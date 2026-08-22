@@ -10,6 +10,7 @@ import { markRevealed } from './revealRegistry';
 import { parseToolResultBlocks } from '../../lib/toolResultContent';
 import { registerChatListener, unregisterChatListener, takeBufferedMessages, reconcileDrainedMessages } from '../../lib/chatFrameGate';
 import { buildPendingQuestionAnswer } from '../../lib/pendingQuestionAnswer';
+import { normalizeSlashCommands, type SlashCommandInfo } from '../../lib/slashCommands';
 import WaitingIndicator from './WaitingIndicator';
 import UserInputRequestPanel from './UserInputRequestPanel';
 import McpElicitationPanel from './McpElicitationPanel';
@@ -163,7 +164,7 @@ interface ChatPanelProps {
   onQueuePromote?: (sessionId: string, id: string) => void;
   sessionId?: string;
   terminalTabs?: TerminalTab[];
-  onSlashCommandsUpdate?: (commands: string[]) => void;
+  onSlashCommandsUpdate?: (commands: SlashCommandInfo[]) => void;
   onInterceptSend?: (text: string) => Promise<boolean | { handled: boolean; reply?: string }>;
   /**
    * IPC scope to use for claude:start / send / stop / message routing.
@@ -639,7 +640,39 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
   // `done` has flipped isStreaming false but the next turn hasn't begun, so the
   // Stop button and thinking animation don't flicker back to "idle" mid-handoff.
   const [drainInFlight, setDrainInFlight] = useState(false);
-  const [slashCommands, setSlashCommands] = useState<string[]>([]);
+  const [slashCommands, setSlashCommands] = useState<SlashCommandInfo[]>([]);
+  const slashCommandsRef = useRef<SlashCommandInfo[]>([]);
+  /** Single ingest point for every slash-command source (start cache, init
+   *  frame, commands_changed, on-demand refresh). `keepDescriptions` is for
+   *  the names-only init frame, which must not wipe descriptions a structured
+   *  source already supplied. */
+  const applySlashCommands = useCallback((input: unknown, opts?: { keepDescriptions?: boolean }) => {
+    const incoming = normalizeSlashCommands(input);
+    if (incoming.length === 0) return;
+    const byName = new Map(slashCommandsRef.current.map(c => [c.name, c]));
+    const next = opts?.keepDescriptions
+      ? incoming.map(c => {
+          const prev = byName.get(c.name);
+          return prev ? { ...prev, ...c, description: c.description || prev.description } : c;
+        })
+      : incoming;
+    slashCommandsRef.current = next;
+    setSlashCommands(next);
+    onSlashCommandsUpdate?.(next);
+  }, [onSlashCommandsUpdate]);
+  /** Throttle for the composer's on-demand refresh (fires per slash token). */
+  const lastSlashRefreshRef = useRef(0);
+  const refreshSlashCommands = useCallback(() => {
+    if (aiProvider !== 'claude' || !projectPath) return;
+    const now = Date.now();
+    if (now - lastSlashRefreshRef.current < 5000) return;
+    lastSlashRefreshRef.current = now;
+    const pending = (window.sai as any).claudeRefreshSlashCommands?.(projectPath, claudeScope);
+    if (!pending?.then) return;
+    pending
+      .then((cmds: unknown) => applySlashCommands(cmds))
+      .catch(() => { /* backend unavailable — cached list stands */ });
+  }, [aiProvider, projectPath, claudeScope, applySlashCommands]);
   const [pendingApproval, setPendingApproval] = useState<PendingApproval | null>(initialPendingApproval);
   const [pendingCodexUserInput, setPendingCodexUserInput] = useState<PendingCodexUserInput | null>(null);
   const [pendingCodexMcpElicitation, setPendingCodexMcpElicitation] = useState<PendingCodexMcpElicitation | null>(null);
@@ -783,9 +816,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
       : [projectPath || '', metaPreamble];
     startFn(...startArgs).then((result: any) => {
       setReady(true);
-      if (result?.slashCommands?.length) {
-        setSlashCommands(result.slashCommands);
-      }
+      if (result?.slashCommands?.length) applySlashCommands(result.slashCommands);
 
       // One-shot brainstorm seed consumption. Server-side read+delete avoids
       // the renderer ever calling fs:readFile on a missing path (which would
@@ -1035,13 +1066,9 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
 
       // Mid-session slash-command changes (dynamically discovered skills).
       if (msg.type === 'system' && msg.subtype === 'commands_changed' && Array.isArray(msg.commands)) {
-        const cmds = msg.commands
-          .map((c: any) => (typeof c?.name === 'string' && c.name ? `/${c.name}` : null))
-          .filter((n: string | null): n is string => n !== null);
-        if (cmds.length > 0) {
-          setSlashCommands(cmds);
-          onSlashCommandsUpdate?.(cmds);
-        }
+        // REPLACE, not merge: supportedCommands() is captured at initialize and
+        // never revised, so this frame is the whole truth about the list.
+        applySlashCommands(msg.commands);
         return;
       }
 
@@ -1083,8 +1110,9 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
 
       // Capture slash commands from init
       if (msg.type === 'system' && msg.subtype === 'init' && msg.slash_commands) {
-        setSlashCommands(msg.slash_commands);
-        onSlashCommandsUpdate?.(msg.slash_commands);
+        // Names only. Keep any descriptions a supportedCommands() refresh
+        // already recorded for the same names — mirrors the main-process cache.
+        applySlashCommands(msg.slash_commands, { keepDescriptions: true });
         return;
       }
 
@@ -2666,6 +2694,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
             onBeforeSend={(rect) => { pendingComposerRectRef.current = rect; }}
             disabled={!ready}
             slashCommands={slashCommands}
+            onSlashRefresh={refreshSlashCommands}
             onQueue={handleQueue}
             queueCount={messageQueue.length}
             pendingApproval={pendingApproval}

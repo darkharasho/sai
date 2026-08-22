@@ -24,6 +24,7 @@ import {
   emitChatMessage,
   readCachedSlashCommands,
   writeCachedSlashCommands,
+  type SlashCommandInfo,
   readSaiSetting,
   getRemoteCeiling,
   getMainWin,
@@ -79,6 +80,10 @@ interface ScopeSession {
   lastActivityAt: number;
   /** True when waiting for approval / AskUserQuestion / plan review. */
   awaitingInput: boolean;
+  /** Created by start() purely to read supportedCommands(), never sent to.
+   *  Cleared on the first real send. A warm session has no conversation, so
+   *  its session id must not be stashed for resume when it is torn down. */
+  warm?: boolean;
   /** Normalized per-session config; a send with different values recreates the
    *  session (CLI ensureProcess parity) so model/effort/permMode/feature-setting
    *  changes apply. */
@@ -390,7 +395,7 @@ export class SdkBackend implements ClaudeBackend {
 
   // ─── start ─────────────────────────────────────────────────────────────────
 
-  start(args: StartArgs): { slashCommands: string[] } {
+  start(args: StartArgs): { slashCommands: SlashCommandInfo[] } {
     const { projectPath, scope, scopeCwd, kind = 'chat', metaPreamble, orchestratorContext } = args;
     const scopeKey = toScopeKey(projectPath, scope);
     const cwd = scopeCwd ?? projectPath;
@@ -398,7 +403,58 @@ export class SdkBackend implements ClaudeBackend {
     // Register with the workspace registry — the titlebar dropdown lists only
     // registered-active workspaces (CLI parity: startImpl's getOrCreate).
     try { getOrCreateWorkspace(projectPath); } catch { /* workspace registry unavailable (tests) */ }
-    return { slashCommands: readCachedSlashCommands() };
+
+    const cached = readCachedSlashCommands(projectPath);
+    // A workspace opened for the first time has nothing cached, and the SDK
+    // only reports its commands once a query exists. Spin one up now so the
+    // slash menu is populated before the first turn instead of after it.
+    if (cached.length === 0 && kind === 'chat') this._warmForCommands(scopeKey, projectPath, scope);
+    return { slashCommands: cached };
+  }
+
+  /** Create a query with no input pending, solely so supportedCommands() can
+   *  answer. Skipped when a session already exists, when one is waiting to be
+   *  resumed (the warm session would swallow that resume id), or when the
+   *  query cannot be created at all. */
+  private _warmForCommands(scopeKey: string, projectPath: string, scope: string | undefined): void {
+    if (this.sessions.has(scopeKey) || this.pendingResume.has(scopeKey)) return;
+    try {
+      const session = this._createSession(scopeKey, projectPath, scope, {});
+      session.warm = true;
+    } catch { /* SDK unavailable — the list stays empty until the first turn */ }
+  }
+
+  // ─── slash commands ────────────────────────────────────────────────────────
+
+  refreshSlashCommands(projectPath: string, scope?: string): Promise<SlashCommandInfo[]> {
+    const session = this.sessions.get(toScopeKey(projectPath, scope));
+    if (!session) return Promise.resolve(readCachedSlashCommands(projectPath));
+    return this._refreshSupportedCommands(session, projectPath, scope);
+  }
+
+  /** Pull the structured list (name + description + argumentHint) from the
+   *  live query. This is the only source that carries descriptions — the
+   *  `system/init` frame is names-only. */
+  private async _refreshSupportedCommands(
+    session: ScopeSession,
+    projectPath: string,
+    scope: string | undefined,
+  ): Promise<SlashCommandInfo[]> {
+    const q = session.query as { supportedCommands?: () => Promise<unknown> };
+    if (typeof q.supportedCommands !== 'function') return readCachedSlashCommands(projectPath);
+    try {
+      const commands = await q.supportedCommands();
+      if (!Array.isArray(commands) || commands.length === 0) return readCachedSlashCommands(projectPath);
+      const merged = writeCachedSlashCommands(projectPath, commands);
+      this._emit({
+        type: 'system', subtype: 'commands_changed', commands: merged,
+        projectPath, scope: scope ?? 'chat',
+      });
+      return merged;
+    } catch {
+      // Query died or the runtime predates supportedCommands() — cache stands.
+      return readCachedSlashCommands(projectPath);
+    }
   }
 
   // ─── send ──────────────────────────────────────────────────────────────────
@@ -430,7 +486,9 @@ export class SdkBackend implements ClaudeBackend {
           // after an interrupt and would get this done dropped as stale.
           this._emit({ type: 'done', projectPath, scope: effectiveScope, turnSeq: session.turnSeq });
         }
-        if (session.sessionId) this.pendingResume.set(scopeKey, session.sessionId);
+        // A warm session holds no conversation — resuming its id would just
+        // reattach to an empty transcript.
+        if (session.sessionId && !session.warm) this.pendingResume.set(scopeKey, session.sessionId);
         session.query.close();
         this.sessions.delete(scopeKey);
         session = undefined;
@@ -438,6 +496,7 @@ export class SdkBackend implements ClaudeBackend {
       if (!session) {
         session = this._createSession(scopeKey, projectPath, scope, { permMode: effectivePermMode, effort, model });
       }
+      session.warm = false;
 
       // A send while gates are held means the user moved on — unblock the query
       // so the queued message can be processed (mirrors CLI clearing awaitingApproval).
@@ -1078,6 +1137,7 @@ export class SdkBackend implements ClaudeBackend {
 
     this.sessions.set(scopeKey, session);
     this._startDrain(session, projectPath, scope);
+    void this._refreshSupportedCommands(session, projectPath, scope);
 
     return session;
   }
@@ -1249,7 +1309,9 @@ export class SdkBackend implements ClaudeBackend {
         for await (const m of session.query) {
           session.lastActivityAt = Date.now();
           if (m?.type === 'system' && m?.subtype === 'init' && Array.isArray(m?.slash_commands)) {
-            writeCachedSlashCommands(m.slash_commands as string[]);
+            // Names only — writeCachedSlashCommands keeps any descriptions a
+            // supportedCommands() refresh already recorded for these names.
+            writeCachedSlashCommands(projectPath, m.slash_commands as string[]);
           }
           // Live MCP/plugin status for the sidebar (SDK-only capability — the
           // CLI never reports per-server connection state).
@@ -1264,10 +1326,7 @@ export class SdkBackend implements ClaudeBackend {
           // Mid-session command-list changes (skills discovered dynamically):
           // REPLACE the cache — supportedCommands() never reflects these.
           if (m?.type === 'system' && m?.subtype === 'commands_changed' && Array.isArray(m?.commands)) {
-            const names = (m.commands as Array<{ name?: string }>)
-              .map((c) => (typeof c?.name === 'string' && c.name ? `/${c.name}` : null))
-              .filter((n): n is string => n !== null);
-            if (names.length > 0) writeCachedSlashCommands(names);
+            if (m.commands.length > 0) writeCachedSlashCommands(projectPath, m.commands);
           }
 
           // Background-task lifecycle. These frames are the runtime's own truth
@@ -1529,7 +1588,7 @@ export class SdkBackend implements ClaudeBackend {
         // turnSeq, not activeTurnSeq: the lagging seq gets dropped as stale.
         this._emit({ type: 'done', projectPath, scope: session._scopeName, turnSeq: session.turnSeq });
       }
-      if (session.sessionId) this.pendingResume.set(scopeKey, session.sessionId);
+      if (session.sessionId && !session.warm) this.pendingResume.set(scopeKey, session.sessionId);
       session.query.close();
       this.sessions.delete(scopeKey);
     }
@@ -1586,7 +1645,7 @@ export class SdkBackend implements ClaudeBackend {
         const scopeKey = toScopeKey(workspaceId, scope === 'chat' ? undefined : scope);
         const session = this.sessions.get(scopeKey);
         if (session) {
-          if (session.sessionId) this.pendingResume.set(scopeKey, session.sessionId);
+          if (session.sessionId && !session.warm) this.pendingResume.set(scopeKey, session.sessionId);
           session.query.close();
           this.sessions.delete(scopeKey);
         }

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import type { SlashCommandInfo } from '../lib/slashCommands';
 import { Search, File, ChevronRight, FileCode2, MessageSquare } from 'lucide-react';
 import { fuzzyMatch } from '../utils/fuzzyMatch';
 import { basename } from '../utils/pathUtils';
@@ -24,7 +25,7 @@ interface CommandPaletteProps {
   open: boolean;
   onClose: () => void;
   fileIndex: string[];
-  slashCommands: string[];
+  slashCommands: SlashCommandInfo[];
   workspaces: WorkspaceInfo[];
   projectPath: string;
   onFileOpen: (path: string, line?: number) => void;
@@ -186,7 +187,7 @@ export default function CommandPalette({
       { name: 'help', description: 'Show available commands' },
       { name: 'clear', description: 'Clear conversation' },
     ];
-    const fromProvider = slashCommands.map(c => ({ name: c, description: '' }));
+    const fromProvider = slashCommands.map(c => ({ name: c.name, description: c.description }));
     const all = [...builtins, ...fromProvider.filter(c => !builtins.some(b => b.name === c.name))];
     if (!lq) return all;
     return all.filter(c => c.name.toLowerCase().includes(lq));

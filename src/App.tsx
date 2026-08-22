@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
+import type { SlashCommandInfo } from './lib/slashCommands';
 import NavBar from './components/NavBar';
 import ChatPanel from './components/Chat/ChatPanel';
 import TerminalPanel from './components/Terminal/TerminalPanel';
@@ -422,7 +423,7 @@ export default function App() {
     | { title: string; branch: string; baseBranch: string; diff: string; loading: boolean; error?: string }
     | null
   >(null);
-  const slashCommandsRef = useRef<string[]>([]);
+  const slashCommandsRef = useRef<SlashCommandInfo[]>([]);
   // Shared mention-insert ref: populated by ChatInput, consumed by the
   // accordion-bar IncludedProjectsControl so both share the same callback.
   const mentionInsertRef = useRef<((linkName: string) => void) | null>(null);
@@ -4777,7 +4778,7 @@ export default function App() {
                           sessions: w.sessions.map(s => s.id === orchSessionId ? { ...s, codexSessionId: sessionId } : s),
                         }));
                       }}
-                      onSlashCommandsUpdate={(cmds: string[]) => { slashCommandsRef.current = cmds; }}
+                      onSlashCommandsUpdate={(cmds: SlashCommandInfo[]) => { slashCommandsRef.current = cmds; }}
                       terminalTabs={ws.terminalTabs ?? []}
                       claudeScope={orchSessionId}
                       claudeKind="orchestrator"
@@ -5188,7 +5189,7 @@ export default function App() {
                       activeSession: { ...w.activeSession, codexSessionId: sessionId },
                     }));
                   }}
-                  onSlashCommandsUpdate={(cmds: string[]) => { slashCommandsRef.current = cmds; }}
+                  onSlashCommandsUpdate={(cmds: SlashCommandInfo[]) => { slashCommandsRef.current = cmds; }}
                   terminalTabs={ws.terminalTabs ?? []}
                   onTurnComplete={() => {
                     const latestMessages = wsMessagesRef.current.get(wsPath) || [];

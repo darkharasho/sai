@@ -1,4 +1,5 @@
 import type { ClaudeModelOption } from '../claude';
+import type { SlashCommandInfo } from '../slashCommands';
 
 export interface StartArgs {
   projectPath: string;
@@ -48,7 +49,11 @@ export interface AnswerPlanArgs {
 }
 
 export interface ClaudeBackend {
-  start(args: StartArgs): { slashCommands: string[] } | undefined;
+  start(args: StartArgs): { slashCommands: SlashCommandInfo[] } | undefined;
+  /** Re-pull the scope's slash commands from the live query (SDK
+   *  supportedCommands()), falling back to the per-project cache when no
+   *  session exists. Drives the renderer's on-demand refresh. */
+  refreshSlashCommands(projectPath: string, scope?: string): Promise<SlashCommandInfo[]>;
   send(args: SendArgs): void;
   interrupt(projectPath: string, scope?: string): void;
   /** Re-assert backend truth for a scope the renderer believes is streaming.

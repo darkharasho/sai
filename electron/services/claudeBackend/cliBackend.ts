@@ -4,12 +4,16 @@ import {
   generateCommitMessageImpl, generateTitleImpl, getAvailableClaudeModels,
   reconcileScopeImpl,
 } from '../claude';
+import { readCachedSlashCommands } from '../slashCommands';
 import type {
   ClaudeBackend, StartArgs, SendArgs, CompactArgs, ApproveArgs, AnswerQuestionArgs, AnswerPlanArgs,
 } from './types';
 
 export class CliBackend implements ClaudeBackend {
   start(a: StartArgs) { return startImpl(a); }
+  // The CLI has no supportedCommands() equivalent — its list only ever arrives
+  // on an init frame, so a refresh can do no better than the cache.
+  refreshSlashCommands(projectPath: string) { return Promise.resolve(readCachedSlashCommands(projectPath)); }
   send(a: SendArgs) { sendImpl(a.projectPath, a.message, a.imagePaths, a.permMode, a.effort, a.model, a.scope, a.origin); }
   interrupt(projectPath: string, scope?: string) { interruptImpl(projectPath, scope); }
   reconcileScope(projectPath: string, scope?: string) { reconcileScopeImpl(projectPath, scope); }

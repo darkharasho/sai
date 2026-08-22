@@ -18,6 +18,7 @@ import {
 } from '../../terminalBuffer';
 import { getCapabilities } from '../../providers/capabilities';
 import { effortsForCodexModel, normalizeCodexEffort } from '../../lib/codexEffort';
+import type { SlashCommandInfo } from '../../lib/slashCommands';
 import type { ContextUsageView, UsageLimitView } from '../../lib/composerTelemetry';
 
 type ModelOption = { id: string; label: string; description: string; recommended?: boolean; oneM?: boolean; extra?: boolean };
@@ -31,7 +32,10 @@ interface ChatInputProps {
   overlayControl?: { mode: OverlayMode; onChange: (m: OverlayMode) => void };
   onBeforeSend?: (composerRect: DOMRect) => void;
   disabled?: boolean;
-  slashCommands?: string[];
+  slashCommands?: SlashCommandInfo[];
+  /** Fired when the user starts a slash token or opens the slash menu, so the
+   *  host can re-pull the live command list. Expected to be throttled there. */
+  onSlashRefresh?: () => void;
   isStreaming?: boolean;
   /** Backend is idle but waiting on a scheduled wakeup / background work —
    *  keep the stop button in the send slot so the wait can be cancelled. */
@@ -123,6 +127,20 @@ function getCommandIcon(name: string): React.ReactNode {
   if (name.includes('file') || name.includes('init') || name.includes('claude-md') || name.includes('revise')) return <FileText size={14} />;
   if (name.includes('config') || name.includes('setting') || name.includes('cost')) return <Settings size={14} />;
   return <Slash size={14} />;
+}
+
+/** Names are stored bare, so exactly one `/` is added here. The description
+ *  is the provider's own; only when it has none do we fall back to the
+ *  namespace prefix, which is all the old name-only cache could ever show. */
+function toAutocompleteItem(cmd: SlashCommandInfo): AutocompleteItem {
+  const description = cmd.description
+    || (cmd.argumentHint ? '' : (cmd.name.includes(':') ? cmd.name.split(':')[0] : ''));
+  return {
+    label: cmd.argumentHint ? `/${cmd.name} ${cmd.argumentHint}` : `/${cmd.name}`,
+    value: `/${cmd.name}`,
+    description,
+    icon: getCommandIcon(cmd.name),
+  };
 }
 
 const BUILTIN_COMMANDS: AutocompleteItem[] = [
@@ -257,7 +275,7 @@ function getBarColor(pct: number, isOverage: boolean): string {
   return 'var(--accent)';
 }
 
-export default function ChatInput({ onSend, overlayControl, onBeforeSend, disabled, slashCommands = [], isStreaming, waiting, awaitingQuestion, messages = [], onStop, onQueue, queueCount, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, availableModels, claudeOverrideState, contextUsage, sessionUsage, sessionCost, usageLimits = [], billingMode = 'subscription', activeFilePath, fileContextEnabled = true, onFileContextToggle, aiProvider = 'claude', pendingApproval, pendingSudoPrompt, onApprove, onDeny, onAlwaysAllow, onAmend, codexModel = 'o3', codexModels = [], onCodexModelChange, onCodexModelsRefresh, codexPermission = 'auto', onCodexPermissionChange, codexEffort = 'high', onCodexEffortChange, geminiModel = 'auto-gemini-3', geminiModels = [], onGeminiModelChange, geminiApprovalMode = 'default', onGeminiApprovalModeChange, geminiConversationMode = 'planning', onGeminiConversationModeChange, kimiModel = 'kimi-k3', kimiModels = [], onKimiModelChange, kimiApprovalMode = 'default', onKimiApprovalModeChange, terminalTabs = [], messageQueue = [], onQueueRemove, onQueuePromote, onQueueSendNow, initialDraft = '', onDraftChange, initialContextItems = [], onContextItemsChange, metaRuntime, mentionInsertRef }: ChatInputProps) {
+export default function ChatInput({ onSend, overlayControl, onBeforeSend, disabled, slashCommands = [], onSlashRefresh, isStreaming, waiting, awaitingQuestion, messages = [], onStop, onQueue, queueCount, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, availableModels, claudeOverrideState, contextUsage, sessionUsage, sessionCost, usageLimits = [], billingMode = 'subscription', activeFilePath, fileContextEnabled = true, onFileContextToggle, aiProvider = 'claude', pendingApproval, pendingSudoPrompt, onApprove, onDeny, onAlwaysAllow, onAmend, codexModel = 'o3', codexModels = [], onCodexModelChange, onCodexModelsRefresh, codexPermission = 'auto', onCodexPermissionChange, codexEffort = 'high', onCodexEffortChange, geminiModel = 'auto-gemini-3', geminiModels = [], onGeminiModelChange, geminiApprovalMode = 'default', onGeminiApprovalModeChange, geminiConversationMode = 'planning', onGeminiConversationModeChange, kimiModel = 'kimi-k3', kimiModels = [], onKimiModelChange, kimiApprovalMode = 'default', onKimiApprovalModeChange, terminalTabs = [], messageQueue = [], onQueueRemove, onQueuePromote, onQueueSendNow, initialDraft = '', onDraftChange, initialContextItems = [], onContextItemsChange, metaRuntime, mentionInsertRef }: ChatInputProps) {
   const selectedCodexModel = codexModels.find(model => model.id === codexModel);
   const supportedCodexEfforts = effortsForCodexModel(selectedCodexModel);
   const effectiveCodexEffort = normalizeCodexEffort(codexEffort, selectedCodexModel);
@@ -384,16 +402,20 @@ export default function ChatInput({ onSend, overlayControl, onBeforeSend, disabl
     onContextItemsChange?.(contextItems);
   }, [contextItems, onContextItemsChange]);
 
+  // Ask the host for a fresh command list the moment a slash token starts —
+  // a command added while the app was running is otherwise invisible until
+  // the next turn.
+  const slashTriggerActive = slashMenuOpen || /(^|\s)\/[^\s]*$/.test(value);
+  useEffect(() => {
+    if (slashTriggerActive) onSlashRefresh?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slashTriggerActive]);
+
   // Autocomplete
   useEffect(() => {
     if (showAddMenu) { setSuggestions([]); return; }
 
-    const dynamicCommands: AutocompleteItem[] = slashCommands.map(name => ({
-      label: `/${name}`,
-      value: `/${name}`,
-      description: name.includes(':') ? name.split(':')[0] : '',
-      icon: getCommandIcon(name),
-    }));
+    const dynamicCommands: AutocompleteItem[] = slashCommands.map(toAutocompleteItem);
     const all = [...BUILTIN_COMMANDS, ...dynamicCommands];
     const seen = new Set<string>();
     const unique = all.filter(c => { if (seen.has(c.label)) return false; seen.add(c.label); return true; });
@@ -692,11 +714,7 @@ export default function ChatInput({ onSend, overlayControl, onBeforeSend, disabl
       const currentWord = textBeforeCursor.slice(lastSep + 1).toLowerCase();
       if (currentWord.startsWith('/') && currentWord.length > 1) {
         const query = currentWord.slice(1);
-        const dynamicCommands: AutocompleteItem[] = slashCommands.map(name => ({
-          label: `/${name}`, value: `/${name}`,
-          description: name.includes(':') ? name.split(':')[0] : '',
-          icon: getCommandIcon(name),
-        }));
+        const dynamicCommands: AutocompleteItem[] = slashCommands.map(toAutocompleteItem);
         const all = [...BUILTIN_COMMANDS, ...dynamicCommands];
         const matches = all.filter(c => {
           const full = c.label.toLowerCase();

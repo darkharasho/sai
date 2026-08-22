@@ -1228,7 +1228,7 @@ describe('SdkBackend', () => {
 
     backend.send({ projectPath: PROJECT, message: 'hi', scope: SCOPE, permMode: 'default' });
     await new Promise<void>((r) => setTimeout(r, 20));
-    expect(mockWriteCachedSlashCommands).toHaveBeenCalledWith(['/clear', '/compact', '/new']);
+    expect(mockWriteCachedSlashCommands).toHaveBeenCalledWith(PROJECT, ['/clear', '/compact', '/new']);
     fakeQuery.close();
   });
 
@@ -1940,14 +1940,14 @@ describe('SdkBackend', () => {
     fakeQuery.close();
   });
 
-  it('(40) commands_changed replaces the slash-command cache with slash-prefixed names', async () => {
+  it('(40) commands_changed hands the structured command list to the per-project cache', async () => {
     const fakeQuery = makeFakeQuery([
       { type: 'system', subtype: 'commands_changed', commands: [{ name: 'deploy', description: '' }, { name: 'lint', description: '' }] },
     ], { hang: true });
     const backend = new SdkBackend({ queryFn: vi.fn(() => fakeQuery), emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
     backend.send({ projectPath: PROJECT, message: 'go', scope: SCOPE });
     await new Promise(r => setTimeout(r, 20));
-    expect(mockWriteCachedSlashCommands).toHaveBeenCalledWith(['/deploy', '/lint']);
+    expect(mockWriteCachedSlashCommands).toHaveBeenCalledWith(PROJECT, [{ name: 'deploy', description: '' }, { name: 'lint', description: '' }]);
     fakeQuery.close();
   });
 
@@ -2424,6 +2424,121 @@ describe('SdkBackend', () => {
     backend._sweepOnce(Date.now() + BACKGROUND_WAIT_SETTLE_MS + 1_000);
     expect(emits.filter(e => e.type === 'done' && e.wait == null)).toHaveLength(1);
     expect(notify.completion).not.toHaveBeenCalled();
+    backend.destroy();
+  });
+  // ── slash commands ───────────────────────────────────────────────────────
+  // The list used to come from one global disk cache written only when a turn
+  // ran, so a never-used workspace showed nothing (or another project's list)
+  // and no command ever carried a description.
+
+  it('(60) start warms a query when the project has nothing cached, so supportedCommands() can answer before the first turn', async () => {
+    mockReadCachedSlashCommands.mockReturnValue([]);
+    const fakeQuery = makeFakeQuery([], { hang: true });
+    (fakeQuery as any).supportedCommands = vi.fn().mockResolvedValue([
+      { name: 'deploy', description: 'Ship it', argumentHint: '<env>' },
+    ]);
+    mockWriteCachedSlashCommands.mockImplementation((_p: string, c: unknown) => c);
+    const queryFn = vi.fn(() => fakeQuery);
+    const backend = new SdkBackend({ queryFn, emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
+
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    expect(queryFn).toHaveBeenCalledTimes(1);
+    await new Promise<void>((r) => setTimeout(r, 10));
+
+    expect((fakeQuery as any).supportedCommands).toHaveBeenCalled();
+    expect(mockWriteCachedSlashCommands).toHaveBeenCalledWith(PROJECT, [
+      { name: 'deploy', description: 'Ship it', argumentHint: '<env>' },
+    ]);
+    // The renderer learns about it without waiting for a turn.
+    const pushed = emits.find(e => e.subtype === 'commands_changed');
+    expect(pushed).toMatchObject({ type: 'system', projectPath: PROJECT, scope: SCOPE });
+    fakeQuery.close();
+    backend.destroy();
+  });
+
+  it('(61) start does not warm a query when the project already has cached commands', async () => {
+    mockReadCachedSlashCommands.mockReturnValue(['/clear']);
+    const queryFn = vi.fn(() => makeFakeQuery([], { hang: true }));
+    const backend = new SdkBackend({ queryFn, emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
+
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    expect(queryFn).not.toHaveBeenCalled();
+    backend.destroy();
+  });
+
+  it('(62) start does not warm a task/orchestrator scope', async () => {
+    mockReadCachedSlashCommands.mockReturnValue([]);
+    const queryFn = vi.fn(() => makeFakeQuery([], { hang: true }));
+    const backend = new SdkBackend({ queryFn, emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
+
+    backend.start({ projectPath: PROJECT, scope: 'swarm-task-1', scopeCwd: PROJECT, kind: 'task' });
+    expect(queryFn).not.toHaveBeenCalled();
+    backend.destroy();
+  });
+
+  it('(63) start does not warm over a pending resume — the warm query would swallow the session id', async () => {
+    mockReadCachedSlashCommands.mockReturnValue([]);
+    const queryFn = vi.fn(() => makeFakeQuery([], { hang: true }));
+    const backend = new SdkBackend({ queryFn, emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
+
+    backend.setSessionId(PROJECT, 'sess-history', SCOPE);
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+
+    expect(queryFn).not.toHaveBeenCalled();
+    expect((backend as any).pendingResume.get(`${PROJECT} ${SCOPE}`)).toBe('sess-history');
+    backend.destroy();
+  });
+
+  it("(64) a warm session's empty transcript is never stashed for resume when the first send restarts it", async () => {
+    mockReadCachedSlashCommands.mockReturnValue([]);
+    const warm = makeFakeQuery([{ type: 'system', subtype: 'init', session_id: 'warm-sess' }], { hang: true });
+    const real = makeFakeQuery([], { hang: true });
+    let call = 0;
+    const queryFn = vi.fn(() => (call++ === 0 ? warm : real));
+    const backend = new SdkBackend({ queryFn, emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
+
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    await new Promise<void>((r) => setTimeout(r, 10));
+    // The warm session picked up a session id from its init frame.
+    expect((backend as any).sessions.get(`${PROJECT} ${SCOPE}`).sessionId).toBe('warm-sess');
+
+    // A send with a different config tears the warm session down and rebuilds.
+    backend.send({ projectPath: PROJECT, message: 'hi', scope: SCOPE, permMode: 'bypass' });
+    await new Promise<void>((r) => setTimeout(r, 10));
+
+    expect((backend as any).pendingResume.has(`${PROJECT} ${SCOPE}`)).toBe(false);
+    expect(queryFn).toHaveBeenCalledTimes(2);
+    warm.close();
+    real.close();
+    backend.destroy();
+  });
+
+  it('(65) refreshSlashCommands re-pulls from the live query, and falls back to the cache with no session', async () => {
+    mockReadCachedSlashCommands.mockReturnValue([{ name: 'cached', description: 'from disk' }]);
+    const fakeQuery = makeFakeQuery([], { hang: true });
+    (fakeQuery as any).supportedCommands = vi.fn().mockResolvedValue([{ name: 'fresh', description: 'live' }]);
+    mockWriteCachedSlashCommands.mockImplementation((_p: string, c: unknown) => c);
+    const backend = new SdkBackend({ queryFn: vi.fn(() => fakeQuery), emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
+
+    // No session yet — cache only.
+    expect(await backend.refreshSlashCommands(PROJECT, SCOPE)).toEqual([{ name: 'cached', description: 'from disk' }]);
+
+    backend.send({ projectPath: PROJECT, message: 'go', scope: SCOPE });
+    await new Promise<void>((r) => setTimeout(r, 10));
+    expect(await backend.refreshSlashCommands(PROJECT, SCOPE)).toEqual([{ name: 'fresh', description: 'live' }]);
+    fakeQuery.close();
+    backend.destroy();
+  });
+
+  it('(66) a runtime without supportedCommands() falls back to the cache instead of throwing', async () => {
+    mockReadCachedSlashCommands.mockReturnValue([{ name: 'cached', description: '' }]);
+    const fakeQuery = makeFakeQuery([], { hang: true });
+    const backend = new SdkBackend({ queryFn: vi.fn(() => fakeQuery), emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
+
+    backend.send({ projectPath: PROJECT, message: 'go', scope: SCOPE });
+    await new Promise<void>((r) => setTimeout(r, 10));
+    expect(await backend.refreshSlashCommands(PROJECT, SCOPE)).toEqual([{ name: 'cached', description: '' }]);
+    fakeQuery.close();
     backend.destroy();
   });
 });

@@ -25,6 +25,7 @@ export interface MockSai {
   claudeSend: ReturnType<typeof vi.fn>;
   claudeGenerateCommitMessage: ReturnType<typeof vi.fn>;
   claudeStop: ReturnType<typeof vi.fn>;
+  claudeRefreshSlashCommands: ReturnType<typeof vi.fn>;
   claudeSetSessionId: ReturnType<typeof vi.fn>;
   claudeReconcileScope: ReturnType<typeof vi.fn>;
   claudeApprove: ReturnType<typeof vi.fn>;
@@ -180,6 +181,7 @@ export function createMockSai(): MockSai {
     claudeSend: vi.fn(),
     claudeGenerateCommitMessage: vi.fn().mockResolvedValue(''),
     claudeStop: vi.fn(),
+    claudeRefreshSlashCommands: vi.fn().mockResolvedValue([]),
     claudeSetSessionId: vi.fn(),
     claudeReconcileScope: vi.fn(),
     claudeApprove: vi.fn().mockResolvedValue(undefined),

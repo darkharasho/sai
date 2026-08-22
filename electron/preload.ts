@@ -27,6 +27,8 @@ contextBridge.exposeInMainWorld('sai', {
   claudeGenerateCommitMessage: (cwd: string, aiProvider?: string) => ipcRenderer.invoke('claude:generateCommitMessage', cwd, aiProvider),
   claudeGenerateTitle: (cwd: string, userMessage: string, aiProvider?: string) => ipcRenderer.invoke('claude:generateTitle', cwd, userMessage, aiProvider),
   claudeCompact: (projectPath: string, permMode?: string, effort?: string, model?: string, scope?: string) => ipcRenderer.send('claude:compact', projectPath, permMode, effort, model, scope),
+  claudeRefreshSlashCommands: (projectPath: string, scope?: string) =>
+    ipcRenderer.invoke('claude:refreshSlashCommands', projectPath, scope),
   claudeStop: (projectPath: string, scope?: string) => ipcRenderer.send('claude:stop', projectPath, scope),
   claudeSetSessionId: (projectPath: string, sessionId: string | undefined, scope?: string) => ipcRenderer.send('claude:setSessionId', projectPath, sessionId, scope),
   claudeReconcileScope: (projectPath: string, scope?: string) => ipcRenderer.send('claude:reconcileScope', projectPath, scope),

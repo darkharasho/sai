@@ -25,12 +25,19 @@ import { imageReadResult } from './imageFiles';
 import type { StartArgs, CompactArgs } from './claudeBackend/types';
 import { getClaudeBackend, getClaudeBackendSetting } from './claudeBackend';
 export { touchActivity, getOrCreate as getOrCreateWorkspace } from './workspace';
+export {
+  readCachedSlashCommands,
+  writeCachedSlashCommands,
+  normalizeSlashCommands,
+  hasCachedSlashCommands,
+  type SlashCommandInfo,
+} from './slashCommands';
 import { CHAT_RENDER_NUDGE, CHAT_GITHUB_WATCH_NUDGE, CHAT_TASKS_NUDGE } from './chatNudges';
 import { classifyTurnEnd, isSchedulingTool, isBackgroundLaunch, isAsyncLaunchResult, WAKEUP_GRACE_MS, type WaitMeta, countLiveBackgroundTasks } from './waitClassifier';
 import { getSudoAskpassHelperPath, getSudoBroker, getSudoSession, lockSudo } from './sudo';
+import { readCachedSlashCommands, writeCachedSlashCommands, type SlashCommandInfo } from './slashCommands';
 export { CHAT_RENDER_NUDGE, CHAT_GITHUB_WATCH_NUDGE };
 
-const SLASH_COMMANDS_CACHE = path.join(app.getPath('userData'), 'slash-commands-cache.json');
 
 // On Windows, CLI tools like `claude`, `codex`, `agy`, and even `git` are
 // typically shipped as `.cmd`/`.ps1` shims. Node's spawn won't resolve those
@@ -56,19 +63,6 @@ export function spawnEnv(): NodeJS.ProcessEnv {
   return env;
 }
 
-export function readCachedSlashCommands(): string[] {
-  try {
-    return JSON.parse(fs.readFileSync(SLASH_COMMANDS_CACHE, 'utf-8'));
-  } catch {
-    return [];
-  }
-}
-
-export function writeCachedSlashCommands(commands: string[]) {
-  try {
-    fs.writeFileSync(SLASH_COMMANDS_CACHE, JSON.stringify(commands));
-  } catch { /* ignore write errors */ }
-}
 
 let mainWin: BrowserWindow | null = null;
 
@@ -413,7 +407,7 @@ function ensureProcess(
         // Capture slash commands from init (replaces the probe)
         if (msg.type === 'system' && msg.subtype === 'init') {
           if (msg.slash_commands) {
-            writeCachedSlashCommands(msg.slash_commands);
+            writeCachedSlashCommands(ws.projectPath, msg.slash_commands);
           }
           emitChatMessage({ ...msg, projectPath: ws.projectPath, scope });
           continue;
@@ -1353,7 +1347,7 @@ export function getAvailableClaudeModels(): { models: ClaudeModelOption[]; detec
   return { models, detected: true };
 }
 
-export function startImpl(args: StartArgs): { slashCommands: string[] } | undefined {
+export function startImpl(args: StartArgs): { slashCommands: SlashCommandInfo[] } | undefined {
   const { projectPath, scope, kind, orchestratorContext, scopeCwd, metaPreamble } = args;
   if (!projectPath) return;
   const ws = getOrCreate(projectPath);
@@ -1367,7 +1361,7 @@ export function startImpl(args: StartArgs): { slashCommands: string[] } | undefi
   }
   claude.metaPreamble = metaPreamble || '';
   emitChatMessage({ type: 'ready', projectPath: ws.projectPath, scope: scope || 'chat' });
-  return { slashCommands: readCachedSlashCommands() };
+  return { slashCommands: readCachedSlashCommands(ws.projectPath) };
 }
 
 export function compactImpl(args: CompactArgs): void {
@@ -1583,6 +1577,13 @@ export function registerClaudeHandlers(win: BrowserWindow) {
   // Sends cached slash commands immediately so they're available before the process init.
   ipcMain.handle('claude:start', (_event, projectPath: string, scope?: string, kind?: 'chat' | 'task' | 'orchestrator', orchestratorContext?: Partial<OrchestratorPromptContext> | null, scopeCwd?: string, metaPreamble?: string) =>
     getClaudeBackend().start({ projectPath, scope, kind, orchestratorContext: orchestratorContext as Record<string, unknown> | null, scopeCwd, metaPreamble })
+  );
+
+  // claude:refreshSlashCommands — re-pull the live list (SDK supportedCommands()).
+  // The renderer calls this when the slash menu opens, so a command added while
+  // the app was running shows up without a restart or a wasted turn.
+  ipcMain.handle('claude:refreshSlashCommands', (_event, projectPath: string, scope?: string) =>
+    getClaudeBackend().refreshSlashCommands(projectPath, scope)
   );
 
   // claude:stop — kill the persistent process for a scope

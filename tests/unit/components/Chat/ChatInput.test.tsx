@@ -24,9 +24,10 @@ vi.mock('../../../../src/terminalBuffer', () => ({
 }));
 
 import ChatInput from '../../../../src/components/Chat/ChatInput';
+import type { SlashCommandInfo } from '../../../../src/lib/slashCommands';
 
 /** Stable empty array to prevent infinite-render caused by new `[]` on each render */
-const STABLE_SLASH_COMMANDS: string[] = [];
+const STABLE_SLASH_COMMANDS: SlashCommandInfo[] = [];
 
 const defaultProps = {
   onSend: vi.fn(),
@@ -477,6 +478,44 @@ describe('ChatInput', () => {
     it('never renders a misleading 0% used label for an empty limits list', () => {
       render(<ChatInput {...baseProps()} aiProvider="codex" sessionUsage={{ inputTokens: 0, outputTokens: 0 }} usageLimits={[]} />);
       expect(screen.queryByText('0% used')).toBeNull();
+    });
+  });
+  describe('slash-command autocomplete', () => {
+    // Names are cached bare and each consumer adds its own slash. When a
+    // mid-session `commands_changed` frame delivered already-slashed names,
+    // this menu prefixed them again and rendered `//deploy`.
+    const COMMANDS: SlashCommandInfo[] = [
+      { name: 'deploy', description: 'Ship the app', argumentHint: '<env>' },
+      { name: 'superpowers:brainstorm', description: '' },
+    ];
+
+    it('renders one slash per command, with the provider description and arg hint', async () => {
+      render(<ChatInput {...defaultProps} slashCommands={COMMANDS} />);
+      const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+      fireEvent.change(textarea, { target: { value: '/dep' } });
+
+      expect(await screen.findByText('/deploy <env>')).toBeTruthy();
+      expect(screen.getByText('Ship the app')).toBeTruthy();
+      expect(screen.queryByText(/\/\//)).toBeNull();
+    });
+
+    it('falls back to the namespace when a command has no description', async () => {
+      render(<ChatInput {...defaultProps} slashCommands={COMMANDS} />);
+      const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+      fireEvent.change(textarea, { target: { value: '/brain' } });
+
+      expect(await screen.findByText('/superpowers:brainstorm')).toBeTruthy();
+      expect(screen.getByText('superpowers')).toBeTruthy();
+    });
+
+    it('asks the host to refresh the list when a slash token starts', () => {
+      const onSlashRefresh = vi.fn();
+      render(<ChatInput {...defaultProps} slashCommands={COMMANDS} onSlashRefresh={onSlashRefresh} />);
+      const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+
+      expect(onSlashRefresh).not.toHaveBeenCalled();
+      fireEvent.change(textarea, { target: { value: '/dep' } });
+      expect(onSlashRefresh).toHaveBeenCalled();
     });
   });
 });

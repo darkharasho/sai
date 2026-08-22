@@ -4,6 +4,10 @@
  *
  * Regression: 044bb07 — claude:start must return cached slash commands immediately
  * so the renderer can display them before the persistent process sends its init message.
+ *
+ * The cache is keyed BY PROJECT and stores structured commands
+ * ({ name, description, ... }, names bare). A pre-v2 flat array is discarded
+ * on read: it was global, so its contents belong to no particular project.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -201,6 +205,26 @@ const PROJECT = '/test/slash-project';
 // (forward slashes on POSIX, backslashes on Windows).
 const CACHE_PATH = path.join('/tmp/sai-slash-test', 'slash-commands-cache.json');
 
+/** Build a v2 cache file holding `names` (bare or slashed) for one project. */
+function cacheFile(projectPath: string, names: string[], description = ''): string {
+  return JSON.stringify({
+    version: 2,
+    projects: {
+      [projectPath]: {
+        commands: names.map(n => ({ name: n.replace(/^\/+/, ''), description })),
+        updatedAt: 1,
+      },
+    },
+  });
+}
+
+/** The commands the cache file currently holds for a project. */
+function cachedNames(projectPath: string): string[] {
+  const raw = fsMock.store.get(CACHE_PATH);
+  if (!raw) return [];
+  return (JSON.parse(raw).projects?.[projectPath]?.commands ?? []).map((c: { name: string }) => c.name);
+}
+
 beforeEach(() => {
   workspaceState.clear();
   spawnedProcesses = [];
@@ -231,20 +255,24 @@ afterEach(() => {
 
 describe('IPC slash commands — regression 044bb07', () => {
   it('claude:start returns empty array when no cache exists', async () => {
-    const result = await mockIpcMain._invoke('claude:start', PROJECT) as { slashCommands: string[] };
+    const result = await mockIpcMain._invoke('claude:start', PROJECT) as { slashCommands: unknown[] };
     expect(result).toBeDefined();
     expect(result.slashCommands).toEqual([]);
   });
 
   it('claude:start returns cached slash commands immediately (without waiting for process)', async () => {
     // Pre-populate cache
-    fsMock.store.set(CACHE_PATH, JSON.stringify(['/help', '/clear', '/compact']));
+    fsMock.store.set(CACHE_PATH, cacheFile(PROJECT, ['/help', '/clear', '/compact'], 'desc'));
 
-    const result = await mockIpcMain._invoke('claude:start', PROJECT) as { slashCommands: string[] };
+    const result = await mockIpcMain._invoke('claude:start', PROJECT) as { slashCommands: Array<{ name: string; description: string }> };
 
     // Must be returned synchronously from cache — no process spawn needed
     expect(spawnedProcesses).toHaveLength(0);
-    expect(result.slashCommands).toEqual(['/help', '/clear', '/compact']);
+    expect(result.slashCommands).toEqual([
+      { name: 'help', description: 'desc' },
+      { name: 'clear', description: 'desc' },
+      { name: 'compact', description: 'desc' },
+    ]);
   });
 
   it('slash commands from process init message update the cache', async () => {
@@ -261,12 +289,9 @@ describe('IPC slash commands — regression 044bb07', () => {
     });
     await flushAsync();
 
-    // writeFileSync should have been called with the new commands
+    // The cache now holds these commands, bare-named, under this project
     expect(fsMock.writeFileSync).toHaveBeenCalled();
-    const writeCalls = fsMock.writeFileSync.mock.calls;
-    const cacheWrite = writeCalls.find(([p]: [string]) => p.includes('slash-commands-cache'));
-    expect(cacheWrite).toBeDefined();
-    expect(JSON.parse(cacheWrite![1])).toEqual(freshCommands);
+    expect(cachedNames(PROJECT)).toEqual(['help', 'new', 'bug', 'feature']);
   });
 
   it('subsequent claude:start returns newly cached commands from previous init', async () => {
@@ -293,14 +318,13 @@ describe('IPC slash commands — regression 044bb07', () => {
     registerClaudeHandlers(win as any);
 
     // Second claude:start should return the updated commands (from cache)
-    const result = await mockIpcMain._invoke('claude:start', PROJECT) as { slashCommands: string[] };
-    expect(result.slashCommands).toEqual(updatedCommands);
+    const result = await mockIpcMain._invoke('claude:start', PROJECT) as { slashCommands: Array<{ name: string }> };
+    expect(result.slashCommands.map(c => c.name)).toEqual(['help', 'updated-cmd']);
   });
 
   it('init message without slash_commands does not overwrite cache', async () => {
     // Pre-populate cache
-    const existing = ['/existing-cmd'];
-    fsMock.store.set(CACHE_PATH, JSON.stringify(existing));
+    fsMock.store.set(CACHE_PATH, cacheFile(PROJECT, ['/existing-cmd']));
 
     await mockIpcMain._invoke('claude:start', PROJECT);
     mockIpcMain._emit('claude:send', PROJECT, 'Hi');
@@ -331,6 +355,31 @@ describe('IPC slash commands — regression 044bb07', () => {
     expect(readyMsg?.projectPath).toBe(PROJECT);
   });
 
+  it('one project\'s commands never leak into another', async () => {
+    const OTHER = '/test/other-project';
+    fsMock.store.set(CACHE_PATH, cacheFile(OTHER, ['/other-only']));
+
+    const mine = await mockIpcMain._invoke('claude:start', PROJECT) as { slashCommands: unknown[] };
+    expect(mine.slashCommands).toEqual([]);
+
+    const theirs = await mockIpcMain._invoke('claude:start', OTHER) as { slashCommands: Array<{ name: string }> };
+    expect(theirs.slashCommands.map(c => c.name)).toEqual(['other-only']);
+  });
+
+  it('a pre-v2 (global, flat-array) cache file is discarded, not misattributed', async () => {
+    fsMock.store.set(CACHE_PATH, JSON.stringify(['/legacy-cmd']));
+
+    const result = await mockIpcMain._invoke('claude:start', PROJECT) as { slashCommands: unknown[] };
+    expect(result.slashCommands).toEqual([]);
+  });
+
+  it('claude:refreshSlashCommands returns the cached list when no session is live', async () => {
+    fsMock.store.set(CACHE_PATH, cacheFile(PROJECT, ['/cached-cmd'], 'from cache'));
+
+    const cmds = await mockIpcMain._invoke('claude:refreshSlashCommands', PROJECT) as Array<{ name: string; description: string }>;
+    expect(cmds).toEqual([{ name: 'cached-cmd', description: 'from cache' }]);
+  });
+
   it('claude:start with no cwd returns undefined without crashing', async () => {
     const result = await mockIpcMain._invoke('claude:start', '');
     expect(result).toBeUndefined();
@@ -349,10 +398,8 @@ describe('IPC slash commands — regression 044bb07', () => {
     });
     await flushAsync();
 
-    const cacheWrites = fsMock.writeFileSync.mock.calls.filter(
-      ([p]: [string]) => p.includes('slash-commands-cache'),
-    );
-    expect(cacheWrites).toHaveLength(1);
-    expect(JSON.parse(cacheWrites[0][1])).toEqual([]);
+    // An empty list is still this project's truth — the entry is written,
+    // and it is empty.
+    expect(cachedNames(PROJECT)).toEqual([]);
   });
 });
