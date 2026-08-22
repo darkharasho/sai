@@ -1,4 +1,5 @@
 import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import * as crypto from 'node:crypto';
 
@@ -144,6 +145,16 @@ const INLINE_BASE = '<base href="sai-render-base/">';
 // traversal protection — a path still has to land inside an allowed root.
 // null = blocked or missing.
 function containedRealPath(roots: string[], target: string): string | null {
+  return resolveContained(roots, target).path;
+}
+
+// Same containment check, but says WHY it failed so callers can tell a real
+// traversal block ("escapes workspace") apart from a path that simply isn't on
+// disk yet — those used to report the same misleading escape error.
+function resolveContained(
+  roots: string[],
+  target: string,
+): { path: string | null; reason: 'ok' | 'missing' | 'escapes' } {
   const realRoots: string[] = [];
   for (const root of roots) {
     try {
@@ -152,7 +163,7 @@ function containedRealPath(roots: string[], target: string): string | null {
       // A missing/unreadable root just can't grant access; skip it.
     }
   }
-  if (realRoots.length === 0) return null;
+  if (realRoots.length === 0) return { path: null, reason: 'escapes' };
   // path.resolve ignores the base when target is already absolute, so absolute
   // targets are resolved on their own and still subjected to the prefix check.
   // Relative targets resolve against the first (primary) root: the workspace.
@@ -161,12 +172,22 @@ function containedRealPath(roots: string[], target: string): string | null {
   try {
     realResolved = fs.realpathSync(resolved);
   } catch {
-    return null;
+    return { path: null, reason: 'missing' };
   }
   const contained = realRoots.some(
     (r) => realResolved === r || realResolved.startsWith(r + path.sep),
   );
-  return contained ? realResolved : null;
+  return contained ? { path: realResolved, reason: 'ok' } : { path: null, reason: 'escapes' };
+}
+
+// Every temp dir a render target might legitimately live in. os.tmpdir() honours
+// TMPDIR, which SAI/agent processes may point somewhere other than /tmp — but a
+// CLI agent still writes scratch files to a literal /tmp path, so allow both.
+export function osTempRoots(): string[] {
+  const roots = [os.tmpdir(), process.env.TMPDIR, '/tmp'].filter(
+    (r): r is string => typeof r === 'string' && r.length > 0,
+  );
+  return [...new Set(roots.map((r) => path.resolve(r)))];
 }
 
 export function prepareRenderTarget(opts: {
@@ -182,8 +203,13 @@ export function prepareRenderTarget(opts: {
   const roots = [opts.cwd, ...(opts.allowedRoots ?? [])];
   // path wins over html.
   if (opts.path) {
-    const abs = containedRealPath(roots, opts.path);
-    if (!abs) return { ok: false, error: `path escapes workspace: ${opts.path}` };
+    const res = resolveContained(roots, opts.path);
+    if (!res.path) {
+      return res.reason === 'missing'
+        ? { ok: false, error: `path not found: ${opts.path}` }
+        : { ok: false, error: `path escapes workspace: ${opts.path}` };
+    }
+    const abs = res.path;
     let stat: fs.Stats;
     try {
       stat = fs.statSync(abs);

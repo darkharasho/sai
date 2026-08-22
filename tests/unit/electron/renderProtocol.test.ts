@@ -9,6 +9,7 @@ import {
   RENDER_CSP,
   contentTypeFor,
   prepareRenderTarget,
+  osTempRoots,
 } from '../../../electron/services/renderProtocol';
 
 let root: string;
@@ -157,9 +158,36 @@ describe('prepareRenderTarget', () => {
     fs.rmSync(extra, { recursive: true, force: true });
   });
 
+  it('reports a missing in-bounds path as not found, not as an escape', () => {
+    const t = prepareRenderTarget({ cwd: root, path: path.join(root, 'nope.html') });
+    expect(t.ok).toBe(false);
+    expect(!t.ok && t.error).toContain('path not found');
+    expect(!t.ok && t.error).not.toContain('escapes');
+  });
+
   it('injects a <base> into inline html so relative assets resolve', () => {
     const t = prepareRenderTarget({ cwd: root, html: '<link href="app.css">', baseDir: 'assets' });
     expect(t.ok && t.inlineHtml).toContain('<base href="sai-render-base/">');
+  });
+});
+
+describe('osTempRoots', () => {
+  it('includes literal /tmp even when TMPDIR points elsewhere', () => {
+    const prev = process.env.TMPDIR;
+    process.env.TMPDIR = '/var/tmp/somebody';
+    try {
+      const roots = osTempRoots();
+      expect(roots).toContain('/tmp');
+      expect(roots).toContain('/var/tmp/somebody');
+    } finally {
+      if (prev == null) delete process.env.TMPDIR;
+      else process.env.TMPDIR = prev;
+    }
+  });
+
+  it('dedupes', () => {
+    const roots = osTempRoots();
+    expect(new Set(roots).size).toBe(roots.length);
   });
 });
 
