@@ -2095,6 +2095,81 @@ describe('SdkBackend', () => {
     expect(notify.completion).not.toHaveBeenCalled();
   });
 
+  // ── Superseded turns: the user sending mid-stream starts a NEW turn while
+  //    the old turn's `result` is still in flight. When it drains, the mapper's
+  //    `streaming` belongs to the NEW turn — reading it as "this turn ended"
+  //    fired the OS completion notification while the chat was still thinking
+  //    on the user's fresh message (the stale `done` is dropped by the
+  //    renderer's turnSeq guard, but the notification never was).
+
+  /** Fake query whose frames are pushed after construction. */
+  function makePushQuery() {
+    const queue: any[] = [];
+    let wake: (() => void) | null = null;
+    let closed = false;
+    async function* gen() {
+      for (;;) {
+        if (closed) return;
+        if (queue.length === 0) {
+          await new Promise<void>((res) => { wake = res; });
+          continue;
+        }
+        yield queue.shift();
+      }
+    }
+    const iterator = gen();
+    return {
+      push(msg: any) { queue.push(msg); wake?.(); wake = null; },
+      interrupt: vi.fn().mockResolvedValue(undefined),
+      close: () => { closed = true; wake?.(); wake = null; },
+      [Symbol.asyncIterator]: () => iterator,
+    };
+  }
+
+  it('(47) a superseded turn result does NOT notify while the new turn is thinking', async () => {
+    const notify = makeNotifySpy();
+    const q = makePushQuery();
+    const backend = new SdkBackend({
+      queryFn: vi.fn(() => q as any),
+      emit: (p) => emits.push(p),
+      resolveClaudePath: () => undefined,
+      notify,
+    });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.send({ projectPath: PROJECT, message: 'first', scope: SCOPE, permMode: 'bypass' });
+    await new Promise((r) => setTimeout(r, 20));
+    // User sends again mid-turn — a new turn begins, the old result is in flight.
+    backend.send({ projectPath: PROJECT, message: 'second', scope: SCOPE, permMode: 'bypass' });
+    await new Promise((r) => setTimeout(r, 20));
+    q.push({ type: 'result', stop_reason: 'end_turn', num_turns: 1, duration_ms: 100 });
+    await new Promise((r) => setTimeout(r, 700)); // past the 500ms notify delay
+
+    expect(notify.completion).not.toHaveBeenCalled();
+    q.close();
+  });
+
+  it('(48) a send inside the 500ms notify delay cancels the completion notification', async () => {
+    const notify = makeNotifySpy();
+    const q = makePushQuery();
+    const backend = new SdkBackend({
+      queryFn: vi.fn(() => q as any),
+      emit: (p) => emits.push(p),
+      resolveClaudePath: () => undefined,
+      notify,
+    });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.send({ projectPath: PROJECT, message: 'first', scope: SCOPE, permMode: 'bypass' });
+    await new Promise((r) => setTimeout(r, 20));
+    q.push({ type: 'result', stop_reason: 'end_turn', num_turns: 1, duration_ms: 100 });
+    await new Promise((r) => setTimeout(r, 50));
+    // The user is already typing the next message — it lands before the timer.
+    backend.send({ projectPath: PROJECT, message: 'second', scope: SCOPE, permMode: 'bypass' });
+    await new Promise((r) => setTimeout(r, 700));
+
+    expect(notify.completion).not.toHaveBeenCalled();
+    q.close();
+  });
+
   // ── Stop-hook background_tasks: the runtime's own in-flight task ledger is
   //    the authoritative "paused waiting" signal. Repro from a live transcript
   //    (otto, 2026-07-05): an Agent tool_use with NO run_in_background flag was

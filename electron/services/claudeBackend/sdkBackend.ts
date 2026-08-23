@@ -1359,6 +1359,13 @@ export class SdkBackend implements ClaudeBackend {
           }
 
           const wasStreaming = session.mapperState.streaming;
+          // A turn the user already superseded (sent again mid-stream, or
+          // interrupted): activeTurnSeq lags behind turnSeq until this result
+          // drains. `wasStreaming` then belongs to the NEW turn, so reading it
+          // as "the turn the user was watching ended" fired the completion
+          // notification while the chat was still thinking on the fresh message.
+          const superseded =
+            session.activeTurnSeq !== session.turnSeq || session.awaitingInterruptResult;
 
           // Classify WHY a turn ended before mapping: a background yield or a
           // scheduled wakeup is a wait, not a real completion (claude.ts:538-552).
@@ -1461,7 +1468,7 @@ export class SdkBackend implements ClaudeBackend {
             // chat-kind scopes are a "turn end" for the user: task/orchestrator
             // scopes finishing must not fire the turn-end notification (swarm
             // tasks have their own opt-in notification in the renderer).
-            if (wasStreaming && wait?.kind === 'none' && session.kind === 'chat') {
+            if (wasStreaming && !superseded && wait?.kind === 'none' && session.kind === 'chat') {
               const info = {
                 provider: 'Claude',
                 duration: rawMsg.duration_ms as number | undefined,
@@ -1469,7 +1476,14 @@ export class SdkBackend implements ClaudeBackend {
                 cost: rawMsg.total_cost_usd as number | undefined,
                 summary: rawMsg.result as string | undefined,
               };
-              setTimeout(() => this._notify.completion(projectPath, info), 500);
+              // Re-check at fire time: the user can send again inside the delay,
+              // and a notification for a turn that is thinking again is noise.
+              const notifiedTurnSeq = session.turnSeq;
+              setTimeout(() => {
+                const live = this.sessions.get(scopeKey);
+                if (live && (live.turnSeq !== notifiedTurnSeq || live.mapperState.streaming)) return;
+                this._notify.completion(projectPath, info);
+              }, 500);
             }
           }
 
