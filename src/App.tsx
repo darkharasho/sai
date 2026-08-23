@@ -2752,6 +2752,13 @@ export default function App() {
   // for the same turn decrements once, not twice). Without this, workspaces
   // running multiple scopes lost their busy indicator after the first turn ended.
   const busyTurnByScopeRef = useRef(new Map<string, number>());
+  // The completion toast/badge is deferred 300ms after a workspace's last busy
+  // scope ends. Sending again mid-stream (or Stop-then-send) makes the backend
+  // emit a synthetic done for the superseded turn immediately followed by the
+  // new turn's streaming_start — so the workspace flashed "has finished" while
+  // it was thinking on the fresh message. Any streaming_start for the workspace
+  // cancels a pending completion: it never finished.
+  const pendingCompletionTimerRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   // Release a scope's busy slot outside the normal turn-end path (session
   // deleted, scheduled-wakeup grace expired). Safe against the late done/result
   // for the same turn: once the scope is no longer counted, the turn-end
@@ -3053,6 +3060,13 @@ export default function App() {
           busyScopeCountRef.current.set(msg.projectPath, count + 1);
         }
         busyTurnByScopeRef.current.set(scopeKey, msg.turnSeq ?? countedTurn ?? 0);
+        // A turn starting here cancels the deferred "has finished" from the
+        // superseded turn's done — the workspace is thinking, not done.
+        const pendingCompletion = pendingCompletionTimerRef.current.get(msg.projectPath);
+        if (pendingCompletion) {
+          clearTimeout(pendingCompletion);
+          pendingCompletionTimerRef.current.delete(msg.projectPath);
+        }
         setBusyWorkspaces(prev => new Set(prev).add(msg.projectPath));
         setCompletedWorkspaces(prev => {
           if (!prev.has(msg.projectPath)) return prev;
@@ -3497,20 +3511,28 @@ export default function App() {
               if (!prev.has(msg.projectPath)) return prev;
               const next = new Set(prev);
               next.delete(msg.projectPath);
-              if (msg.projectPath !== activeProjectPathRef.current) {
-                const wsName = basename(msg.projectPath);
-                setTimeout(() => {
-                  setCompletedWorkspaces(p => new Set(p).add(msg.projectPath));
-                  setNotificationCounts(p => {
-                    const next = new Map(p);
-                    next.set(msg.projectPath, (next.get(msg.projectPath) || 0) + 1);
-                    return next;
-                  });
-                  setToast({ message: `${wsName} has finished`, key: Date.now() });
-                }, 300);
-              }
               return next;
             });
+            // Scheduled HERE, not inside the updater above: React runs updaters
+            // during the batch flush, i.e. AFTER this listener returns — so a
+            // streaming_start arriving in the same tick could not cancel a timer
+            // that didn't exist yet.
+            if (msg.projectPath !== activeProjectPathRef.current) {
+              const completionPath = msg.projectPath;
+              const wsName = basename(completionPath);
+              const prevTimer = pendingCompletionTimerRef.current.get(completionPath);
+              if (prevTimer) clearTimeout(prevTimer);
+              pendingCompletionTimerRef.current.set(completionPath, setTimeout(() => {
+                pendingCompletionTimerRef.current.delete(completionPath);
+                setCompletedWorkspaces(p => new Set(p).add(completionPath));
+                setNotificationCounts(p => {
+                  const next = new Map(p);
+                  next.set(completionPath, (next.get(completionPath) || 0) + 1);
+                  return next;
+                });
+                setToast({ message: `${wsName} has finished`, key: Date.now() });
+              }, 300));
+            }
           }
         }
         // Clear chatStreamingWorkspaces whenever the chat scope ends.
