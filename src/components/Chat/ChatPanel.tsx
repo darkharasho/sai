@@ -2890,6 +2890,9 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
         .chat-messages {
           flex: 1;
           overflow-y: auto;
+          /* Long unbreakable tokens (URLs, hashes) must never scroll the whole
+             transcript sideways; pre/table opt into their own overflow-x. */
+          overflow-x: hidden;
           padding: 16px;
           min-height: 0;
           display: flex;

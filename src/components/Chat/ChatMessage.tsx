@@ -953,7 +953,7 @@ function ChatMessage({
         .chat-msg-sai {
           margin-top: 1px;
         }
-        .chat-msg-body { color: var(--text); font-size: var(--text-md); line-height: 1.55; flex: 1; min-width: 0; }
+        .chat-msg-body { color: var(--text); font-size: var(--text-md); line-height: 1.55; flex: 1; min-width: 0; overflow-wrap: anywhere; }
         .chat-msg-duration {
           font-family: 'Geist Mono', 'JetBrains Mono', monospace;
           font-variant-numeric: tabular-nums;
