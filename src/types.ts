@@ -399,6 +399,9 @@ export interface SaiSearchApi {
 
 declare global {
   interface SaiBridge extends Record<string, any> {
+    /** Developer diagnostics (maintainer account only) — see electron/services/devlog.ts. */
+    devlog?: (event: string, data?: Record<string, unknown>) => void;
+    devlogInfo?: () => Promise<{ enabled: boolean; path: string | null }>;
     /** Canonical home directory plus every alias spelling (symlinked homes). */
     homeDir?: () => Promise<{ path: string; aliases: string[] }>;
     metaWorkspaceList?: () => Promise<any[]>;

@@ -248,7 +248,7 @@ export function registerGeminiHandlers(win: BrowserWindow) {
       const preamble = ws.gemini.metaPreamble && !scopeSession(ws, scope) ? `${ws.gemini.metaPreamble}\n\n` : '';
       await promptAntigravityText(win, ws, { scope, prompt: `${preamble}${message}`, imagePaths, approvalMode, conversationMode, model });
       safeSend(win, { type: 'result', projectPath, scope, usage: { input_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, output_tokens: 0 } });
-      notifyCompletion(win, projectPath, { provider: DISPLAY_NAME });
+      notifyCompletion(win, projectPath, { provider: DISPLAY_NAME }, { site: 'gemini.turnEnd' });
     } catch (error) {
       safeSend(win, { type: 'error', projectPath, scope, text: error instanceof Error ? error.message : 'Antigravity request failed' });
     } finally {

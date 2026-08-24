@@ -100,9 +100,9 @@ function makeSdkBackend(): CodexBackend {
   return new SdkCodexBackend({
     emit: emitChatMessage,
     getModels: fetchBundledCodexModels,
-    notifyCompletion: (projectPath, info) => {
+    notifyCompletion: (projectPath, info, ctx) => {
       const win = getMainWin();
-      if (win) notifyCompletion(win, projectPath, info);
+      if (win) notifyCompletion(win, projectPath, info, ctx);
     },
     buildChatMcpConfig: (workspace) => {
       const handle = swarmMcpHost.start();

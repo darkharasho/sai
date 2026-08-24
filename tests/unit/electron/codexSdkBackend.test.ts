@@ -288,7 +288,11 @@ describe('SdkCodexBackend', () => {
     await settle();
 
     expect(h.notifyCompletion).toHaveBeenCalledTimes(1);
-    expect(h.notifyCompletion).toHaveBeenCalledWith('/a', { provider: 'Codex', summary: 'finished' });
+    expect(h.notifyCompletion).toHaveBeenCalledWith(
+      '/a',
+      { provider: 'Codex', summary: 'finished' },
+      expect.objectContaining({ site: 'codex.turnEnd' }),
+    );
   });
 
   it('drains native subagent lifecycle events after the parent completes before settling the turn', async () => {

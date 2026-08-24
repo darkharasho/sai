@@ -814,7 +814,7 @@ export function registerAcpProviderHandlers(win: BrowserWindow, config: AcpProvi
           turnSeq: state(ws).turnSeq,
         });
 
-        notifyCompletion(win, ws.projectPath, { provider: config.displayName });
+        notifyCompletion(win, ws.projectPath, { provider: config.displayName }, { site: 'acp.turnEnd' });
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : `${config.displayName} request failed`;
         // Transport-level failures (ACP process died or never started) require a full

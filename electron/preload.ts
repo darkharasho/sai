@@ -288,6 +288,8 @@ contextBridge.exposeInMainWorld('sai', {
     return () => ipcRenderer.removeListener('update:error', listener);
   },
   workspaceSetActive: (projectPath: string) => ipcRenderer.send('workspace:setActive', projectPath),
+  devlog: (event: string, data?: Record<string, unknown>) => ipcRenderer.send('devlog:write', event, data),
+  devlogInfo: (): Promise<{ enabled: boolean; path: string | null }> => ipcRenderer.invoke('devlog:info'),
   workspaceGetAll: () => ipcRenderer.invoke('workspace:getAll'),
   workspaceClose: (projectPath: string) => ipcRenderer.invoke('workspace:close', projectPath),
   workspaceSuspend: (projectPath: string) => ipcRenderer.invoke('workspace:suspend', projectPath),

@@ -33,6 +33,7 @@ import {
 } from '../claude';
 import { isImagePath, mimeForImagePath } from '../imageFiles';
 import { notifyCompletion, notifyApproval, notifyQuestion, notifyPlanReview } from '../notify';
+import { devlog } from '../devlog';
 import { classifyTurnEnd, isSchedulingTool, isBackgroundLaunch, isAsyncLaunchResult, countLiveBackgroundTasks,
   isTerminalTaskStatus, WAKEUP_GRACE_MS, BACKGROUND_WAIT_SETTLE_MS, BACKGROUND_WAIT_IDLE_MS, type WaitMeta } from '../waitClassifier';
 import { clamp, type PermMode } from '../remote/clamp';
@@ -285,7 +286,12 @@ export interface SdkNotify {
   approval(workspaceName: string, toolName: string, command: string): void;
   question(workspaceName: string, question: string): void;
   planReview(workspaceName: string): void;
-  completion(projectPath: string, info: { provider: string; duration?: number; turns?: number; cost?: number; summary?: string }): void;
+  completion(
+    projectPath: string,
+    info: { provider: string; duration?: number; turns?: number; cost?: number; summary?: string },
+    /** Diagnostics only (devlog): call site + turn state behind this decision. */
+    ctx?: Record<string, unknown>,
+  ): void;
 }
 
 const defaultNotify: SdkNotify = {
@@ -301,9 +307,9 @@ const defaultNotify: SdkNotify = {
     const win = getMainWin();
     if (win) notifyPlanReview(win, wsName);
   },
-  completion: (projectPath, info) => {
+  completion: (projectPath, info, ctx) => {
     const win = getMainWin();
-    if (win) notifyCompletion(win, projectPath, info);
+    if (win) notifyCompletion(win, projectPath, info, ctx);
   },
 };
 
@@ -877,6 +883,17 @@ export class SdkBackend implements ClaudeBackend {
     session.awaitingInput = false;
     this._resetWaitTracking(session);
 
+    devlog('claude-sdk', 'beginTurn', {
+      projectPath,
+      scope: effectiveScope,
+      kind: session.kind,
+      wasInterrupt,
+      turnSeq: session.turnSeq,
+      activeTurnSeq: session.activeTurnSeq,
+      awaitingInterruptResult: session.awaitingInterruptResult,
+      pendingBackgroundResume: session.pendingBackgroundResume,
+    });
+
     this._emit({
       type: 'streaming_start',
       projectPath,
@@ -1296,7 +1313,17 @@ export class SdkBackend implements ClaudeBackend {
     // the result path's notification never fired. Same chat-kind gate as there
     // (task/orchestrator scopes have their own opt-in path in the renderer).
     // No duration/turns/cost: there is no result frame to read them from.
-    if (session.kind === 'chat') this._notify.completion(session._projectPath, { provider: 'Claude' });
+    if (session.kind === 'chat') {
+      this._notify.completion(session._projectPath, { provider: 'Claude' }, {
+        site: 'closeBackgroundWait',
+        scope: session._scopeName,
+        kind: session.kind,
+        turnSeq: session.turnSeq,
+        activeTurnSeq: session.activeTurnSeq,
+        settled,
+        abandoned,
+      });
+    }
     return true;
   }
 
@@ -1366,6 +1393,13 @@ export class SdkBackend implements ClaudeBackend {
           // notification while the chat was still thinking on the fresh message.
           const superseded =
             session.activeTurnSeq !== session.turnSeq || session.awaitingInterruptResult;
+          // Snapshot for diagnostics: both fields are mutated (converged) below
+          // before the notify decision is logged.
+          const supersededFrom = {
+            activeTurnSeq: session.activeTurnSeq,
+            turnSeq: session.turnSeq,
+            awaitingInterruptResult: session.awaitingInterruptResult,
+          };
 
           // Classify WHY a turn ended before mapping: a background yield or a
           // scheduled wakeup is a wait, not a real completion (claude.ts:538-552).
@@ -1468,6 +1502,17 @@ export class SdkBackend implements ClaudeBackend {
             // chat-kind scopes are a "turn end" for the user: task/orchestrator
             // scopes finishing must not fire the turn-end notification (swarm
             // tasks have their own opt-in notification in the renderer).
+            devlog('claude-sdk', 'turnEnd.decide', {
+              projectPath,
+              scope: effectiveScope,
+              kind: session.kind,
+              wasStreaming,
+              superseded,
+              waitKind: wait?.kind ?? null,
+              turnSeq: session.turnSeq,
+              supersededFrom,
+              willNotify: Boolean(wasStreaming && !superseded && wait?.kind === 'none' && session.kind === 'chat'),
+            });
             if (wasStreaming && !superseded && wait?.kind === 'none' && session.kind === 'chat') {
               const info = {
                 provider: 'Claude',
@@ -1481,8 +1526,24 @@ export class SdkBackend implements ClaudeBackend {
               const notifiedTurnSeq = session.turnSeq;
               setTimeout(() => {
                 const live = this.sessions.get(scopeKey);
-                if (live && (live.turnSeq !== notifiedTurnSeq || live.mapperState.streaming)) return;
-                this._notify.completion(projectPath, info);
+                if (live && (live.turnSeq !== notifiedTurnSeq || live.mapperState.streaming)) {
+                  devlog('claude-sdk', 'turnEnd.recheck.dropped', {
+                    projectPath,
+                    scope: effectiveScope,
+                    notifiedTurnSeq,
+                    liveTurnSeq: live.turnSeq,
+                    liveStreaming: live.mapperState.streaming,
+                  });
+                  return;
+                }
+                this._notify.completion(projectPath, info, {
+                  site: 'turnEnd',
+                  scope: effectiveScope,
+                  notifiedTurnSeq,
+                  liveTurnSeq: live?.turnSeq ?? null,
+                  liveStreaming: live?.mapperState.streaming ?? null,
+                  sessionGone: !live,
+                });
               }, 500);
             }
           }

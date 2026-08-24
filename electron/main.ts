@@ -77,6 +77,7 @@ import { registerUpdater } from './services/updater';
 import { registerUsageHandlers, destroyUsagePolling } from './services/usage';
 import { destroyAll, startSuspendTimer, stopSuspendTimer, getAll, remove, suspend, getOrCreate as getOrCreateWorkspace, DEFAULT_SUSPEND_TIMEOUT } from './services/workspace';
 import { initFocusTracking, setActiveWorkspace } from './services/notify';
+import { devlog, devlogEnabled, devlogPath } from './services/devlog';
 import { OverlayManager } from './services/overlay';
 import { registerGithubAuthHandlers } from './services/github-auth';
 import { initialSync, schedulePush } from './services/github-sync';
@@ -723,6 +724,17 @@ function createWindow() {
   ipcMain.on('workspace:setActive', (_event, projectPath: string) => {
     setActiveWorkspace(projectPath || '');
   });
+
+  // Renderer-side developer diagnostics land in the same JSONL as the main
+  // process, so a notification and the UI state around it share one timeline.
+  ipcMain.on('devlog:write', (_event, event: string, data?: Record<string, unknown>) => {
+    devlog('renderer', String(event), data);
+  });
+
+  ipcMain.handle('devlog:info', () => ({
+    enabled: devlogEnabled(),
+    path: devlogEnabled() ? devlogPath() : null,
+  }));
 
   ipcMain.handle('workspace:getAll', () => {
     const active = getAll().filter(w => w.projectPath);

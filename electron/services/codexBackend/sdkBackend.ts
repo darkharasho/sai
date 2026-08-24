@@ -26,6 +26,7 @@ import {
   type CodexStartArgs,
   type CodexUserInputResponse,
 } from './types';
+import { devlog } from '../devlog';
 
 export interface CodexSdkThread {
   readonly id: string | null;
@@ -43,7 +44,12 @@ export interface SdkCodexBackendDeps {
   getModels?: (forceRefresh?: boolean) => Promise<CodexModelResult>;
   getEnv?: () => NodeJS.ProcessEnv;
   registerWorkspace?: (projectPath: string) => void;
-  notifyCompletion?: (projectPath: string, info: { provider: string; summary?: string }) => void;
+  notifyCompletion?: (
+    projectPath: string,
+    info: { provider: string; summary?: string },
+    /** Diagnostics only (devlog): call site + turn state behind this decision. */
+    ctx?: Record<string, unknown>,
+  ) => void;
   /** Creates the private SAI chat MCP configuration for one workspace. */
   buildChatMcpConfig?: (workspace: string) => NonNullable<CodexOptions['config']>;
 }
@@ -106,7 +112,11 @@ export class SdkCodexBackend implements CodexBackend {
   private readonly loadModels: (forceRefresh?: boolean) => Promise<CodexModelResult>;
   private readonly getEnv: () => NodeJS.ProcessEnv;
   private readonly registerWorkspace: (projectPath: string) => void;
-  private readonly notifyCompletion: (projectPath: string, info: { provider: string; summary?: string }) => void;
+  private readonly notifyCompletion: (
+    projectPath: string,
+    info: { provider: string; summary?: string },
+    ctx?: Record<string, unknown>,
+  ) => void;
   private readonly buildChatMcpConfig?: (workspace: string) => NonNullable<CodexOptions['config']>;
 
   constructor(deps: SdkCodexBackendDeps = {}) {
@@ -410,12 +420,25 @@ export class SdkCodexBackend implements CodexBackend {
         this.emit(pendingResult);
       }
       const shouldNotifyCompletion = Boolean(pendingResult) && runtime.kind === 'chat';
+      const wasCurrent = this.isCurrent(runtime, active);
       // At physical EOF no further collaboration events can arrive. Mark the
       // final envelope so the renderer can clear any child the CLI omitted a
       // terminal event for, while an earlier logical parent done remains safe.
       this.finishTurn(runtime, active, { subagentsSettled: true });
+      devlog('codex-sdk', 'turnEnd.decide', {
+        projectPath: runtime.projectPath,
+        kind: runtime.kind,
+        hasResult: Boolean(pendingResult),
+        // Unlike every emit above, the notify is NOT gated on isCurrent —
+        // logged so a stale turn firing a completion is visible in the log.
+        isCurrent: wasCurrent,
+        willNotify: shouldNotifyCompletion,
+      });
       if (shouldNotifyCompletion) {
-        this.notifyCompletion(runtime.projectPath, { provider: 'Codex', summary: active.summary });
+        this.notifyCompletion(runtime.projectPath, { provider: 'Codex', summary: active.summary }, {
+          site: 'codex.turnEnd',
+          isCurrent: wasCurrent,
+        });
       }
     } catch (error) {
       if (!this.isCurrent(runtime, active) || this.runtimes.get(key) !== runtime) return;

@@ -8,6 +8,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import { enrichedEnv, withNodeMemoryCap } from './shellEnv';
 import { notifyCompletion, notifyApproval, notifyQuestion, notifyPlanReview } from './notify';
+import { devlog } from './devlog';
 import { extractCodexCommitMessage } from './commit-message-parser';
 import { promptAntigravityOneShot } from './gemini';
 import { ensureKimiTransport, ensureKimiCommitSession, promptKimiText } from './kimi';
@@ -581,13 +582,22 @@ function ensureProcess(
           // chat-kind scopes are a "turn end" for the user: task/orchestrator
           // scopes finishing must not fire the turn-end notification (swarm
           // tasks have their own opt-in notification in the renderer).
+          devlog('claude-cli', 'turnEnd.decide', {
+            projectPath: ws.projectPath,
+            scope,
+            kind: claude.kind,
+            wasBusy,
+            waitKind: wait.kind,
+            turnSeq: responseTurnSeq,
+            willNotify: Boolean(wasBusy && wait.kind === 'none' && claude.kind === 'chat'),
+          });
           if (wasBusy && wait.kind === 'none' && claude.kind === 'chat') setTimeout(() => notifyCompletion(win, ws.projectPath, {
             provider: 'Claude',
             duration: msg.duration_ms,
             turns: msg.num_turns,
             cost: msg.total_cost_usd,
             summary: msg.result,
-          }), 500);
+          }, { site: 'cli.turnEnd', scope, turnSeq: responseTurnSeq }), 500);
           continue;
         }
 

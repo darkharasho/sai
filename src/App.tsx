@@ -3063,6 +3063,11 @@ export default function App() {
         // A turn starting here cancels the deferred "has finished" from the
         // superseded turn's done — the workspace is thinking, not done.
         const pendingCompletion = pendingCompletionTimerRef.current.get(msg.projectPath);
+        window.sai.devlog?.('streamingStart', {
+          projectPath: msg.projectPath, scope: msg.scope || 'chat',
+          turnSeq: msg.turnSeq ?? null,
+          cancelledPendingCompletion: Boolean(pendingCompletion),
+        });
         if (pendingCompletion) {
           clearTimeout(pendingCompletion);
           pendingCompletionTimerRef.current.delete(msg.projectPath);
@@ -3379,6 +3384,10 @@ export default function App() {
         // so its busy slot is already released — a second decrement here is what
         // used to zero the count while sibling scopes were still streaming.
         if (turnEndIsStale(msg.turnSeq, wsTurnSeqRef.current.get(scopeKey))) {
+          window.sai.devlog?.('turnEnd.stale', {
+            projectPath: msg.projectPath, scope: msg.scope || 'chat', type: msg.type,
+            turnSeq: msg.turnSeq ?? null, wsTurnSeq: wsTurnSeqRef.current.get(scopeKey) ?? null,
+          });
           return;
         }
         // Branch on wait classification before entering the completion path.
@@ -3517,6 +3526,13 @@ export default function App() {
             // during the batch flush, i.e. AFTER this listener returns — so a
             // streaming_start arriving in the same tick could not cancel a timer
             // that didn't exist yet.
+            window.sai.devlog?.('turnEnd.completion', {
+              projectPath: msg.projectPath, scope: msg.scope || 'chat', type: msg.type,
+              turnSeq: msg.turnSeq ?? null,
+              activeProjectPath: activeProjectPathRef.current,
+              isActive: msg.projectPath === activeProjectPathRef.current,
+              willToast: msg.projectPath !== activeProjectPathRef.current,
+            });
             if (msg.projectPath !== activeProjectPathRef.current) {
               const completionPath = msg.projectPath;
               const wsName = basename(completionPath);
@@ -3530,6 +3546,7 @@ export default function App() {
                   next.set(completionPath, (next.get(completionPath) || 0) + 1);
                   return next;
                 });
+                window.sai.devlog?.('toast.finished', { projectPath: completionPath });
                 setToast({ message: `${wsName} has finished`, key: Date.now() });
               }, 300));
             }

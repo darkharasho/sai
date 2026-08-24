@@ -1,6 +1,7 @@
 import { Notification, BrowserWindow, app } from 'electron';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
+import { devlog, devlogSnip } from './devlog';
 
 const settingsFile = path.join(app.getPath('userData'), 'settings.json');
 
@@ -21,13 +22,16 @@ let windowFocused = true;
 let activeWorkspacePath = '';
 
 export function initFocusTracking(win: BrowserWindow) {
-  win.on('focus', () => { windowFocused = true; });
-  win.on('blur', () => { windowFocused = false; });
+  win.on('focus', () => { windowFocused = true; devlog('notify', 'focus', { focused: true }); });
+  win.on('blur', () => { windowFocused = false; devlog('notify', 'focus', { focused: false }); });
   windowFocused = win.isFocused();
+  devlog('notify', 'focus.init', { focused: windowFocused });
 }
 
 export function setActiveWorkspace(projectPath: string) {
+  const prev = activeWorkspacePath;
   activeWorkspacePath = projectPath;
+  if (prev !== projectPath) devlog('notify', 'activeWorkspace', { from: prev, to: projectPath });
 }
 
 export interface CompletionInfo {
@@ -50,13 +54,35 @@ function formatDuration(ms: number): string {
  * Flash the taskbar and optionally send a system notification
  * when a response completes while the window is unfocused.
  */
-export function notifyCompletion(win: BrowserWindow, projectPath: string, info?: CompletionInfo) {
-  if (win.isDestroyed()) return;
+export function notifyCompletion(
+  win: BrowserWindow,
+  projectPath: string,
+  info?: CompletionInfo,
+  /** Diagnostics only: who called and what turn state they read. */
+  ctx?: Record<string, unknown>,
+) {
+  // Diagnostics: record the decision AND the state it was taken on, so a
+  // spurious "has finished" can be traced back to its call site + turn state.
+  const trace = (decision: string) => devlog('notify', `completion.${decision}`, {
+    projectPath,
+    windowFocused,
+    activeWorkspacePath,
+    isActive: projectPath === activeWorkspacePath,
+    provider: info?.provider,
+    duration: info?.duration,
+    turns: info?.turns,
+    summary: devlogSnip(info?.summary, 80),
+    ...(ctx ?? {}),
+  });
+
+  if (win.isDestroyed()) { trace('skipped.destroyed'); return; }
   // Use event-tracked focus state — isFocused() is unreliable on Wayland
   // Only suppress if the window is focused AND this is the active workspace
-  if (windowFocused && projectPath === activeWorkspacePath) return;
+  if (windowFocused && projectPath === activeWorkspacePath) { trace('suppressed.focused'); return; }
 
-  if (!isEnabled()) return;
+  if (!isEnabled()) { trace('skipped.disabled'); return; }
+
+  trace('fired');
 
   win.flashFrame(true);
 
