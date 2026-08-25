@@ -1437,6 +1437,20 @@ export class SdkBackend implements ClaudeBackend {
           // Capture the raw SDK message to inspect for special tool_use blocks
           const rawMsg = m;
 
+          // A result that produced no assistant turns AND no text is a
+          // continuation boundary, not a completion: the runtime ends the turn
+          // and the same scope resumes ~1s later (the mapper sees an assistant
+          // frame and re-arms via streaming_start above). Live devlog evidence
+          // 2026-08-25: every spurious "has finished" carried num_turns 0 + an
+          // empty result and resumed within 0.66-0.94s, while all 22 real
+          // completions had turns >= 1 and real summary text. turnSeq guards
+          // cannot catch this — the resumed turn does not exist yet when the
+          // result lands, so nothing looks superseded.
+          const producedNothing =
+            rawMsg?.type === 'result'
+            && (rawMsg.num_turns ?? 0) === 0
+            && !String(rawMsg.result ?? '').trim();
+
           for (const e of emits) {
             if (e.type === 'streaming_start') {
               // Re-arm: the mapper saw an assistant frame (or a stream_event
@@ -1446,7 +1460,7 @@ export class SdkBackend implements ClaudeBackend {
               this._resetWaitTracking(session);
               this._emit({ ...e, projectPath, scope: effectiveScope, sessionId: session.sessionId ?? null, turnSeq: session.turnSeq });
             } else if (e.type === 'result' || e.type === 'done') {
-              this._emit({ ...e, projectPath, scope: effectiveScope, turnSeq: session.activeTurnSeq, ...(wait ? { wait } : {}) });
+              this._emit({ ...e, projectPath, scope: effectiveScope, turnSeq: session.activeTurnSeq, ...(wait ? { wait } : {}), ...(producedNothing ? { continuation: true } : {}) });
             } else {
               this._emit({ ...e, projectPath, scope: effectiveScope });
             }
@@ -1508,12 +1522,13 @@ export class SdkBackend implements ClaudeBackend {
               kind: session.kind,
               wasStreaming,
               superseded,
+              producedNothing,
               waitKind: wait?.kind ?? null,
               turnSeq: session.turnSeq,
               supersededFrom,
-              willNotify: Boolean(wasStreaming && !superseded && wait?.kind === 'none' && session.kind === 'chat'),
+              willNotify: Boolean(wasStreaming && !superseded && !producedNothing && wait?.kind === 'none' && session.kind === 'chat'),
             });
-            if (wasStreaming && !superseded && wait?.kind === 'none' && session.kind === 'chat') {
+            if (wasStreaming && !superseded && !producedNothing && wait?.kind === 'none' && session.kind === 'chat') {
               const info = {
                 provider: 'Claude',
                 duration: rawMsg.duration_ms as number | undefined,

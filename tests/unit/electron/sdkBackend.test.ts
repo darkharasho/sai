@@ -2170,6 +2170,55 @@ describe('SdkBackend', () => {
     q.close();
   });
 
+  // ── Empty results are continuation boundaries, not completions.
+  //    Live devlog evidence (2026-08-25, axistream): four spurious "has
+  //    finished" notifications all carried `num_turns: 0` and an empty
+  //    `result`, and the SAME scope resumed streaming 0.66-0.94s later. The
+  //    other 22 fires that session all had num_turns >= 1 and real summary
+  //    text, with the next activity 7-607s away. Nothing was superseded — the
+  //    resumed turn does not exist yet when the result lands, so every
+  //    turnSeq-based guard passes. A result that produced no assistant turns
+  //    and no text has nothing for the user to come back and read.
+
+  it('(49) an empty result (no assistant turns, no text) does NOT notify', async () => {
+    const notify = makeNotifySpy();
+    const q = makePushQuery();
+    const backend = new SdkBackend({
+      queryFn: vi.fn(() => q as any),
+      emit: (p) => emits.push(p),
+      resolveClaudePath: () => undefined,
+      notify,
+    });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.send({ projectPath: PROJECT, message: 'first', scope: SCOPE, permMode: 'bypass' });
+    await new Promise((r) => setTimeout(r, 20));
+    // Shape taken verbatim from the live log: long duration, zero turns, no text.
+    q.push({ type: 'result', stop_reason: 'end_turn', num_turns: 0, duration_ms: 125947, result: '' });
+    await new Promise((r) => setTimeout(r, 700)); // past the 500ms notify delay
+
+    expect(notify.completion).not.toHaveBeenCalled();
+    q.close();
+  });
+
+  it('(50) a result with text still notifies even when num_turns is 0', async () => {
+    const notify = makeNotifySpy();
+    const q = makePushQuery();
+    const backend = new SdkBackend({
+      queryFn: vi.fn(() => q as any),
+      emit: (p) => emits.push(p),
+      resolveClaudePath: () => undefined,
+      notify,
+    });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.send({ projectPath: PROJECT, message: 'first', scope: SCOPE, permMode: 'bypass' });
+    await new Promise((r) => setTimeout(r, 20));
+    q.push({ type: 'result', stop_reason: 'end_turn', num_turns: 0, duration_ms: 100, result: 'Done.' });
+    await new Promise((r) => setTimeout(r, 700));
+
+    expect(notify.completion).toHaveBeenCalledTimes(1);
+    q.close();
+  });
+
   // ── Stop-hook background_tasks: the runtime's own in-flight task ledger is
   //    the authoritative "paused waiting" signal. Repro from a live transcript
   //    (otto, 2026-07-05): an Agent tool_use with NO run_in_background flag was

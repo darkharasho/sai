@@ -3393,6 +3393,12 @@ export default function App() {
         // Branch on wait classification before entering the completion path.
         const waitMeta = (msg as any).wait as WaitMeta | undefined;
         const isWait = !!waitMeta && waitMeta.kind !== 'none';
+        // Backend-tagged continuation boundary (an SDK result with no assistant
+        // turns and no text). The scope resumes on its own about a second
+        // later, so announcing "has finished" is a lie. Busy accounting still
+        // runs below — holding the slot on a continuation that never resumed
+        // would strand the workspace as permanently busy.
+        const isContinuation = (msg as any).continuation === true;
         if (isWait) {
           // A wait is NOT a completion: stop the thinking indicator but do not
           // notify, toast, or mark the workspace finished. Show the waiting state.
@@ -3531,9 +3537,10 @@ export default function App() {
               turnSeq: msg.turnSeq ?? null,
               activeProjectPath: activeProjectPathRef.current,
               isActive: msg.projectPath === activeProjectPathRef.current,
-              willToast: msg.projectPath !== activeProjectPathRef.current,
+              isContinuation,
+              willToast: msg.projectPath !== activeProjectPathRef.current && !isContinuation,
             });
-            if (msg.projectPath !== activeProjectPathRef.current) {
+            if (msg.projectPath !== activeProjectPathRef.current && !isContinuation) {
               const completionPath = msg.projectPath;
               const wsName = basename(completionPath);
               const prevTimer = pendingCompletionTimerRef.current.get(completionPath);
