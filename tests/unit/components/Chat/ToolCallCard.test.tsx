@@ -429,3 +429,31 @@ describe('TodoWrite card enhancements', () => {
     expect(container.querySelector('.todo-priority')?.textContent).toBe('high');
   });
 });
+
+describe('non-string tool input fields (renderer crash guard)', () => {
+  // Regression: an MCP tool whose `query`/`url`/`content` is an object made
+  // formatInput hand a non-string label/body to isMarkdownBody, which called
+  // .trim() on it and threw during render — unmounting the whole app (black screen).
+  const cases: Array<[string, Record<string, unknown>]> = [
+    ['object query', { query: { filters: [{ key: 'x' }], limit: 5 } }],
+    ['object url', { url: { href: 'https://example.com' } }],
+    ['object content', { file_path: '/tmp/a.md', content: { a: 1 } }],
+    ['numeric command', { command: 42 }],
+    ['numeric pattern', { pattern: 7 }],
+    ['object file_path', { file_path: { path: '/tmp/x' } }],
+    ['object old_string', { file_path: '/tmp/x.ts', old_string: { a: 1 }, new_string: 2 }],
+  ];
+
+  for (const [label, input] of cases) {
+    it(`renders without throwing for ${label}`, () => {
+      const { container } = render(
+        <ToolCallCard toolCall={{ id: 't', type: 'other', name: 'mcp__x__y', input: JSON.stringify(input) }} />
+      );
+      expect(container.querySelector('.tool-call-card')).toBeTruthy();
+    });
+  }
+
+  it('isMarkdownBody tolerates non-string args', () => {
+    expect(isMarkdownBody({ a: 1 } as unknown as string, 42 as unknown as string)).toBe(false);
+  });
+});

@@ -76,13 +76,16 @@ function detectLang(toolCall: ToolCall): string {
  *  True when the label is a .md/.markdown path, or the body shows clear
  *  markdown structure. Conservative: plain prose / plain code stays as source. */
 export function isMarkdownBody(label: string, code: string): boolean {
-  if (/\.(md|markdown)$/i.test(label.trim())) return true;
+  // Callers can hand us values parsed straight out of arbitrary tool JSON, so
+  // never assume these are strings.
+  const name = asText(label);
+  if (/\.(md|markdown)$/i.test(name.trim())) return true;
   // Any other file extension means a non-markdown file: never promote, no
   // matter what the body looks like (JSDoc " * line"s match the list-item
   // heuristic, TS union arms look table-ish). Heuristics below are only for
   // extension-less labels (bash output, generic content).
-  if (/\.[a-z0-9]+$/i.test(label.trim())) return false;
-  const body = code || '';
+  if (/\.[a-z0-9]+$/i.test(name.trim())) return false;
+  const body = asText(code);
   // Require non-trivial content so a single value line doesn't promote.
   if (body.split('\n').filter(l => l.trim()).length < 2) return false;
   // ATX heading
@@ -277,6 +280,21 @@ function langFromPath(filePath: string): string {
   return (ext && map[ext]) || 'text';
 }
 
+/** Coerce an arbitrary JSON value from a tool's input into displayable text.
+ *  Tool schemas are not ours to trust: MCP tools ship object/number values in
+ *  fields we render as strings (e.g. `query`), and a raw non-string reaching
+ *  .trim()/.split() throws during render and unmounts the app. */
+function asText(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (value == null) return '';
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  try {
+    return JSON.stringify(value, null, 2) ?? '';
+  } catch {
+    return String(value);
+  }
+}
+
 interface FormatResult {
   label: string;
   code: string;
@@ -292,33 +310,33 @@ function formatInput(toolCall: ToolCall): FormatResult {
     const parsed = JSON.parse(input);
 
     // Bash — show command
-    if (parsed.command) return { label: 'Command', code: parsed.command, labelLang: 'bash' };
+    if (parsed.command) return { label: 'Command', code: asText(parsed.command), labelLang: 'bash' };
 
     // Write — show file path + content, highlighted as the target file's
     // language (detectLang only sees the tool name + raw JSON input, which
     // misguesses for Write bodies).
     if (parsed.file_path && parsed.content) {
-      return { label: parsed.file_path, code: parsed.content, langOverride: langFromPath(parsed.file_path) };
+      const filePath = asText(parsed.file_path);
+      return { label: filePath, code: asText(parsed.content), langOverride: langFromPath(filePath) };
     }
 
     // Edit — show diff with structured data for syntax-highlighted rendering
     if (parsed.file_path && parsed.old_string != null) {
-      const oldLines = (parsed.old_string || '').split('\n').map((l: string) => `- ${l}`).join('\n');
-      const newLines = (parsed.new_string || '').split('\n').map((l: string) => `+ ${l}`).join('\n');
+      const filePath = asText(parsed.file_path);
+      const oldString = asText(parsed.old_string);
+      const newString = asText(parsed.new_string);
+      const oldLines = oldString.split('\n').map((l: string) => `- ${l}`).join('\n');
+      const newLines = newString.split('\n').map((l: string) => `+ ${l}`).join('\n');
       return {
-        label: parsed.file_path,
+        label: filePath,
         code: `${oldLines}\n${newLines}`,
         langOverride: 'diff',
-        diff: {
-          oldString: parsed.old_string || '',
-          newString: parsed.new_string || '',
-          fileLang: langFromPath(parsed.file_path),
-        },
+        diff: { oldString, newString, fileLang: langFromPath(filePath) },
       };
     }
 
     // Read / Glob with file_path — label only, no body needed
-    if (parsed.file_path) return { label: parsed.file_path, code: '' };
+    if (parsed.file_path) return { label: asText(parsed.file_path), code: '' };
 
     // Grep / Glob — show pattern + optional path/glob filter
     if (parsed.pattern) {
@@ -336,8 +354,8 @@ function formatInput(toolCall: ToolCall): FormatResult {
     }
 
     // WebFetch / WebSearch
-    if (parsed.url) return { label: parsed.url, code: '' };
-    if (parsed.query) return { label: parsed.query, code: '' };
+    if (parsed.url) return { label: asText(parsed.url), code: '' };
+    if (parsed.query) return { label: asText(parsed.query), code: '' };
 
     // Fallback — format as key: value pairs instead of raw JSON
     const lines = Object.entries(parsed).map(([k, v]) => {
