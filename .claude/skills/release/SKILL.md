@@ -148,12 +148,16 @@ Create the draft release **before** pushing the tag, so the notes are already in
 place when CI's electron-builder looks for the release:
 
 ```bash
-gh release create v{NEW_VERSION} --draft --title "v{NEW_VERSION}" --notes-file - <<'NOTES'
+gh release create v{NEW_VERSION} --draft --target main --title "v{NEW_VERSION}" --notes-file - <<'NOTES'
 {RELEASE_NOTES}
 NOTES
 ```
 
-Use a heredoc for the notes body to preserve formatting.
+Use a heredoc for the notes body to preserve formatting. `--target main` is
+required: the tag exists locally but not on the remote at this point, and
+without it `gh` aborts with "tag v{NEW_VERSION} exists locally but has not been
+pushed". The draft stays untagged until Step 8 pushes the tag, which lands on
+the same commit as `main`.
 
 Verify the notes actually landed before releasing the tag:
 
