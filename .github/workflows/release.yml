@@ -68,15 +68,47 @@ jobs:
           NODE_OPTIONS: --max-old-space-size=4096
 
       - name: Build and publish Electron distributables
+        if: matrix.platform != 'mac'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CSC_LINK: ${{ matrix.platform == 'mac' && secrets.CSC_LINK || '' }}
-          CSC_KEY_PASSWORD: ${{ matrix.platform == 'mac' && secrets.CSC_KEY_PASSWORD || '' }}
+        run: npx electron-builder ${{ matrix.args }} --publish always
+
+      # Signing on macOS intermittently dies while electron-builder imports
+      # CSC_LINK into a throwaway keychain:
+      #   security: SecKeychainUnlock: The user name or passphrase you entered
+      #   is not correct.
+      # The same secrets and the same commit succeed on a plain re-run (v1.20.10
+      # and v1.20.12 both failed here, then passed untouched), so treat it as a
+      # flaky runner rather than a bad CSC_KEY_PASSWORD and retry before failing
+      # the release. Only mac retries -- a Linux or Windows failure is real, and
+      # re-running it just burns ten minutes.
+      - name: Build and publish Electron distributables (macOS, retries signing)
+        if: matrix.platform == 'mac'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_ID_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: npx electron-builder ${{ matrix.args }} --publish always
+        run: |
+          attempts=3
+          for i in $(seq 1 "$attempts"); do
+            echo "::group::electron-builder attempt $i of $attempts"
+            if npx electron-builder ${{ matrix.args }} --publish always; then
+              echo "::endgroup::"
+              exit 0
+            fi
+            echo "::endgroup::"
+            if [ "$i" -lt "$attempts" ]; then
+              echo "::warning::macOS build attempt $i failed; retrying in 30s"
+              sleep 30
+            fi
+          done
+          echo "::error::macOS build failed $attempts times; not a transient keychain error"
+          exit 1
 
   publish:
     needs: [test, build]
