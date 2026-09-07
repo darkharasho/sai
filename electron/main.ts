@@ -410,6 +410,28 @@ function createWindow() {
   mainWindow.on('maximize', () => mainWindow?.webContents.send('window:maximizedChange', true));
   mainWindow.on('unmaximize', () => mainWindow?.webContents.send('window:maximizedChange', false));
 
+  // Black-screen forensics. A blank window has three distinct causes that look
+  // identical from the outside: the renderer died, the renderer is alive but
+  // wedged (no paint), or the GPU/viz process died and took compositing with
+  // it. None of them left a trace anywhere before this — no crash dump, no log
+  // line — so a report of "it went black" was unfalsifiable. Record which one
+  // it was at the moment it happens.
+  mainWindow.webContents.on('render-process-gone', (_e, details) => {
+    devlog('lifecycle', 'renderProcessGone', {
+      reason: details.reason,
+      exitCode: details.exitCode,
+    });
+  });
+  mainWindow.webContents.on('unresponsive', () => {
+    devlog('lifecycle', 'unresponsive', { at: 'mainWindow' });
+  });
+  mainWindow.webContents.on('responsive', () => {
+    devlog('lifecycle', 'responsive', { at: 'mainWindow' });
+  });
+  mainWindow.webContents.on('did-fail-load', (_e, errorCode, errorDescription, validatedURL, isMainFrame) => {
+    devlog('lifecycle', 'didFailLoad', { errorCode, errorDescription, validatedURL, isMainFrame });
+  });
+
   initFocusTracking(mainWindow);
   // Focus overlay (off by default; spec 2026-06-11-focus-overlay-design.md).
   // Single instance across re-registration, destroyed in the close handler.
@@ -1318,6 +1340,20 @@ app.whenReady().then(() => {
   });
   createWindow();
 });
+// The GPU/viz process death is the one black-screen cause the window's own
+// events can't see: the renderer stays alive and healthy, it just has nowhere
+// to present frames. Chromium restarts the process silently, so without this
+// the only evidence is a window that stopped painting.
+app.on('child-process-gone', (_e, details) => {
+  devlog('lifecycle', 'childProcessGone', {
+    type: details.type,
+    reason: details.reason,
+    exitCode: details.exitCode,
+    serviceName: details.serviceName,
+    name: details.name,
+  });
+});
+
 let _quitInProgress = false;
 app.on('before-quit', (e) => {
   // Process-level fallback for exit paths that bypass the window close handler.

@@ -2,6 +2,31 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import './styles/fonts';
 import './styles/globals.css';
+import { ErrorBoundary } from './ErrorBoundary';
+import { heapStats } from './heapStats';
+
+// Anything that escapes React — event handlers, timers, awaited promises — never
+// reaches componentDidCatch. Those throws don't blank the window on their own,
+// but they're the breadcrumbs that precede one, and until now they vanished into
+// a devtools console nobody had open.
+window.addEventListener('error', (e) => {
+  window.sai?.devlog?.('windowError', {
+    message: String(e.message),
+    source: e.filename,
+    line: e.lineno,
+    col: e.colno,
+    stack: e.error?.stack?.slice(0, 4000),
+    ...heapStats(),
+  });
+});
+window.addEventListener('unhandledrejection', (e) => {
+  const reason = e.reason as { message?: string; stack?: string } | undefined;
+  window.sai?.devlog?.('unhandledRejection', {
+    message: String(reason?.message ?? e.reason),
+    stack: reason?.stack?.slice(0, 4000),
+    ...heapStats(),
+  });
+});
 
 const root = document.getElementById('root')!;
 const params = new URLSearchParams(window.location.search);
@@ -33,9 +58,13 @@ if (window.location.pathname.startsWith('/render-host') || params.has('render-ho
   // hundreds of module requests and seconds of load time.
   import('./App').then(({ default: App }) => {
     ReactDOM.createRoot(root).render(
-      <React.StrictMode>
-        <App />
-      </React.StrictMode>
+      // Outside StrictMode so it also catches whatever StrictMode's double
+      // invocation surfaces in development.
+      <ErrorBoundary>
+        <React.StrictMode>
+          <App />
+        </React.StrictMode>
+      </ErrorBoundary>
     );
   });
 }
