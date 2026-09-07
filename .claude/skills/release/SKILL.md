@@ -98,12 +98,16 @@ git commit -m "release: v{NEW_VERSION}"
 git tag v{NEW_VERSION}
 ```
 
-### Step 7: Push
+### Step 7: Push the commit (NOT the tag yet)
 
 ```bash
 git push
-git push --tags
 ```
+
+**Do not push the tag yet.** Pushing the tag starts the CI release workflow, and
+electron-builder will create its own release with an *empty body* if no release
+exists for that tag by the time it publishes. The release (with notes) must exist
+first — that is Step 8.
 
 ### Step 8: Create release
 
@@ -118,9 +122,10 @@ npx electron-builder --linux AppImage --win nsis --publish never
 
 This produces files in the `release/` directory including the AppImage, exe installer, and update manifest yml files.
 
-Then create a published release with artifacts attached:
+Push the tag, then create a published release with artifacts attached:
 
 ```bash
+git push --tags
 gh release create v{NEW_VERSION} \
   release/*.AppImage \
   release/*.exe \
@@ -139,13 +144,32 @@ Tell the user:
 
 #### If `local_build` is NOT set (default):
 
-Create a draft release:
+Create the draft release **before** pushing the tag, so the notes are already in
+place when CI's electron-builder looks for the release:
 
 ```bash
-gh release create v{NEW_VERSION} --draft --title "v{NEW_VERSION}" --notes "{RELEASE_NOTES}"
+gh release create v{NEW_VERSION} --draft --title "v{NEW_VERSION}" --notes-file - <<'NOTES'
+{RELEASE_NOTES}
+NOTES
 ```
 
 Use a heredoc for the notes body to preserve formatting.
+
+Verify the notes actually landed before releasing the tag:
+
+```bash
+gh release view v{NEW_VERSION} --json body --jq '.body | length'
+```
+
+If that prints `0`, fix the release body before continuing — a tag pushed against a
+bodyless release produces a release with no notes, and the in-app What's New modal
+then shows "No release notes available for this version."
+
+Only now push the tag to trigger CI:
+
+```bash
+git push --tags
+```
 
 Tell the user: "Draft release created. GitHub Actions is now building artifacts for Linux, Windows, and macOS."
 
@@ -174,6 +198,6 @@ gh run list --workflow=release.yml --limit=1 --json url --jq '.[0].url'
 
 ### Error recovery
 
-- If `git push` fails, the commit and tag are local only. Tell the user they can retry with `git push && git push --tags`.
-- If `gh release create` fails, the tag is already pushed. Tell the user they can create the release manually on GitHub.
+- If `git push` fails, the commit and tag are local only. Tell the user they can retry with `git push`.
+- If `gh release create` fails, the tag has NOT been pushed yet — nothing is published. Fix the release creation (or create the release manually on GitHub) and only then run `git push --tags`.
 - If the workflow fails (CI mode), the draft release exists but has no/partial artifacts. Tell the user to check the Actions tab and re-run the failed jobs.

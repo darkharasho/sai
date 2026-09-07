@@ -1,7 +1,7 @@
 node_modules
 dist
 dist-electron
-release
+/release/
 electron-dist
 *.AppImage
 .superpowers/

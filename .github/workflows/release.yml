@@ -89,4 +89,15 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           tag="${GITHUB_REF#refs/tags/}"
+          # electron-builder creates the release itself when the /release skill's
+          # draft isn't there yet, and that release has an empty body. An empty
+          # body makes the in-app What's New modal say "No release notes
+          # available", so fall back to GitHub's generated notes before publishing.
+          body="$(gh release view "$tag" --json body --jq '.body')"
+          if [ -z "$(printf '%s' "$body" | tr -d '[:space:]')" ]; then
+            echo "::warning::Release $tag has no notes; falling back to generated notes."
+            gh api "repos/$GITHUB_REPOSITORY/releases/generate-notes" \
+              -f tag_name="$tag" --jq '.body' > generated-notes.md
+            gh release edit "$tag" --notes-file generated-notes.md
+          fi
           gh release edit "$tag" --draft=false
