@@ -73,42 +73,47 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npx electron-builder ${{ matrix.args }} --publish always
 
-      # Signing on macOS intermittently dies while electron-builder imports
-      # CSC_LINK into a throwaway keychain:
+      # electron-builder's createKeychain() makes a temp keychain with a random
+      # password, then calls `security set-key-partition-list -k` with the p12
+      # password instead (app-builder-lib macCodeSign.js). macOS ignored the bad
+      # -k value until runner image 20260828 (Darwin 25.6) started enforcing it,
+      # so every mac build on the new image dies with
       #   security: SecKeychainUnlock: The user name or passphrase you entered
       #   is not correct.
-      # The same secrets and the same commit succeed on a plain re-run (v1.20.10
-      # and v1.20.12 both failed here, then passed untouched), so treat it as a
-      # flaky runner rather than a bad CSC_KEY_PASSWORD and retry before failing
-      # the release. Only mac retries -- a Linux or Windows failure is real, and
-      # re-running it just burns ten minutes.
-      - name: Build and publish Electron distributables (macOS, retries signing)
+      # Import the cert ourselves and point electron-builder at that keychain.
+      # Leaving CSC_LINK unset is the load-bearing part: macPackager then uses
+      # CSC_KEYCHAIN and never runs the broken createKeychain() path.
+      - name: Import macOS signing certificate
         if: matrix.platform == 'mac'
-        shell: bash
+        uses: apple-actions/import-codesign-certs@v7
+        with:
+          p12-file-base64: ${{ secrets.CSC_LINK }}
+          p12-password: ${{ secrets.CSC_KEY_PASSWORD }}
+          keychain: signing_temp
+
+      # electron-builder silently ad-hoc signs when it can't see an identity,
+      # which only surfaces minutes later as a notarization rejection.
+      - name: Verify macOS signing identity is visible
+        if: matrix.platform == 'mac'
+        run: |
+          if ! security find-identity -v -p codesigning signing_temp.keychain | grep -q "Developer ID Application"; then
+            echo "::error::No Developer ID Application identity in signing_temp.keychain"
+            security find-identity -v signing_temp.keychain
+            exit 1
+          fi
+
+      - name: Build and publish Electron distributables (macOS)
+        if: matrix.platform == 'mac'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CSC_LINK: ${{ secrets.CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          # Must keep the .keychain suffix: it goes straight to
+          # `security find-identity`, which doesn't resolve a bare name.
+          CSC_KEYCHAIN: signing_temp.keychain
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_ID_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: |
-          attempts=3
-          for i in $(seq 1 "$attempts"); do
-            echo "::group::electron-builder attempt $i of $attempts"
-            if npx electron-builder ${{ matrix.args }} --publish always; then
-              echo "::endgroup::"
-              exit 0
-            fi
-            echo "::endgroup::"
-            if [ "$i" -lt "$attempts" ]; then
-              echo "::warning::macOS build attempt $i failed; retrying in 30s"
-              sleep 30
-            fi
-          done
-          echo "::error::macOS build failed $attempts times; not a transient keychain error"
-          exit 1
+        run: npx electron-builder ${{ matrix.args }} --publish always
 
   publish:
     needs: [test, build]
