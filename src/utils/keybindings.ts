@@ -1,5 +1,6 @@
 export type KeybindingId =
   | 'palette.open'
+  | 'palette.sessions'
   | 'chatHistory.toggle'
   | 'search.toggle'
   | 'markdownPreview.toggle';
@@ -15,6 +16,7 @@ export interface KeybindingDef {
 
 export const KEYBINDINGS: KeybindingDef[] = [
   { id: 'palette.open',           label: 'Open command palette',        defaultCombo: 'Ctrl+K' },
+  { id: 'palette.sessions',       label: 'Open palette to Sessions',    defaultCombo: 'Ctrl+Shift+K' },
   { id: 'chatHistory.toggle',     label: 'Toggle chat history sidebar', defaultCombo: 'Ctrl+H' },
   { id: 'search.toggle',          label: 'Toggle search sidebar',       defaultCombo: 'Ctrl+Shift+F' },
   { id: 'markdownPreview.toggle', label: 'Toggle markdown preview',     defaultCombo: 'Ctrl+Shift+M' },

@@ -7,7 +7,7 @@ import SaiLogo from './SaiLogo';
 import { WorkspaceSquircle, StatusSlot } from './shared/WorkspaceSquircle';
 import { HOME_WORKSPACE_NAME, isHomeWorkspace } from '../lib/homeWorkspace';
 
-type PaletteMode = 'files' | 'commands' | 'grep' | 'sessions';
+export type PaletteMode = 'files' | 'commands' | 'grep' | 'sessions';
 
 interface GrepResult {
   file: string;
@@ -23,6 +23,8 @@ interface WorkspaceInfo {
 
 interface CommandPaletteProps {
   open: boolean;
+  /** Mode the palette lands on each time it opens. Defaults to files. */
+  initialMode?: PaletteMode;
   onClose: () => void;
   fileIndex: string[];
   slashCommands: SlashCommandInfo[];
@@ -102,10 +104,10 @@ const workspaceLabel = (projectPath: string): string =>
   isHomeWorkspace(projectPath) ? HOME_WORKSPACE_NAME : basename(projectPath);
 
 export default function CommandPalette({
-  open, onClose, fileIndex, slashCommands, workspaces,
+  open, initialMode = 'files', onClose, fileIndex, slashCommands, workspaces,
   projectPath, onFileOpen, onCommand, onWorkspaceSwitch,
 }: CommandPaletteProps) {
-  const [mode, setMode] = useState<PaletteMode>('files');
+  const [mode, setMode] = useState<PaletteMode>(initialMode);
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [grepResults, setGrepResults] = useState<GrepResult[]>([]);
@@ -118,13 +120,13 @@ export default function CommandPalette({
   useEffect(() => {
     if (open) {
       setQuery('');
-      setMode('files');
+      setMode(initialMode);
       setSelectedIndex(0);
       setGrepResults([]);
       setGrepLoading(false);
       setTimeout(() => inputRef.current?.focus(), 0);
     }
-  }, [open]);
+  }, [open, initialMode]);
 
   // Detect prefix-based mode switch
   const handleInputChange = useCallback((value: string) => {

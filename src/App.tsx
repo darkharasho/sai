@@ -15,7 +15,7 @@ import WorkspaceToast, { type ToastTone } from './components/WorkspaceToast';
 import { computeChatToasts } from './lib/chatToasts';
 import { computeChatNotificationCount, computeCompletedWorkspaces, isTurnErrored, workspaceSwitchViewStamps } from './lib/chatActivity';
 import { inferSessionProvider } from './lib/sessionProvider';
-import CommandPalette from './components/CommandPalette';
+import CommandPalette, { type PaletteMode } from './components/CommandPalette';
 import { useWhatsNew } from './hooks/useWhatsNew';
 import { useKeybinding } from './hooks/useKeybinding';
 import WhatsNewModal from './components/WhatsNewModal';
@@ -398,6 +398,7 @@ export default function App() {
     void window.sai.settingsSet('overlayMode', m);
   }, []);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const [commandPaletteMode, setCommandPaletteMode] = useState<PaletteMode>('files');
   const [fileIndex, setFileIndex] = useState<string[]>([]);
   const [toast, setToast] = useState<{ message: string; key: number; tone?: 'success' | 'error' } | null>(null);
   interface ChatToastEntry {
@@ -1860,8 +1861,17 @@ export default function App() {
   // Global Ctrl+K / Cmd+K handler for command palette
   useKeybinding('palette.open', useCallback((e) => {
     e.preventDefault();
+    setCommandPaletteMode('files');
     setCommandPaletteOpen(prev => !prev);
   }, []));
+
+  // Ctrl+Shift+K / Cmd+Shift+K opens the palette straight to the Sessions tab.
+  // Pressing it while already on Sessions closes the palette; from another tab it switches.
+  useKeybinding('palette.sessions', useCallback((e) => {
+    e.preventDefault();
+    setCommandPaletteOpen(prev => !(prev && commandPaletteMode === 'sessions'));
+    setCommandPaletteMode('sessions');
+  }, [commandPaletteMode]));
 
   // Build file index for command palette
   useEffect(() => {
@@ -6124,6 +6134,7 @@ export default function App() {
 
       {projectPath && <CommandPalette
         open={commandPaletteOpen}
+        initialMode={commandPaletteMode}
         onClose={() => setCommandPaletteOpen(false)}
         fileIndex={fileIndex}
         slashCommands={slashCommandsRef.current}
