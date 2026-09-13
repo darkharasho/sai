@@ -925,7 +925,8 @@ function ToolErrorDisplay({ message }: { message: string }) {
   );
 }
 
-function BashInOut({ output, live, showAll, onToggleShowAll }: {
+function BashInOut({ command, output, live, showAll, onToggleShowAll }: {
+  command?: string;
   output?: string;
   live: boolean;
   showAll: boolean;
@@ -939,12 +940,22 @@ function BashInOut({ output, live, showAll, onToggleShowAll }: {
     if (live && el && stickToBottomRef.current) el.scrollTop = el.scrollHeight;
   }, [live, output]);
 
-  if (!output) return null;
+  // The header truncates long commands with an ellipsis, so the expanded body
+  // always carries the full command.
+  const inRow = command ? (
+    <div className="bash-io-row bash-in-row">
+      <span className="bash-io-label bash-in-label">IN</span>
+      <div className="bash-io-command" data-testid="bash-full-command">{command}</div>
+    </div>
+  ) : null;
+
+  if (!output) return inRow ? <div className="tool-call-body bash-inout-body">{inRow}</div> : null;
   const parsed = parseToolError(output);
 
   if (parsed.isToolError) {
     return (
       <div className="tool-call-body bash-inout-body">
+        {inRow}
         <div className="bash-io-row bash-out-row">
           <span className="bash-io-label bash-out-label">OUT</span>
           <div className="bash-out-lines">
@@ -962,6 +973,7 @@ function BashInOut({ output, live, showAll, onToggleShowAll }: {
 
   return (
     <div className="tool-call-body bash-inout-body">
+      {inRow}
       <div className="bash-io-row bash-out-row">
         <span className="bash-io-label bash-out-label">OUT</span>
         <div
@@ -1092,7 +1104,7 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
     settled && parseToolError(toolCall.output ?? '').isToolError ? 'error' :
     settled ? 'done' : 'running';
 
-  const hasBody = isAskUserQuestion ? true : isTask ? true : isBash ? !!toolCall.output : isTodo ? true : isWebSearch ? !!webSearchQuery || !!toolCall.output : search ? (!!toolCall.output || !!query) : !!code;
+  const hasBody = isAskUserQuestion ? true : isTask ? true : isBash ? !!code || !!toolCall.output : isTodo ? true : isWebSearch ? !!webSearchQuery || !!toolCall.output : search ? (!!toolCall.output || !!query) : !!code;
 
   const sigClass =
     (toolCall.name.includes('Edit') || toolCall.name === 'Write' || toolCall.type === 'file_edit') ? 'tool-sig-wipe' :
@@ -1193,6 +1205,7 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
             >
             {isBash && (
               <BashInOut
+                command={code}
                 output={toolCall.output}
                 live={toolCall.liveOutput === true}
                 showAll={showAllOutput}
@@ -1731,6 +1744,9 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
             color: var(--text-muted);
           }
           .bash-io-command {
+            flex: 1;
+            min-width: 0;
+            user-select: text;
             font-family: 'Geist Mono', 'JetBrains Mono', monospace;
             font-size: 12px;
             color: var(--text);

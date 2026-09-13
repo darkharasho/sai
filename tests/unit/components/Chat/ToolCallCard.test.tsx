@@ -352,6 +352,17 @@ describe('ToolCallCard search rendering', () => {
     expect(container.querySelector('.bash-inout-body')).toBeTruthy();
   });
 
+  it('shows the full Bash command in the expanded body, even before output arrives', () => {
+    const command = 'cd /some/very/long/path && npx vitest run tests/unit/components/Chat/ToolCallCard.test.tsx --maxWorkers=2 --reporter=verbose';
+    const { container } = render(
+      <ToolCallCard toolCall={{ id: 'b2', type: 'terminal_command', name: 'Bash', input: JSON.stringify({ command }) }} />,
+    );
+    const header = container.querySelector('.tool-call-header') as HTMLElement;
+    expect(header.className).toContain('tool-call-header-expandable');
+    if (!container.querySelector('[data-testid="bash-full-command"]')) fireEvent.click(header);
+    expect(container.querySelector('[data-testid="bash-full-command"]')?.textContent).toBe(command);
+  });
+
   it('keeps a Codex web-search query readable in the expanded card', () => {
     const query = 'site:developers.googleblog.com Gemini CLI June 18 2026';
     const { container } = render(
