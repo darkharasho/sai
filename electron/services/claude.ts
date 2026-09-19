@@ -61,6 +61,14 @@ export function spawnEnv(): NodeJS.ProcessEnv {
   // for tty spawns (terminals) — with a tty, sudo prompts there and ignores it.
   const sudoAskpass = getSudoAskpassHelperPath();
   if (sudoAskpass) env.SUDO_ASKPASS = sudoAskpass;
+  // SAI's task-progress ring is driven entirely by TaskCreate/TaskUpdate calls,
+  // but the standalone `claude` binary (which we force via
+  // pathToClaudeCodeExecutable) stopped registering them after 2.1.196 — they
+  // now sit behind this flag, so the ring was permanently empty and the model
+  // kept telling users "task tools aren't available this session". Verified on
+  // 2.1.266 and 2.1.278: with the flag, TaskCreate/TaskGet/TaskList/TaskUpdate
+  // come back; without it, only Task/TaskStop. Respect an explicit user value.
+  if (env.CLAUDE_CODE_ENABLE_TODO_TOOLS == null) env.CLAUDE_CODE_ENABLE_TODO_TOOLS = '1';
   return env;
 }
 

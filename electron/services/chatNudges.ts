@@ -23,14 +23,23 @@ export const CHAT_RENDER_NUDGE =
  * (the interactive CLI injects "consider using TaskCreate" reminders; headless
  * SDK/stream-json sessions do not), which left SAI's task-progress ring —
  * driven by TaskCreate/TaskUpdate/TodoWrite calls — permanently empty.
+ *
+ * Deliberately tool-AGNOSTIC: which tracker is registered varies by backend and
+ * CLI version (Claude CLI 2.1.266 ships neither TaskCreate nor TodoWrite; Codex
+ * has its own plan tool, which SAI maps to synthetic TodoWrite calls). Naming
+ * one made the model hunt for a missing tool and narrate its absence to the
+ * user ("Task tools aren't available this session..."), so the wording asks for
+ * whatever tracker exists and says to stay quiet when none does.
  */
 export const CHAT_TASKS_NUDGE =
   'For any multi-step piece of work (3+ distinct steps, refactors, features, ' +
-  'debugging sessions), track your progress with the task tools: create tasks with ' +
-  'TaskCreate before you start, mark each in_progress/completed with TaskUpdate as ' +
-  'you go (or use TodoWrite where the task tools are unavailable). SAI renders a ' +
-  'live progress ring from these — without them the user cannot see plan progress. ' +
-  'Skip them only for single-step or purely conversational requests.';
+  'debugging sessions), track your progress with whichever task/todo tracking tool ' +
+  'this session registers (TaskCreate + TaskUpdate, TodoWrite, or your plan tool): ' +
+  'lay out the steps before you start and mark each in_progress/completed as you go. ' +
+  'SAI renders a live progress ring from those calls. Skip tracking for single-step ' +
+  'or purely conversational requests — and if no such tool is registered in this ' +
+  'session, just do the work without one and do not mention the tool or its absence ' +
+  'to the user.';
 
 export const CHAT_GITHUB_WATCH_NUDGE =
   'After you run `git push` (including pushing tags) or otherwise trigger a GitHub Actions ' +
