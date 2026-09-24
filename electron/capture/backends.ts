@@ -4,7 +4,10 @@ import { spawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { spectacleArgs, grimArgs, screencaptureArgs } from './cliArgs';
+import {
+  spectacleArgs, grimArgs, screencaptureArgs,
+  spectacleDisplayArgs, grimDisplayArgs, screencaptureDisplayArgs,
+} from './cliArgs';
 
 export async function listDesktopWindows(): Promise<Array<{ id: string; title: string }>> {
   const sources = await desktopCapturer.getSources({ types: ['window'], thumbnailSize: { width: 1, height: 1 } });
@@ -39,11 +42,16 @@ async function spawnToFile(bin: string, args: string[]): Promise<void> {
 
 export async function captureViaCli(
   backend: 'spectacle' | 'grim' | 'screencapture',
+  scope: 'window' | 'display' = 'window',
 ): Promise<{ base64: string; rgba: Buffer }> {
   const out = join(tmpdir(), `sai-capture-${backend}-${process.pid}.png`);
-  const argv = backend === 'spectacle' ? spectacleArgs(out)
+  const windowArgs = backend === 'spectacle' ? spectacleArgs(out)
     : backend === 'grim' ? grimArgs(out)
     : screencaptureArgs(out);
+  const displayArgs = backend === 'spectacle' ? spectacleDisplayArgs(out)
+    : backend === 'grim' ? grimDisplayArgs(out)
+    : screencaptureDisplayArgs(out);
+  const argv = scope === 'display' ? displayArgs : windowArgs;
   try {
     await spawnToFile(backend, argv);
     const png = await fs.readFile(out);
@@ -52,4 +60,20 @@ export async function captureViaCli(
   } finally {
     await fs.rm(out, { force: true }).catch((err) => { console.warn('capture: temp file cleanup failed', err); });
   }
+}
+
+// Whole-monitor capture. Uses the same CLI backend the chain picked; falls back
+// to Electron's screen source when no CLI tool is available.
+export async function captureDisplay(
+  cli: 'spectacle' | 'grim' | 'screencapture' | null,
+): Promise<{ base64: string; rgba: Buffer }> {
+  if (cli) return captureViaCli(cli, 'display');
+  const { width, height } = screen.getPrimaryDisplay().size;
+  const sources = await desktopCapturer.getSources({
+    types: ['screen'],
+    thumbnailSize: { width: width * 2, height: height * 2 },
+  });
+  const img = sources[0]?.thumbnail;
+  if (!img) throw new Error('no screen source available');
+  return { base64: img.toPNG().toString('base64'), rgba: img.toBitmap() };
 }

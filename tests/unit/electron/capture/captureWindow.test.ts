@@ -8,12 +8,16 @@ const baseDeps = (over: Partial<CaptureWindowDeps>): CaptureWindowDeps => ({
   listWindows: async () => [{ id: 'a', title: 'MyApp' }],
   captureSource: async () => ({ base64: 'AAA', rgba: CONTENT, empty: false }),
   captureCli: async () => ({ base64: 'CLI', rgba: CONTENT }),
+  captureDisplay: async () => ({ base64: 'SCREEN', rgba: CONTENT }),
   chain: ['desktopCapturer'],
   projectNames: ['MyApp'],
   selfSourceId: 'sai',
+  selfClasses: ['sai'],
   raiseWindow: async () => true,
   activeWindowTitle: async () => 'MyApp',
   selfTitle: 'SAI',
+  settleMs: 0,
+  sleep: async () => {},
   ...over,
 });
 
@@ -69,37 +73,6 @@ describe('captureWindowFlow', () => {
     expect(r).toEqual({ ok: false, message: expect.stringContaining('No window matching "conduit-ui"') });
   });
 
-  it('returns the portal frame without consulting the window list', async () => {
-    const listWindows = vi.fn(async () => []);
-    const r = await captureWindowFlow({ target: 'anything' }, baseDeps({
-      listWindows,
-      portal: async () => ({ ok: true, base64: 'PORTAL', rgba: CONTENT }),
-    }));
-    expect(r).toEqual({ ok: true, __mcpImage: { base64: 'PORTAL', mimeType: 'image/png' }, window: 'portal selection' });
-    expect(listWindows).not.toHaveBeenCalled();
-  });
-
-  it('surfaces a portal decline to the user instead of falling through', async () => {
-    const r = await captureWindowFlow({}, baseDeps({
-      portal: async () => ({ ok: false, reason: 'declined', message: 'Screen capture was not granted' }),
-    }));
-    expect(r).toEqual({ ok: false, message: expect.stringContaining('not granted') });
-  });
-
-  it('falls through to legacy backends when the portal is unavailable', async () => {
-    const r = await captureWindowFlow({}, baseDeps({
-      portal: async () => ({ ok: false, reason: 'unavailable', message: 'screen-capture portal unavailable' }),
-    }));
-    expect(r).toEqual({ ok: true, __mcpImage: { base64: 'AAA', mimeType: 'image/png' }, window: 'MyApp' });
-  });
-
-  it('falls through to legacy backends when the portal frame is blank', async () => {
-    const r = await captureWindowFlow({}, baseDeps({
-      portal: async () => ({ ok: true, base64: 'BLANKPNG', rgba: BLANK }),
-    }));
-    expect(r).toEqual({ ok: true, __mcpImage: { base64: 'AAA', mimeType: 'image/png' }, window: 'MyApp' });
-  });
-
   it('refuses the CLI fallback when the active window is SAI (never captures SAI)', async () => {
     const r = await captureWindowFlow({}, baseDeps({
       chain: ['desktopCapturer', 'spectacle'],
@@ -107,5 +80,113 @@ describe('captureWindowFlow', () => {
       activeWindowTitle: async () => 'SAI',
     }));
     expect(r).toEqual({ ok: false, message: expect.stringContaining('foreground') });
+  });
+
+  it('excludes SAI windows by class even when the title is a workspace name', async () => {
+    const r = await captureWindowFlow({}, baseDeps({
+      listWindows: async () => [{ id: 'other', title: 'axiom', klass: 'sai' }],
+    }));
+    expect(r).toEqual({ ok: false, message: expect.stringContaining('no external app window') });
+  });
+
+  describe('target handling (the portal cannot honour a target)', () => {
+    it('prefers the inferred window over the remembered portal selection', async () => {
+      const portal = vi.fn(async () => ({ ok: true as const, base64: 'PORTAL', rgba: CONTENT }));
+      const r = await captureWindowFlow({ target: 'MyApp' }, baseDeps({ portal }));
+      expect(r).toEqual({ ok: true, __mcpImage: { base64: 'AAA', mimeType: 'image/png' }, window: 'MyApp' });
+      expect(portal).not.toHaveBeenCalled();
+    });
+
+    it('never falls back to the portal when a target was given', async () => {
+      const portal = vi.fn(async () => ({ ok: true as const, base64: 'PORTAL', rgba: CONTENT }));
+      const r = await captureWindowFlow({ target: 'Firefox' }, baseDeps({
+        listWindows: async () => [{ id: 'a', title: 'MyApp' }],
+        portal,
+      }));
+      expect(r).toEqual({
+        ok: false,
+        candidates: ['MyApp'],
+        message: expect.stringContaining('No window matching "Firefox"'),
+      });
+      expect(portal).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('portal fallback', () => {
+    it('is used when no window could be inferred', async () => {
+      const r = await captureWindowFlow({}, baseDeps({
+        listWindows: async () => [],
+        portal: async () => ({ ok: true, base64: 'PORTAL', rgba: CONTENT }),
+      }));
+      expect(r).toEqual({ ok: true, __mcpImage: { base64: 'PORTAL', mimeType: 'image/png' }, window: 'portal selection' });
+    });
+
+    it('reports a decline rather than a generic no-window error', async () => {
+      const r = await captureWindowFlow({}, baseDeps({
+        listWindows: async () => [],
+        portal: async () => ({ ok: false, reason: 'declined', message: 'Screen capture was not granted' }),
+      }));
+      expect(r).toEqual({ ok: false, message: expect.stringContaining('not granted') });
+    });
+
+    it('reports no external window when the portal is unavailable', async () => {
+      const r = await captureWindowFlow({}, baseDeps({
+        listWindows: async () => [],
+        portal: async () => ({ ok: false, reason: 'unavailable', message: 'screen-capture portal unavailable' }),
+      }));
+      expect(r).toEqual({ ok: false, message: expect.stringContaining('no external app window') });
+    });
+
+    it('ignores a blank portal frame', async () => {
+      const r = await captureWindowFlow({}, baseDeps({
+        listWindows: async () => [],
+        portal: async () => ({ ok: true, base64: 'BLANKPNG', rgba: BLANK }),
+      }));
+      expect(r).toEqual({ ok: false, message: expect.stringContaining('no external app window') });
+    });
+  });
+
+  describe('focus settling', () => {
+    it('waits for a raised window to become active before capturing', async () => {
+      let active = 'SAI';
+      const r = await captureWindowFlow({}, baseDeps({
+        chain: ['spectacle'],
+        settleMs: 1000,
+        activeWindowTitle: async () => active,
+        raiseWindow: async () => { setTimeout(() => { active = 'MyApp'; }, 0); return true; },
+        sleep: async () => { await new Promise((res) => setTimeout(res, 0)); },
+      }));
+      expect(r).toEqual({ ok: true, __mcpImage: { base64: 'CLI', mimeType: 'image/png' }, window: 'MyApp' });
+    });
+
+    it('gives up once the settle budget is exhausted', async () => {
+      const r = await captureWindowFlow({}, baseDeps({
+        chain: ['spectacle'],
+        settleMs: 300,
+        activeWindowTitle: async () => 'Something Else',
+      }));
+      expect(r).toEqual({ ok: false, message: expect.stringContaining('foreground') });
+    });
+  });
+
+  describe('display capture', () => {
+    it('captures the whole monitor and skips window inference', async () => {
+      const listWindows = vi.fn(async () => []);
+      const r = await captureWindowFlow({ display: true }, baseDeps({ listWindows }));
+      expect(r).toEqual({ ok: true, __mcpImage: { base64: 'SCREEN', mimeType: 'image/png' }, window: 'display' });
+      expect(listWindows).not.toHaveBeenCalled();
+    });
+
+    it('reports a blank display frame', async () => {
+      const r = await captureWindowFlow({ display: true }, baseDeps({
+        captureDisplay: async () => ({ base64: 'S', rgba: BLANK }),
+      }));
+      expect(r).toEqual({ ok: false, message: expect.stringContaining('empty frame') });
+    });
+
+    it('errors when no display backend exists', async () => {
+      const r = await captureWindowFlow({ display: true }, baseDeps({ captureDisplay: undefined }));
+      expect(r).toEqual({ ok: false, message: expect.stringContaining('not available') });
+    });
   });
 });

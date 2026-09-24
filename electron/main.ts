@@ -17,8 +17,9 @@ import { readDirImpl, readFileImpl, readFileBufImpl, statFileImpl, writeFileImpl
 import { clampRect, type Rect } from './capturePage';
 import { selectBackendChain } from './capture/selectBackend';
 import { captureWindowFlow } from './capture/captureWindow';
-import { listDesktopWindows, captureDesktopSource, captureViaCli } from './capture/backends';
+import { listDesktopWindows, captureDesktopSource, captureViaCli, captureDisplay } from './capture/backends';
 import { capturePortalViaDbus } from './capture/portalDbus';
+import { listKdotoolWindows, activateKdotoolWindow, kdotoolActiveWindowTitle, kdotoolAvailable } from './capture/kdotool';
 import { activeWindowTitle, raiseWindowByTitle } from './capture/windowControl';
 import { gitStatusImpl, gitDiffImpl, gitStageImpl, gitUnstageImpl, gitCommitImpl, gitPushImpl, gitPullImpl } from './services/git';
 import { enrichedEnv, patchProcessPath } from './services/shellEnv';
@@ -959,28 +960,45 @@ function createWindow() {
     return image.toPNG().toString('base64'); // bare base64, no data: prefix
   });
 
-  ipcMain.handle('sai:capture-window', async (_evt, opts: { target?: string; workspace?: string } = {}) => {
+  ipcMain.handle('sai:capture-window', async (_evt, opts: { target?: string; workspace?: string; display?: boolean } = {}) => {
     const selfSourceId = mainWindow && !mainWindow.isDestroyed() ? mainWindow.getMediaSourceId() : undefined;
+    const has = (bin: string) => {
+      try { execFileSync('which', [bin], { stdio: 'ignore' }); return true; }
+      catch { return false; }
+    };
     const chain = selectBackendChain({
       platform: process.platform,
       sessionType: process.env.XDG_SESSION_TYPE,
       desktop: process.env.XDG_CURRENT_DESKTOP,
-      has: (bin) => {
-        try { execFileSync('which', [bin], { stdio: 'ignore' }); return true; }
-        catch { return false; }
-      },
+      has,
     });
+
+    // On KDE Wayland, wmctrl/xdotool only see XWayland windows. kdotool asks
+    // KWin directly, so it is the only source that enumerates and raises the
+    // real window list — and it reports window classes, which is how SAI's own
+    // windows are excluded regardless of the workspace name in the titlebar.
+    const useKdotool = process.platform === 'linux'
+      && (process.env.XDG_SESSION_TYPE ?? '').toLowerCase() === 'wayland'
+      && await kdotoolAvailable();
+
+    const cliBackend = chain.find((b) => b !== 'desktopCapturer') as
+      'spectacle' | 'grim' | 'screencapture' | undefined;
+
     return captureWindowFlow(
-      { target: opts.target },
+      { target: opts.target, display: opts.display },
       {
-        listWindows: listDesktopWindows,
+        listWindows: useKdotool ? listKdotoolWindows : listDesktopWindows,
         captureSource: captureDesktopSource,
         captureCli: captureViaCli,
+        captureDisplay: () => captureDisplay(cliBackend ?? null),
         chain,
         projectNames: projectNamesFor(opts.workspace),
         selfSourceId,
-        raiseWindow: raiseWindowByTitle,
-        activeWindowTitle,
+        selfClasses: ['sai'],
+        raiseWindow: useKdotool
+          ? (w) => activateKdotoolWindow(w.id)
+          : (w) => raiseWindowByTitle(w.title),
+        activeWindowTitle: useKdotool ? kdotoolActiveWindowTitle : activeWindowTitle,
         selfTitle: (mainWindow && !mainWindow.isDestroyed() ? mainWindow.getTitle() : undefined) ?? 'SAI',
         portal: process.platform === 'linux' && (process.env.XDG_SESSION_TYPE ?? '').toLowerCase() === 'wayland'
           ? () => capturePortalViaDbus(path.join(app.getPath('userData'), 'capture-portal.json'))

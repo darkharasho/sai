@@ -18,12 +18,12 @@ describe('selectBackendChain', () => {
     expect(selectBackendChain(env({ platform: 'linux', sessionType: 'x11' }))).toEqual(['desktopCapturer']);
   });
 
-  it('linux Wayland + KDE: desktopCapturer then spectacle', () => {
-    expect(selectBackendChain(env({ sessionType: 'wayland', desktop: 'KDE' }))).toEqual(['desktopCapturer', 'spectacle']);
+  it('linux Wayland + KDE: spectacle leads, desktopCapturer backs it up', () => {
+    expect(selectBackendChain(env({ sessionType: 'wayland', desktop: 'KDE' }))).toEqual(['spectacle', 'desktopCapturer']);
   });
 
-  it('linux Wayland + wlroots: desktopCapturer then grim', () => {
-    expect(selectBackendChain(env({ sessionType: 'wayland', desktop: 'sway' }))).toEqual(['desktopCapturer', 'grim']);
+  it('linux Wayland + wlroots: grim leads, desktopCapturer backs it up', () => {
+    expect(selectBackendChain(env({ sessionType: 'wayland', desktop: 'sway' }))).toEqual(['grim', 'desktopCapturer']);
   });
 
   it('omits fallbacks whose binary is missing', () => {
