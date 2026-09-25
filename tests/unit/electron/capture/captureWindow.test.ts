@@ -189,4 +189,46 @@ describe('captureWindowFlow', () => {
       expect(r).toEqual({ ok: false, message: expect.stringContaining('not available') });
     });
   });
+
+  describe('diagnostics', () => {
+    const trace = () => {
+      const events: Array<{ ev: string; data?: Record<string, unknown> }> = [];
+      return { events, log: (ev: string, data?: Record<string, unknown>) => { events.push({ ev, data }); } };
+    };
+    const names = (t: { events: Array<{ ev: string }> }) => t.events.map((e) => e.ev);
+
+    it('records the window list and the pick on a successful capture', async () => {
+      const t = trace();
+      await captureWindowFlow({}, baseDeps({ log: t.log }));
+      expect(names(t)).toEqual(['flow.start', 'windows.listed', 'infer.result', 'backend.ok']);
+      expect(t.events[1].data).toMatchObject({ count: 1 });
+      expect(t.events[2].data).toMatchObject({ kind: 'pick', pick: 'MyApp' });
+    });
+
+    it('records the active window at focus timeout, which is the diagnosis', async () => {
+      const t = trace();
+      await captureWindowFlow({}, baseDeps({
+        log: t.log,
+        chain: ['spectacle'],
+        activeWindowTitle: async () => 'SAI',
+      }));
+      const timeout = t.events.find((e) => e.ev === 'focus.timeout');
+      expect(timeout?.data).toMatchObject({ window: 'MyApp', activeTitle: 'SAI', raised: true });
+      expect(names(t)).toContain('result.focusFailed');
+    });
+
+    it('records why the portal was skipped for an explicit target', async () => {
+      const t = trace();
+      await captureWindowFlow({ target: 'MyApp' }, baseDeps({
+        log: t.log,
+        captureSource: async () => ({ base64: 'X', rgba: BLANK, empty: false }),
+      }));
+      expect(t.events.find((e) => e.ev === 'portal.skipped')?.data).toMatchObject({ why: 'explicit target' });
+      expect(names(t)).not.toContain('portal.attempt');
+    });
+
+    it('stays silent when no log sink is injected', async () => {
+      await expect(captureWindowFlow({}, baseDeps({}))).resolves.toMatchObject({ ok: true });
+    });
+  });
 });

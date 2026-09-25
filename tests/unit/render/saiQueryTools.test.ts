@@ -92,4 +92,46 @@ describe('handleSaiQueryToolRequest', () => {
     expect(passedRect).toMatchObject({ x: expect.any(Number), y: expect.any(Number), width: expect.any(Number), height: expect.any(Number) });
     document.body.removeChild(el);
   });
+
+  it('refuses capture_app when the asking workspace is not the one on screen', async () => {
+    const captureRegion = async () => 'AAAA';
+    const r = await handleSaiQueryToolRequest(
+      { tool: 'capture_app', input: {}, workspace: '/home/me/projects/alpha' },
+      { captureRegion, activeWorkspace: '/home/me/projects/beta' },
+    );
+    expect(r).toMatchObject({ ok: false });
+    expect((r as any).error).toContain('/home/me/projects/beta');
+    expect((r as any).error).toContain('/home/me/projects/alpha');
+  });
+
+  it('refuses inspect_element from a background workspace too', async () => {
+    const el = document.createElement('div');
+    el.id = 'bg';
+    document.body.appendChild(el);
+    const r = await handleSaiQueryToolRequest(
+      { tool: 'inspect_element', input: { selector: '#bg' }, workspace: '/home/me/a' },
+      { activeWorkspace: '/home/me/b' },
+    );
+    expect(r).toMatchObject({ ok: false });
+    expect((r as any).found).toBeUndefined();
+    document.body.removeChild(el);
+  });
+
+  it('allows capture_app when the workspaces differ only by the /var home symlink', async () => {
+    const captureRegion = async () => 'AAAA';
+    const r = await handleSaiQueryToolRequest(
+      { tool: 'capture_app', input: {}, workspace: '/home/me/projects/alpha' },
+      { captureRegion, activeWorkspace: '/var/home/me/projects/alpha/' },
+    );
+    expect(r).toMatchObject({ ok: true });
+  });
+
+  it('allows capture_app when the caller reports no workspace', async () => {
+    const captureRegion = async () => 'AAAA';
+    const r = await handleSaiQueryToolRequest(
+      { tool: 'capture_app', input: {} },
+      { captureRegion, activeWorkspace: '/home/me/projects/beta' },
+    );
+    expect(r).toMatchObject({ ok: true });
+  });
 });

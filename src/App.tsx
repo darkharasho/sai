@@ -1609,8 +1609,8 @@ export default function App() {
       if (req.tool === 'inspect_element' || req.tool === 'capture_app') {
         const saiAny = sai as { captureRegion?: (r: { x: number; y: number; width: number; height: number }) => Promise<string | null> };
         void handleSaiQueryToolRequest(
-          { tool: req.tool, input: req.input },
-          { captureRegion: saiAny.captureRegion },
+          { tool: req.tool, input: req.input, workspace: req.workspace },
+          { captureRegion: saiAny.captureRegion, activeWorkspace: activeProjectPathRef.current ?? undefined },
         ).then(
           (result) =>
             result === null

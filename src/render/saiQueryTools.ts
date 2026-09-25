@@ -47,14 +47,50 @@ export function inspectElement(input: InspectInput, doc: Document = document): I
 export interface SaiQueryDeps {
   /** Capture a region of the app window; returns bare base64 PNG or null. */
   captureRegion?: (rect: { x: number; y: number; width: number; height: number }) => Promise<string | null>;
+  /** Workspace currently shown in the window, for the foreground check below. */
+  activeWorkspace?: string;
 }
 
-export interface SaiQueryRequest { tool: string; input: any; }
+export interface SaiQueryRequest {
+  tool: string;
+  input: any;
+  /** Workspace of the session that asked. Absent for callers that have none. */
+  workspace?: string;
+}
 
 // Deliberately larger than any window; the main-process `sai:capture-region`
 // IPC clamps the rect to the live window's content bounds, so this captures
 // the whole window without the renderer needing to know its size.
 const OVERSIZED_CAPTURE_RECT = { x: 0, y: 0, width: 100000, height: 100000 };
+
+// This home is a symlink (/home/x -> /var/home/x) and the two halves of the app
+// disagree about which spelling they report, so workspaces can only be compared
+// after both are reduced to one form.
+function sameWorkspace(a: string, b: string): boolean {
+  const norm = (p: string) => p.replace(/^\/var(?=\/home\/)/, '').replace(/\/+$/, '');
+  return norm(a) === norm(b);
+}
+
+/**
+ * `inspect_element` and `capture_app` both read the live renderer — a single
+ * DOM showing whichever workspace is in the foreground. A session in a
+ * background workspace that calls them gets another workspace's screen and no
+ * hint that it did, which is how "the tool just screenshots SAI" happens: the
+ * answer is truthful about the window and silently wrong about the subject.
+ * Refuse instead, and name the workspace that is actually on screen.
+ */
+function foregroundError(req: SaiQueryRequest, deps: SaiQueryDeps): { ok: false; error: string } | null {
+  const asked = req.workspace;
+  const shown = deps.activeWorkspace;
+  if (!asked || !shown || sameWorkspace(asked, shown)) return null;
+  return {
+    ok: false,
+    error:
+      `${req.tool} reads the window as it is on screen, and SAI is currently showing ` +
+      `${shown}, not ${asked}. Switch to that workspace and ask again, or use ` +
+      `capture_window to capture a window by name.`,
+  };
+}
 
 /**
  * Handles the read-only SAI query tools. Returns the result object, or null if
@@ -66,9 +102,11 @@ export async function handleSaiQueryToolRequest(
   deps: SaiQueryDeps,
 ): Promise<unknown | null> {
   if (req.tool === 'inspect_element') {
-    return inspectElement(req.input ?? {});
+    return foregroundError(req, deps) ?? inspectElement(req.input ?? {});
   }
   if (req.tool === 'capture_app') {
+    const wrongWorkspace = foregroundError(req, deps);
+    if (wrongWorkspace) return wrongWorkspace;
     const capture = deps.captureRegion;
     if (!capture) return { ok: false, error: 'capture is unavailable' };
 

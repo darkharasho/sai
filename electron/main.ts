@@ -953,10 +953,17 @@ function createWindow() {
   }
 
   ipcMain.handle('sai:capture-region', async (_evt, rect: Rect): Promise<string | null> => {
-    if (!mainWindow || mainWindow.isDestroyed()) return null;
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      devlog('capture', 'region.noWindow');
+      return null;
+    }
     const bounds = mainWindow.getContentBounds();
     const clamped = clampRect(rect, { width: bounds.width, height: bounds.height });
     const image = await mainWindow.webContents.capturePage(clamped);
+    // capturePage always shoots the live window, whichever workspace it shows;
+    // the renderer's foreground check is what keeps that honest, so record what
+    // was actually shot to tell a real capture from one that slipped the check.
+    devlog('capture', 'region.shot', { clamped, bounds, title: mainWindow.getTitle() });
     return image.toPNG().toString('base64'); // bare base64, no data: prefix
   });
 
@@ -984,6 +991,17 @@ function createWindow() {
     const cliBackend = chain.find((b) => b !== 'desktopCapturer') as
       'spectacle' | 'grim' | 'screencapture' | undefined;
 
+    devlog('capture', 'window.request', {
+      target: opts.target ?? null,
+      workspace: opts.workspace ?? null,
+      display: opts.display === true,
+      platform: process.platform,
+      sessionType: process.env.XDG_SESSION_TYPE ?? null,
+      desktop: process.env.XDG_CURRENT_DESKTOP ?? null,
+      useKdotool,
+      cliBackend: cliBackend ?? null,
+    });
+
     return captureWindowFlow(
       { target: opts.target, display: opts.display },
       {
@@ -1003,6 +1021,7 @@ function createWindow() {
         portal: process.platform === 'linux' && (process.env.XDG_SESSION_TYPE ?? '').toLowerCase() === 'wayland'
           ? () => capturePortalViaDbus(path.join(app.getPath('userData'), 'capture-portal.json'))
           : undefined,
+        log: (event, data) => devlog('capture', event, data),
       },
     );
   });
