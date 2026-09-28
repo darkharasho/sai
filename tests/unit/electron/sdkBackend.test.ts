@@ -78,7 +78,7 @@ vi.mock('../../../electron/services/notify', () => ({
 
 // Import after mocks are set up
 import { SdkBackend } from '../../../electron/services/claudeBackend/sdkBackend';
-import { BACKGROUND_WAIT_SETTLE_MS, BACKGROUND_WAIT_IDLE_MS } from '../../../electron/services/waitClassifier';
+import { BACKGROUND_WAIT_IDLE_MS } from '../../../electron/services/waitClassifier';
 
 // fs mock — mockReadFileSync is overridden per-test that needs it; others leave it as-is
 const { mockReadFileSync } = vi.hoisted(() => ({
@@ -2426,17 +2426,19 @@ describe('SdkBackend', () => {
   const TASK_DONE = (id: string) => ({ type: 'system', subtype: 'task_notification', task_id: id, status: 'completed', output_file: '/tmp/o', summary: 'done', session_id: 's' });
   const TASK_START = (id: string) => ({ type: 'system', subtype: 'task_started', task_id: id, description: 'reviewer', session_id: 's' });
 
-  it('(51) the last live task settling closes the background wait with an unstick done', async () => {
+  it('(51) a drained ledger closes the background wait only at the idle backstop', async () => {
     const { backend } = await runBackgroundWaitTurn(
       [{ id: 't-1', type: 'subagent', status: 'running', description: 'reviewer' }],
       [TASK_START('t-1'), TASK_DONE('t-1')],
     );
-    // The wait is still open inside the settle window — a real resume normally
-    // lands here, and clearing early would race it.
+    // Draining proves nothing: the settling task is what wakes the model, so a
+    // resume is still expected here. Only task-frame silence closes the wait.
     backend._sweepOnce(Date.now());
     expect(emits.filter(e => e.type === 'done' && e.wait == null)).toHaveLength(0);
+    backend._sweepOnce(Date.now() + BACKGROUND_WAIT_IDLE_MS - 60_000);
+    expect(emits.filter(e => e.type === 'done' && e.wait == null)).toHaveLength(0);
 
-    backend._sweepOnce(Date.now() + BACKGROUND_WAIT_SETTLE_MS + 1_000);
+    backend._sweepOnce(Date.now() + BACKGROUND_WAIT_IDLE_MS + 1_000);
     const clearing = emits.filter(e => e.type === 'done' && e.wait == null);
     expect(clearing).toHaveLength(1);
     expect(clearing[0].turnSeq).toBeNull(); // never stale-droppable
@@ -2448,7 +2450,7 @@ describe('SdkBackend', () => {
       [{ id: 't-1', status: 'running' }, { id: 't-2', status: 'running' }],
       [TASK_START('t-1'), TASK_START('t-2'), TASK_DONE('t-1')],
     );
-    backend._sweepOnce(Date.now() + BACKGROUND_WAIT_SETTLE_MS + 1_000);
+    backend._sweepOnce(Date.now() + BACKGROUND_WAIT_IDLE_MS - 60_000);
     expect(emits.filter(e => e.type === 'done' && e.wait == null)).toHaveLength(0);
     backend.destroy();
   });
@@ -2481,13 +2483,13 @@ describe('SdkBackend', () => {
     backend.destroy();
   });
 
-  it('(55) reconcileScope closes a settled background wait instead of re-asserting it', async () => {
+  it('(55) reconcileScope closes an abandoned background wait instead of re-asserting it', async () => {
     const { backend } = await runBackgroundWaitTurn(
       [{ id: 't-1', status: 'running' }],
       [TASK_START('t-1'), TASK_DONE('t-1')],
     );
     const before = emits.length;
-    backend._nowForTest = () => Date.now() + BACKGROUND_WAIT_SETTLE_MS + 1_000;
+    backend._nowForTest = () => Date.now() + BACKGROUND_WAIT_IDLE_MS + 1_000;
     backend.reconcileScope(PROJECT, SCOPE);
     const after = emits.slice(before).filter(e => e.type === 'done');
     expect(after).toHaveLength(1);
@@ -2495,7 +2497,7 @@ describe('SdkBackend', () => {
     backend.destroy();
   });
 
-  it('(56) a resume beats the settle window: streaming_start re-arms and no clearing done fires', async () => {
+  it('(56) a resume beats the backstop: streaming_start re-arms and no clearing done fires', async () => {
     const { backend } = await runBackgroundWaitTurn(
       [{ id: 't-1', status: 'running' }],
       [
@@ -2505,7 +2507,7 @@ describe('SdkBackend', () => {
         { type: 'assistant', message: { content: [{ type: 'text', text: 'reviewer finished' }] } },
       ],
     );
-    backend._sweepOnce(Date.now() + BACKGROUND_WAIT_SETTLE_MS + 1_000);
+    backend._sweepOnce(Date.now() + BACKGROUND_WAIT_IDLE_MS + 1_000);
     expect(emits.filter(e => e.type === 'done' && e.wait == null)).toHaveLength(0);
     expect(emits.some(e => e.type === 'streaming_start' && e.turnSeq === 2)).toBe(true);
     backend.destroy();
@@ -2521,21 +2523,42 @@ describe('SdkBackend', () => {
       [TASK_START('t-1'), TASK_DONE('t-1')],
     );
     backend._sweepOnce(Date.now());
-    expect(notify.completion).not.toHaveBeenCalled(); // still inside the settle window
+    expect(notify.completion).not.toHaveBeenCalled(); // wait still open, resume may land
 
-    backend._sweepOnce(Date.now() + BACKGROUND_WAIT_SETTLE_MS + 1_000);
+    backend._sweepOnce(Date.now() + BACKGROUND_WAIT_IDLE_MS + 1_000);
     expect(notify.completion).toHaveBeenCalledTimes(1);
     expect(notify.completion.mock.calls[0][0]).toBe(PROJECT);
     backend.destroy();
   });
 
-  it('(58) a resume before the settle window means no clearing notification', async () => {
+  it('(58) a resume before the backstop means no clearing notification', async () => {
     const { backend, notify } = await runBackgroundWaitTurn(
       [{ id: 't-1', status: 'running' }],
       [TASK_START('t-1'), TASK_DONE('t-1'), { type: 'assistant', message: { content: [{ type: 'text', text: 'reviewer finished' }] } }],
     );
-    backend._sweepOnce(Date.now() + BACKGROUND_WAIT_SETTLE_MS + 1_000);
+    backend._sweepOnce(Date.now() + BACKGROUND_WAIT_IDLE_MS + 1_000);
     expect(notify.completion).not.toHaveBeenCalled();
+    backend.destroy();
+  });
+
+  // Live measurement 2026-09-28 (896 closes in the devlog): a drained ledger is
+  // NOT proof no resume is coming — it is the moment a resume is MOST likely,
+  // because a task settling is exactly what wakes the model. Measured autonomous
+  // resume latency AFTER the drain: median 56s, p75 105s, max 6291s. Closing at
+  // 15s produced 79 provable false "has finished" toasts and — worse — cleared
+  // pendingBackgroundResume, the only flag pinning the scope, so chat-switch /
+  // suspend / idle-sweep then closed the query and the resume died forever.
+  it('(67) a drained ledger does not close the wait — the resume typically lands a minute later', async () => {
+    const { backend } = await runBackgroundWaitTurn(
+      [{ id: 't-1', type: 'subagent', status: 'running', description: 'reviewer' }],
+      [TASK_START('t-1'), TASK_DONE('t-1')],
+    );
+    // Median measured resume latency, far past the old 15s settle window.
+    backend._sweepOnce(Date.now() + 56_000);
+    expect(emits.filter(e => e.type === 'done' && e.wait == null)).toHaveLength(0);
+    // And the scope is still pinned busy, so no teardown path can reap the
+    // session out from under the pending resume.
+    expect(backend.isWorkspaceBusy(PROJECT)).toBe(true);
     backend.destroy();
   });
 
@@ -2545,7 +2568,7 @@ describe('SdkBackend', () => {
       [TASK_START('t-1'), TASK_DONE('t-1')],
       { scope: 'swarm-task-1', kind: 'task' },
     );
-    backend._sweepOnce(Date.now() + BACKGROUND_WAIT_SETTLE_MS + 1_000);
+    backend._sweepOnce(Date.now() + BACKGROUND_WAIT_IDLE_MS + 1_000);
     expect(emits.filter(e => e.type === 'done' && e.wait == null)).toHaveLength(1);
     expect(notify.completion).not.toHaveBeenCalled();
     backend.destroy();

@@ -41,17 +41,13 @@ export interface ClassifyInput {
  *  abandoned (drop the pill, stop deferring the idle sweep). */
 export const WAKEUP_GRACE_MS = 60_000;
 
-/** Grace after the live task ledger drains to empty before a background wait
- *  is closed. The runtime normally re-invokes the model within a tick of the
- *  last task_notification; this window keeps that ordinary resume from being
- *  raced by our own clearing done. */
-export const BACKGROUND_WAIT_SETTLE_MS = 15_000;
-
-/** Backstop for a background wait the task ledger cannot see (CLI backend,
- *  older runtime, or a ledger entry that leaked). A genuinely running task
- *  emits task_progress/task_updated frames, so silence this long means the
- *  resume is never coming. Long enough not to cut off a real backgrounded
- *  build or test run. */
+/** The ONLY way a background wait closes without a real resume: no task
+ *  lifecycle frame for this long. A genuinely running task emits
+ *  task_progress/task_updated frames, so silence this long means the resume is
+ *  never coming. Long enough not to cut off a real backgrounded build or test
+ *  run — and deliberately the only closer: a ledger that drained to empty used
+ *  to close a wait 15s later, which raced (and usually lost to) the resume that
+ *  the draining task itself triggers. See _closeBackgroundWaitIfDue. */
 export const BACKGROUND_WAIT_IDLE_MS = 10 * 60_000;
 
 /** Task statuses that mean the work is over (SDKTaskUpdatedMessage.patch.status
