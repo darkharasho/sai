@@ -35,7 +35,8 @@ import { isImagePath, mimeForImagePath } from '../imageFiles';
 import { notifyCompletion, notifyApproval, notifyQuestion, notifyPlanReview } from '../notify';
 import { devlog } from '../devlog';
 import { classifyTurnEnd, isSchedulingTool, isBackgroundLaunch, isAsyncLaunchResult, countLiveBackgroundTasks,
-  isTerminalTaskStatus, WAKEUP_GRACE_MS, BACKGROUND_WAIT_IDLE_MS, type WaitMeta } from '../waitClassifier';
+  isTerminalTaskStatus, WAKEUP_GRACE_MS, BACKGROUND_WAIT_SETTLE_MS, BACKGROUND_WAIT_IDLE_MS,
+  type WaitMeta } from '../waitClassifier';
 import { clamp, type PermMode } from '../remote/clamp';
 import { parseUserMcpConfigPaths } from './userMcpConfig';
 import { loadExternalMcpForSdk } from './externalMcp';
@@ -140,15 +141,23 @@ interface ScopeSession {
    *  makes the runtime re-invoke the model, so a turn ending right after one
    *  is a wait even though the ledger is now empty and nothing new launched. */
   sawTaskSettled: boolean;
-  /** Any task-lifecycle frame seen in this session. Diagnostics only now: a
-   *  drained ledger no longer closes a wait either way (see
-   *  _closeBackgroundWaitIfDue), so only the idle backstop ever closes one. */
+  /** Any task-lifecycle frame seen in this session. False means the ledger is
+   *  blind (older runtime / no frames), so drain-to-zero proves nothing and the
+   *  wait pill rides the idle backstop instead of the settle window. */
   sawTaskFrames: boolean;
   /** Epoch ms of the last task-lifecycle frame, seeded when a wait opens. A
    *  genuinely running task keeps this moving (task_progress); silence past
    *  BACKGROUND_WAIT_IDLE_MS means the resume is never coming. */
   lastTaskEventAt: number;
-  /** Prompt timer for the idle backstop (the idle sweep is only 5-minutely). */
+  /** The background wait as the USER sees it: pill up, turn-end notification
+   *  withheld. Closed on the settle window (see _closeBackgroundWaitIfDue),
+   *  which is deliberately much sooner than the pin below is released. */
+  backgroundWaitOpen: boolean;
+  /** Epoch ms the live ledger drained to empty while the wait pill was up, or
+   *  null. The pill comes down BACKGROUND_WAIT_SETTLE_MS later. */
+  backgroundSettleAt: number | null;
+  /** Prompt timer for the settle/backstop checks (the idle sweep is only
+   *  5-minutely). */
   backgroundWaitTimer: ReturnType<typeof setTimeout> | null;
   /** Stored for the idle sweep so we never need to parse the scope key. */
   _projectPath: string;
@@ -616,7 +625,11 @@ export class SdkBackend implements ClaudeBackend {
       if (session.pendingBackgroundResume && this._closeBackgroundWaitIfDue(scopeKey, this._now())) return;
       // In a wait: re-assert the wait instead of clearing it, so a renderer
       // that lost the original wait done recovers the pill, not a dead chat.
-      if (session.pendingBackgroundResume) {
+      // Gated on the PILL, not the pin: once the settle window has closed the
+      // presentation, the scope stays pinned alive for a late resume but the
+      // user has already been told the turn ended — re-asserting a wait here
+      // would put the pill back up under a chat that looks finished.
+      if (session.backgroundWaitOpen) {
         this._emit({
           type: 'done', projectPath, scope: effectiveScope, turnSeq: null,
           wait: { kind: 'background', resumeInSeconds: null, taskCount: null },
@@ -909,6 +922,8 @@ export class SdkBackend implements ClaudeBackend {
     session.wakeupResumeInSeconds = null;
     session.pendingWakeup = false;
     session.pendingBackgroundResume = false;
+    session.backgroundWaitOpen = false;
+    session.backgroundSettleAt = null;
     session.wakeupDeadline = null;
     if (session.backgroundWaitTimer) {
       clearTimeout(session.backgroundWaitTimer);
@@ -1141,6 +1156,8 @@ export class SdkBackend implements ClaudeBackend {
       sawTaskSettled: false,
       sawTaskFrames: false,
       lastTaskEventAt: Date.now(),
+      backgroundWaitOpen: false,
+      backgroundSettleAt: null,
       backgroundWaitTimer: null,
       _projectPath: projectPath,
       _scopeName: scope ?? 'chat',
@@ -1263,88 +1280,135 @@ export class SdkBackend implements ClaudeBackend {
     this._armBackgroundWaitCheck(session, scopeKey);
   }
 
-  /** Schedule the idle-backstop check that closes an unresumable wait. Cheap
-   *  and idempotent — safe to call on every task frame, and each frame pushes
-   *  the backstop out because lastTaskEventAt just moved. */
+  /** Schedule the next background-wait check: the settle window while the pill
+   *  is still up over a drained ledger, otherwise the idle backstop that
+   *  releases the keep-alive pin. Cheap and idempotent — safe to call on every
+   *  task frame, and each frame pushes the backstop out because lastTaskEventAt
+   *  just moved. */
   private _armBackgroundWaitCheck(session: ScopeSession, scopeKey: string): void {
     if (!session.pendingBackgroundResume) return;
+    // Only a SIGHTED ledger can say the work is over. With no task frames at
+    // all we know nothing, so the pill rides the backstop with the pin.
+    const drained = session.backgroundWaitOpen && session.sawTaskFrames && session.liveTasks.size === 0;
+    session.backgroundSettleAt = drained ? (session.backgroundSettleAt ?? Date.now()) : null;
     if (session.backgroundWaitTimer) clearTimeout(session.backgroundWaitTimer);
+    const delay = drained ? BACKGROUND_WAIT_SETTLE_MS + 500 : BACKGROUND_WAIT_IDLE_MS + 500;
     session.backgroundWaitTimer = setTimeout(() => {
       session.backgroundWaitTimer = null;
       this._closeBackgroundWaitIfDue(scopeKey, Date.now());
-    }, BACKGROUND_WAIT_IDLE_MS + 500);
+    }, delay);
     session.backgroundWaitTimer.unref?.();
   }
 
   /**
-   * Close a background wait that can no longer resume, emitting the turn-end
-   * the runtime never will. ONE way in: no task-lifecycle activity at all for
-   * BACKGROUND_WAIT_IDLE_MS. A genuinely running task keeps emitting
-   * task_progress, so it is never cut off however long it runs.
+   * Advance a background wait toward closure. The wait is TWO things on two
+   * clocks, and collapsing them into one flag caused a regression in each
+   * direction (see tests 67-69):
    *
-   * There used to be a second, much faster way in — "the live ledger drained to
-   * empty and 15s passed". It was unsound, and measurably so. A task reaching a
-   * terminal status is precisely what makes the runtime re-invoke the model, so
-   * an empty ledger is the moment a resume is MOST likely, not least; the 15s
-   * window was meant to let the real resume win that race and lost it. Measured
-   * over 896 closes in the devlog (2026-09-28): every single one came from the
-   * drain path, the idle backstop never fired once, and the runtime resumed
-   * autonomously AFTER 79 of them — median 56s later, p75 105s. Each of those
-   * was a false "has finished", and because this method clears
-   * pendingBackgroundResume — the only flag pinning the scope in isWorkspaceBusy,
-   * _sweepOnce and setSessionId's busy-guard — a chat switch, workspace suspend
-   * or idle sweep could then close the query and kill the pending resume for
-   * good. That is the "says it's done and never comes back online" bug.
+   *   1. The PRESENTATION — the waiting pill, and the withheld turn-end
+   *      notification. Closed once the live ledger has been drained for
+   *      BACKGROUND_WAIT_SETTLE_MS (or at the backstop, if the ledger is
+   *      blind and never drained visibly). A drained ledger is exactly what a
+   *      genuinely finished turn looks like, and measured over 896 waits that
+   *      is ~91% of them, so making the user stare at a fake "waiting on
+   *      background" pill until the 10-minute backstop — with no completion
+   *      notification the whole time — is wrong far more often than it is right.
    *
-   * Deleting the drain path costs nothing it was protecting: when the ledger
-   * drains, lastTaskEventAt stops moving, so the backstop below closes the same
-   * wait anyway — 10 minutes later instead of 15 seconds, with a live elapsed
-   * pill in the meantime. Returns true if the wait was closed.
+   *   2. The PIN — pendingBackgroundResume, the only flag holding the scope in
+   *      isWorkspaceBusy, _sweepOnce and setSessionId's busy-guard. Released
+   *      ONLY at the idle backstop. The runtime can resume the turn only while
+   *      this query is alive, and the other ~9% resume a median 56s (p75 105s,
+   *      max 6291s) after the drain. Releasing the pin on the settle clock let
+   *      a chat switch, workspace suspend or idle sweep close the query in that
+   *      gap and kill the pending resume for good — the "says it's done and
+   *      never comes back online" bug.
+   *
+   * Split this way, the failure mode in each direction is survivable: a turn
+   * that resumes late gets its pill back in a session that is still alive,
+   * and a turn that is really over is reported as over within seconds.
+   * A genuinely running task keeps emitting task frames, which push both
+   * clocks out, so it is never cut off however long it runs. Returns true if
+   * anything closed.
    */
   private _closeBackgroundWaitIfDue(scopeKey: string, now: number): boolean {
     const session = this.sessions.get(scopeKey);
     if (!session || !session.pendingBackgroundResume) return false;
     // A turn is running again — the resume arrived, nothing to close.
     if (session.mapperState.streaming || session.awaitingInput) return false;
-    const idleMs = now - session.lastTaskEventAt;
-    if (idleMs < BACKGROUND_WAIT_IDLE_MS) return false;
 
-    devlog('claude-sdk', 'backgroundWait.close', {
-      scope: session._scopeName,
-      kind: session.kind,
-      idleMs,
-      liveTasks: session.liveTasks.size,
-      sawTaskFrames: session.sawTaskFrames,
-      turnSeq: session.turnSeq,
-    });
-    session.pendingBackgroundResume = false;
-    if (session.backgroundWaitTimer) {
-      clearTimeout(session.backgroundWaitTimer);
-      session.backgroundWaitTimer = null;
-    }
-    // turnSeq null: treated as "current" by the renderer's stale-turn guard, so
-    // this can never be dropped — the same unstick contract as interrupt().
-    this._emit({
-      type: 'done',
-      projectPath: session._projectPath,
-      scope: session._scopeName,
-      turnSeq: null,
-    });
-    // This close IS the turn end for the user — the runtime never sent one, so
-    // the result path's notification never fired. Same chat-kind gate as there
-    // (task/orchestrator scopes have their own opt-in path in the renderer).
-    // No duration/turns/cost: there is no result frame to read them from.
-    if (session.kind === 'chat') {
-      this._notify.completion(session._projectPath, { provider: 'Claude' }, {
-        site: 'closeBackgroundWait',
+    const idleMs = now - session.lastTaskEventAt;
+    const abandoned = idleMs >= BACKGROUND_WAIT_IDLE_MS;
+    const settled = session.backgroundSettleAt != null
+      && now - session.backgroundSettleAt >= BACKGROUND_WAIT_SETTLE_MS;
+    if (!settled && !abandoned) return false;
+
+    let closed = false;
+
+    // ── Stage 1: the turn ends for the user ────────────────────────────────
+    if (session.backgroundWaitOpen) {
+      devlog('claude-sdk', 'backgroundWait.close', {
         scope: session._scopeName,
         kind: session.kind,
+        stage: 'presentation',
+        idleMs,
+        settled,
+        abandoned,
+        liveTasks: session.liveTasks.size,
+        sawTaskFrames: session.sawTaskFrames,
         turnSeq: session.turnSeq,
-        activeTurnSeq: session.activeTurnSeq,
-        abandoned: true,
       });
+      session.backgroundWaitOpen = false;
+      session.backgroundSettleAt = null;
+      closed = true;
+      // turnSeq null: treated as "current" by the renderer's stale-turn guard,
+      // so this can never be dropped — same unstick contract as interrupt().
+      this._emit({
+        type: 'done',
+        projectPath: session._projectPath,
+        scope: session._scopeName,
+        turnSeq: null,
+      });
+      // This close IS the turn end for the user — the runtime never sent one,
+      // so the result path's notification never fired. Same chat-kind gate as
+      // there (task/orchestrator scopes have their own opt-in path in the
+      // renderer). No duration/turns/cost: there is no result frame to read.
+      if (session.kind === 'chat') {
+        this._notify.completion(session._projectPath, { provider: 'Claude' }, {
+          site: 'closeBackgroundWait',
+          scope: session._scopeName,
+          kind: session.kind,
+          turnSeq: session.turnSeq,
+          activeTurnSeq: session.activeTurnSeq,
+          settled,
+          abandoned,
+        });
+      }
     }
-    return true;
+
+    // ── Stage 2: the session stops being held open ─────────────────────────
+    if (abandoned) {
+      devlog('claude-sdk', 'backgroundWait.close', {
+        scope: session._scopeName,
+        kind: session.kind,
+        stage: 'pin',
+        idleMs,
+        liveTasks: session.liveTasks.size,
+        turnSeq: session.turnSeq,
+      });
+      session.pendingBackgroundResume = false;
+      session.backgroundSettleAt = null;
+      if (session.backgroundWaitTimer) {
+        clearTimeout(session.backgroundWaitTimer);
+        session.backgroundWaitTimer = null;
+      }
+      closed = true;
+    } else if (closed) {
+      // Pill down, pin still held: re-arm on the backstop clock so the pin is
+      // eventually released even if no further task frame ever arrives.
+      this._armBackgroundWaitCheck(session, scopeKey);
+    }
+
+    return closed;
   }
 
   private _startDrain(session: ScopeSession, projectPath: string, scope: string | undefined): void {
@@ -1440,6 +1504,8 @@ export class SdkBackend implements ClaudeBackend {
             });
             session.pendingWakeup = wait.kind === 'scheduled';
             session.pendingBackgroundResume = wait.kind === 'background';
+            session.backgroundWaitOpen = wait.kind === 'background';
+            session.backgroundSettleAt = null;
             session.wakeupDeadline = (wait.kind === 'scheduled' && typeof wait.resumeInSeconds === 'number')
               ? Date.now() + wait.resumeInSeconds * 1000 + WAKEUP_GRACE_MS
               : null;

@@ -41,13 +41,22 @@ export interface ClassifyInput {
  *  abandoned (drop the pill, stop deferring the idle sweep). */
 export const WAKEUP_GRACE_MS = 60_000;
 
-/** The ONLY way a background wait closes without a real resume: no task
- *  lifecycle frame for this long. A genuinely running task emits
- *  task_progress/task_updated frames, so silence this long means the resume is
- *  never coming. Long enough not to cut off a real backgrounded build or test
- *  run — and deliberately the only closer: a ledger that drained to empty used
- *  to close a wait 15s later, which raced (and usually lost to) the resume that
- *  the draining task itself triggers. See _closeBackgroundWaitIfDue. */
+/** Grace after the live task ledger drains to empty before the background wait
+ *  stops being SHOWN to the user — the pill comes down and the turn-end
+ *  notification fires. A drained ledger is ambiguous: it is what a finished
+ *  turn looks like (the common case, ~91% measured) and also the moment a
+ *  resume is most likely (the task settling is what wakes the model). We
+ *  resolve that ambiguity in the user's favour on this clock, and keep the
+ *  session ALIVE on the slower one below, so a late resume still lands in a
+ *  living conversation. See _closeBackgroundWaitIfDue. */
+export const BACKGROUND_WAIT_SETTLE_MS = 15_000;
+
+/** How long the session stays pinned alive after a background wait opens, with
+ *  no task-lifecycle frame at all. The runtime can only resume the turn while
+ *  this query is alive, and measured autonomous resume latency runs to p75
+ *  105s and beyond, so the pin must far outlast the pill above. A genuinely
+ *  running task emits task_progress/task_updated frames, each of which pushes
+ *  this out, so long-running work is never cut off. */
 export const BACKGROUND_WAIT_IDLE_MS = 10 * 60_000;
 
 /** Task statuses that mean the work is over (SDKTaskUpdatedMessage.patch.status
