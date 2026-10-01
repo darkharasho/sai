@@ -103,6 +103,7 @@ import {
 } from './services/metaWorkspace';
 import {
   syntheticRootFor, materialize, reconcile, deleteSyntheticRoot, resolveLinkName,
+  metaLinkRoots,
 } from './services/metaSyntheticRoot';
 import { renderHostSearch, type RenderHostParams } from './renderHostUrl';
 import { formTimeoutMs } from '../src/render/formTimeout';
@@ -1167,12 +1168,22 @@ function createWindow() {
     }
   });
 
+  // Roots a render target may resolve into besides the session cwd: temp dirs for
+  // scratch files, plus the linked project roots when cwd is a meta workspace's
+  // synthetic root (its contents are symlinks, so realpath'd containment would
+  // otherwise read every file in the workspace as an escape).
+  const renderAllowedRoots = (cwd: string): string[] => [
+    app.getPath('temp'),
+    ...osTempRoots(),
+    ...metaLinkRoots(cwd),
+  ];
+
   // Render a FILE-backed site (workspace path or inline html + baseDir) in a
   // hidden off-screen window via the sai-render:// protocol and screenshot it,
   // so the agent can SEE a real multi-file render. Returns base64 PNG or null.
   ipcMain.handle('render:captureFile', async (_event, args: { cwd?: string; path?: string; html?: string; baseDir?: string; width?: number; height?: number }) => {
     if (!args || typeof args.cwd !== 'string' || !args.cwd) return null;
-    const target = prepareRenderTarget({ cwd: args.cwd, path: args.path, html: args.html, baseDir: args.baseDir, allowedRoots: [app.getPath('temp'), ...osTempRoots()] });
+    const target = prepareRenderTarget({ cwd: args.cwd, path: args.path, html: args.html, baseDir: args.baseDir, allowedRoots: renderAllowedRoots(args.cwd) });
     if (!target.ok) return null;
     const token = mintRenderToken(renderProtocolStore, { root: target.root, inlineHtml: target.inlineHtml });
     const url = `sai-render://${token}/${encodeURIComponent(target.entry)}`;
@@ -1266,7 +1277,7 @@ function createWindow() {
       if (!args || typeof args.cwd !== 'string' || !args.cwd) {
         return { ok: false, error: 'missing cwd' };
       }
-      const target = prepareRenderTarget({ ...args, allowedRoots: [app.getPath('temp'), ...osTempRoots()] });
+      const target = prepareRenderTarget({ ...args, allowedRoots: renderAllowedRoots(args.cwd) });
       if (!target.ok) return { ok: false, error: target.error };
       const token = mintRenderToken(renderProtocolStore, {
         root: target.root,
@@ -1286,7 +1297,7 @@ function createWindow() {
   ipcMain.handle('render:openInBrowser', async (_event, arg: string | { cwd: string; path: string }) => {
     try {
       if (arg && typeof arg === 'object' && typeof arg.path === 'string') {
-        const target = prepareRenderTarget({ cwd: arg.cwd, path: arg.path, allowedRoots: [app.getPath('temp'), ...osTempRoots()] });
+        const target = prepareRenderTarget({ cwd: arg.cwd, path: arg.path, allowedRoots: renderAllowedRoots(arg.cwd) });
         if (!target.ok) return false;
         const file = path.join(target.root, target.entry);
         await shell.openExternal(pathToFileURL(file).toString());

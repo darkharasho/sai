@@ -85,3 +85,34 @@ function safeUnlinkLink(link: string) {
   }
   fs.unlinkSync(link);
 }
+
+/** Real paths of the project links that make up a meta workspace at `cwd`.
+ *  A meta synthetic root IS a directory of symlinks pointing at real repos, so
+ *  path-containment checks that realpath both ends (render's, notably) see every
+ *  file in the workspace as "outside" it. Handing them these roots restores
+ *  access to exactly the projects the user linked in — nothing wider.
+ *  Returns [] when `cwd` is not a synthetic root under `baseDir`. */
+export function metaLinkRoots(
+  cwd: string,
+  baseDir: string = path.join(os.homedir(), '.sai', 'meta'),
+): string[] {
+  let realCwd: string;
+  let realBase: string;
+  try {
+    realCwd = fs.realpathSync(cwd);
+    realBase = fs.realpathSync(baseDir);
+  } catch {
+    return [];
+  }
+  // Only a direct child of the meta base dir is a synthetic root.
+  if (path.dirname(realCwd) !== realBase) return [];
+  const roots = new Set<string>();
+  for (const name of readExistingLinks(realCwd)) {
+    try {
+      roots.add(fs.realpathSync(path.join(realCwd, name)));
+    } catch {
+      // Dangling link — grants nothing.
+    }
+  }
+  return [...roots];
+}
