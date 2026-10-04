@@ -257,6 +257,11 @@ function WelcomeTypewriter() {
 
 export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState<string | null>(null);
+  /** The MCP panel's chat when it isn't the active session — the swarm
+   *  orchestrator's nudge "Review" opens the panel on the orchestrator scope
+   *  the nudge reported on. Cleared when the panel closes. */
+  const [mcpPanelTarget, setMcpPanelTarget] = useState<{ projectPath: string; scope: string; provider: AIProvider } | null>(null);
+  useEffect(() => { if (sidebarOpen !== 'mcp') setMcpPanelTarget(null); }, [sidebarOpen]);
   const sidebarOpenRef = useRef<string | null>(null);
   const sidebarByWsRef = useRef<Map<string, string | null>>(new Map());
   const swarmSelectedByWsRef = useRef<Map<string, string>>(new Map());
@@ -2136,6 +2141,8 @@ export default function App() {
   const projectPath = activeProjectPath;
   const sessions = activeWorkspace?.sessions ?? [];
   const activeSession = activeWorkspace?.activeSession ?? createSession();
+  // Switching chats points the MCP panel back at the active session.
+  useEffect(() => { setMcpPanelTarget(null); }, [activeSession.id]);
   const openFiles = activeWorkspace?.openFiles ?? [];
   const activeFilePath = activeWorkspace?.activeFilePath ?? null;
 
@@ -4833,7 +4840,7 @@ export default function App() {
                       onSlashCommandsUpdate={(cmds: SlashCommandInfo[]) => { slashCommandsRef.current = cmds; }}
                       terminalTabs={ws.terminalTabs ?? []}
                       claudeScope={orchSessionId}
-                      onOpenMcpPanel={() => setSidebarOpen('mcp')}
+                      onOpenMcpPanel={() => { setMcpPanelTarget({ projectPath: wsPath, scope: orchSessionId, provider: orchProvider }); setSidebarOpen('mcp'); }}
                       claudeKind="orchestrator"
                       activeMetaRuntime={
                         activeMetaRuntime && activeMetaRuntime.syntheticRoot === wsPath
@@ -5070,7 +5077,7 @@ export default function App() {
                   key={ws.activeSession.id}
                   projectPath={wsPath}
                   claudeScope={ws.activeSession.id}
-                  onOpenMcpPanel={() => setSidebarOpen('mcp')}
+                  onOpenMcpPanel={() => { setMcpPanelTarget(null); setSidebarOpen('mcp'); }}
                   claudeKind={ws.activeSession.kind === 'task' ? 'task' : 'chat'}
                   permissionMode={permissionMode}
                   onPermissionChange={handlePermissionChange}
@@ -5954,9 +5961,9 @@ export default function App() {
               style={{ overflow: 'hidden' }}
             >
               <McpSidebar
-                provider={activeSession.aiProvider ?? aiProvider}
-                projectPath={projectPath}
-                scope={activeSession.id}
+                provider={mcpPanelTarget?.provider ?? activeSession.aiProvider ?? aiProvider}
+                projectPath={mcpPanelTarget?.projectPath ?? projectPath}
+                scope={mcpPanelTarget?.scope ?? activeSession.id}
               />
             </motion.div>
           )}

@@ -21,6 +21,17 @@ interface McpDetailProps {
   onRemove(row: McpRow): void;
 }
 
+const MASK = '••••••';
+/** Remote MCP URLs sometimes carry an API key: show the endpoint, mask every
+ *  query value, and drop credentials and the fragment. */
+export function maskUrl(raw: string): string {
+  let u: URL;
+  try { u = new URL(raw); } catch { return raw.split(/[?#]/)[0]; }
+  const keys = [...new Set(u.searchParams.keys())];
+  const query = keys.length ? `?${keys.map((k) => `${k}=${MASK}`).join('&')}` : '';
+  return `${u.protocol}//${u.host}${u.pathname}${query}`;
+}
+
 const SOURCE_LABEL = { user: 'global', project: 'project', plugin: 'plugin', claudeai: 'claude.ai' } as const;
 const TOOL_PREVIEW = 8;
 
@@ -92,7 +103,7 @@ export default function McpDetail(props: McpDetailProps) {
           auth={row.auth}
           canPasteCallback={caps.submitCallbackUrl}
           disabled={!live}
-          onOpenAgain={() => props.onSignIn(row)}
+          onRetry={() => props.onSignIn(row)}
           onCancel={() => props.onCancelAuth(row)}
           onSubmitCallbackUrl={(u) => props.onSubmitCallbackUrl(row, u)}
         />
@@ -120,7 +131,7 @@ export default function McpDetail(props: McpDetailProps) {
         <div className="mcp-config">
           {server?.command && <div><span className="mcp-ck">command:</span> {server.command}</div>}
           {server?.args?.length ? <div><span className="mcp-ck">args:</span> {server.args.join(' ')}</div> : null}
-          {url && <div><span className="mcp-ck">url:</span> {url}</div>}
+          {url && <div><span className="mcp-ck">url:</span> {maskUrl(url)}</div>}
           {server?.env && Object.keys(server.env).length > 0 && (
             <div><span className="mcp-ck">env:</span> {Object.keys(server.env).map((k) => `${k}=••••••`).join(' ')}</div>
           )}

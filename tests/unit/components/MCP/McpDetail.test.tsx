@@ -52,7 +52,7 @@ describe('McpDetail', () => {
   it('waiting: auth card with Open again / Copy link / Cancel and callback paste', () => {
     const row = rowOf({ name: 'cf', transport: 'streamable-http', enabled: true, source: 'user' }, { name: 'cf', status: 'needs-auth' }, { phase: 'waiting', authUrl: 'https://auth/x' });
     const { getByText, getByPlaceholderText } = render(<McpDetail row={row} capabilities={caps} available busy={false} error={null} {...h} />);
-    expect(getByText('Finish signing in in your browser')).toBeTruthy();
+    expect(getByText('Continue signing in from your browser')).toBeTruthy();
     expect(getByText('https://auth/x')).toBeTruthy();
     fireEvent.click(getByText('Copy link'));
     expect((window as any).sai.clipboardWrite).toHaveBeenCalledWith('https://auth/x');
@@ -67,7 +67,7 @@ describe('McpDetail', () => {
   it('auth status text is a polite live region', () => {
     const row = rowOf({ name: 'cf', transport: 'streamable-http', enabled: true, source: 'user' }, { name: 'cf', status: 'needs-auth' }, { phase: 'waiting', authUrl: 'https://auth/x' });
     const { container } = render(<McpDetail row={row} capabilities={caps} available busy={false} error={null} {...h} />);
-    expect(container.querySelector('.mcp-auth [aria-live="polite"]')?.textContent).toContain('Finish signing in in your browser');
+    expect(container.querySelector('.mcp-auth [aria-live="polite"]')?.textContent).toContain('Continue signing in from your browser');
   });
 
   it('non-http authUrl: error state, URL not shown, no copy link', () => {
@@ -128,5 +128,32 @@ describe('McpDetail', () => {
     const row = rowOf({ name: 'cf', transport: 'sse', enabled: true, source: 'user' }, { name: 'cf', status: 'needs-auth' }, { phase: 'waiting', authUrl: 'file:///x' });
     const { queryByText } = render(<McpDetail row={row} capabilities={caps} available busy={false} error={null} {...h} />);
     expect(queryByText('Waiting for browser sign-in…')).toBeNull();
+  });
+
+  it('Open again re-opens the existing sign-in link — it does not start a new sign-in', () => {
+    const row = rowOf({ name: 'cf', transport: 'streamable-http', enabled: true, source: 'user' }, { name: 'cf', status: 'needs-auth' }, { phase: 'waiting', authUrl: 'https://auth/x' });
+    const { getByText } = render(<McpDetail row={row} capabilities={caps} available busy={false} error={null} {...h} />);
+    fireEvent.click(getByText('Open again'));
+    expect((window as any).sai.openExternal).toHaveBeenCalledWith('https://auth/x');
+    expect(h.onSignIn).not.toHaveBeenCalled();
+  });
+
+  it('a timed-out sign-in Retry starts a new sign-in', () => {
+    const row = rowOf({ name: 'cf', transport: 'sse', enabled: true, source: 'user' }, { name: 'cf', status: 'needs-auth' }, { phase: 'timeout', authUrl: 'https://a' });
+    const { getByText } = render(<McpDetail row={row} capabilities={caps} available busy={false} error={null} {...h} />);
+    fireEvent.click(getByText('Retry'));
+    expect(h.onSignIn).toHaveBeenCalledWith(row);
+    expect((window as any).sai.openExternal).not.toHaveBeenCalled();
+  });
+
+  it('masks query-string values (and credentials) in the shown URL', () => {
+    const row = rowOf({ name: 'x', transport: 'streamable-http', url: 'https://user:pw@mcp.example.com/v1/mcp?api_key=SECRET&team=t1#frag', enabled: true, source: 'user' });
+    const { container } = render(<McpDetail row={row} capabilities={caps} available busy={false} error={null} {...h} />);
+    const text = container.querySelector('.mcp-config')!.textContent!;
+    expect(text).toContain('https://mcp.example.com/v1/mcp?api_key=••••••&team=••••••');
+    expect(text).not.toContain('SECRET');
+    expect(text).not.toContain('t1');
+    expect(text).not.toContain('pw');
+    expect(text).not.toContain('frag');
   });
 });

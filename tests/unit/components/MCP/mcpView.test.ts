@@ -6,11 +6,30 @@ import type { McpServer } from '../../../../src/types';
 const cfg = (over: Partial<McpServer>): McpServer => ({ name: 'x', transport: 'stdio', enabled: true, source: 'user', ...over });
 
 describe('mcpView', () => {
-  it('liveFor matches exact, then bare plugin name, then legacy <short>-<name>', () => {
+  it('liveFor matches exact, then the bare plugin name; no legacy <short>-<name> shape', () => {
     const live = { 'cloudflare-api': { name: 'cloudflare-api', status: 'connected' as const }, 'pw-browser': { name: 'pw-browser', status: 'failed' as const } };
     expect(liveFor('plugin:cloudflare:cloudflare-api', live)?.status).toBe('connected');
-    expect(liveFor('plugin:pw:browser', live)?.status).toBe('failed');
+    expect(liveFor('plugin:pw:browser', live)).toBeUndefined();
     expect(liveFor('nope', live)).toBeUndefined();
+    expect(liveFor('plugin:cloudflare:cloudflare-api', live, new Set(['cloudflare-api']))).toBeUndefined();
+  });
+
+  it("a plugin server's bare-name fallback never claims a same-named user server's live entry", () => {
+    const rows = buildMcpRows(
+      [cfg({ name: 'plugin:tools:github', source: 'plugin' }), cfg({ name: 'github', source: 'user' })],
+      { github: { name: 'github', status: 'needs-auth' } },
+      {},
+    );
+    const by = Object.fromEntries(rows.map((r) => [r.name, r]));
+    expect(by.github.live?.status).toBe('needs-auth');
+    expect(by['plugin:tools:github'].live).toBeUndefined();
+    expect(by['plugin:tools:github'].controlName).toBe('plugin:tools:github');
+  });
+
+  it('live-only servers with SDK scope "local" join the project group', () => {
+    const rows = buildMcpRows([], { mine: { name: 'mine', status: 'connected', scope: 'local' } }, {});
+    expect(rows[0].source).toBe('project');
+    expect(groupMcpRows(rows).map((g) => g.id)).toEqual(['project']);
   });
 
   it('builds rows with subtitles, dots and fixes', () => {

@@ -4,9 +4,10 @@ import type { McpAuthState } from '../../types';
 interface McpAuthCardProps {
   auth: McpAuthState;
   canPasteCallback: boolean;
-  /** Live actions (Open again / Retry) are off while no session is available. */
+  /** Live actions (Retry, Submit) are off while no session is available. */
   disabled?: boolean;
-  onOpenAgain(): void;
+  /** Start a new sign-in (after a timeout/error). */
+  onRetry(): void;
   onCancel(): void;
   onSubmitCallbackUrl(url: string): void;
 }
@@ -22,14 +23,14 @@ export function isHttpUrl(value: string | undefined): value is string {
   }
 }
 
-export default function McpAuthCard({ auth, canPasteCallback, disabled, onOpenAgain, onCancel, onSubmitCallbackUrl }: McpAuthCardProps) {
+export default function McpAuthCard({ auth, canPasteCallback, disabled, onRetry, onCancel, onSubmitCallbackUrl }: McpAuthCardProps) {
   const [pasteOpen, setPasteOpen] = useState(false);
   const [url, setUrl] = useState('');
   const safeUrl = isHttpUrl(auth.authUrl) ? auth.authUrl : undefined;
   // A waiting state whose link isn't a web address can never complete: surface it.
   const badLink = auth.phase === 'waiting' && !!auth.authUrl && !safeUrl;
   const waiting = auth.phase === 'waiting' && !badLink;
-  const title = waiting ? 'Finish signing in in your browser'
+  const title = waiting ? 'Continue signing in from your browser'
     : auth.phase === 'timeout' ? "Sign-in didn't complete"
     : 'Sign-in failed';
   const body = waiting
@@ -46,7 +47,11 @@ export default function McpAuthCard({ auth, canPasteCallback, disabled, onOpenAg
       </div>
       {safeUrl && <div className="mcp-auth-url" title={safeUrl}>{safeUrl}</div>}
       <div className="mcp-acts">
-        <button className="mcp-btn" disabled={disabled} onClick={onOpenAgain}>{waiting ? 'Open again' : 'Retry'}</button>
+        {/* Open again re-opens THIS sign-in's link: a new sign-in would mint a
+            new state/PKCE pair and fail an approval already under way. */}
+        {waiting && safeUrl
+          ? <button className="mcp-btn" onClick={() => { void window.sai.openExternal?.(safeUrl); }}>Open again</button>
+          : <button className="mcp-btn" disabled={disabled} onClick={onRetry}>Retry</button>}
         {safeUrl && (
           <button className="mcp-btn" onClick={() => { void window.sai.clipboardWrite?.(safeUrl); }}>Copy link</button>
         )}

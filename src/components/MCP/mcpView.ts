@@ -40,10 +40,17 @@ export function mcpDisplayName(name: string): string {
 
 const TRANSPORT_LABEL: Record<string, string> = { stdio: 'stdio', sse: 'sse', 'streamable-http': 'http', unknown: 'remote' };
 
-export function liveFor(name: string, live: Record<string, McpLiveServer>): McpLiveServer | undefined {
+/** Exact name first. A plugin server not reported under its full
+ *  `plugin:<short>:<name>` may fall back to its bare name — but never to an
+ *  entry in `claimed` (another config server's exact match). */
+export function liveFor(
+  name: string,
+  live: Record<string, McpLiveServer>,
+  claimed: ReadonlySet<string> = new Set(),
+): McpLiveServer | undefined {
   if (live[name]) return live[name];
   const m = PLUGIN_RE.exec(name);
-  return m ? live[m[2]] ?? live[`${m[1]}-${m[2]}`] : undefined;
+  return m && !claimed.has(m[2]) ? live[m[2]] : undefined;
 }
 
 function transportOfLive(l: McpLiveServer): McpRow['transport'] {
@@ -56,7 +63,9 @@ function transportOfLive(l: McpLiveServer): McpRow['transport'] {
 
 function sourceOfLive(l: McpLiveServer): McpSource {
   if (l.scope === 'claudeai') return 'claudeai';
-  if (l.scope === 'project') return 'project';
+  // `local` = ~/.claude.json projects[cwd].mcpServers: private to this
+  // project, so it belongs with the project's servers.
+  if (l.scope === 'project' || l.scope === 'local') return 'project';
   if (PLUGIN_RE.test(l.name)) return 'plugin';
   return 'user';
 }
@@ -93,11 +102,12 @@ export function buildMcpRows(
   auth: Record<string, McpAuthState>,
 ): McpRow[] {
   const rows: McpRow[] = [];
-  const claimed = new Set<string>();
+  // Exact matches claim their live entries first, so a fallback can't take one.
+  const claimed = new Set<string>(config.filter((s) => live[s.name]).map((s) => s.name));
 
   for (const server of config) {
     const source = server.source ?? 'user';
-    const l = liveFor(server.name, live);
+    const l = liveFor(server.name, live, claimed);
     if (l) claimed.add(l.name);
     const m = PLUGIN_RE.exec(server.name);
     const controlName = l?.name ?? server.name;
