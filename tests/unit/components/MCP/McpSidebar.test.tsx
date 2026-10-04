@@ -263,4 +263,51 @@ describe('McpSidebar', () => {
     expect(await findByText('reconnect down')).toBeTruthy();
     expect((getByPlaceholderText('http://localhost:…/callback?code=…') as HTMLInputElement).value).toBe('http://localhost:1/cb?code=1');
   });
+
+  it('add form saves with the panel project and scope, then returns to the list', async () => {
+    const { findByText, getByText, getByPlaceholderText } = render(<McpSidebar projectPath="/p" scope="s1" />);
+    fireEvent.click(await findByText('Add'));
+    fireEvent.change(getByPlaceholderText('my-server'), { target: { value: 'srv' } });
+    fireEvent.change(getByPlaceholderText('npx -y @my/server'), { target: { value: 'run' } });
+    fireEvent.click(getByText('Add Server'));
+    await waitFor(() => expect(mockSai.mcpAdd).toHaveBeenCalledWith(
+      { name: 'srv', transport: 'stdio', command: 'run', source: 'user' }, '/p', 's1'));
+    expect(await findByText('Installed')).toBeTruthy();
+  });
+
+  it('a save {error} is surfaced and the form keeps its input', async () => {
+    mockSai.mcpAdd.mockResolvedValueOnce({ error: 'config unreadable' });
+    const { findByText, getByText, getByPlaceholderText } = render(<McpSidebar projectPath="/p" scope="s1" />);
+    fireEvent.click(await findByText('Add'));
+    fireEvent.change(getByPlaceholderText('my-server'), { target: { value: 'srv' } });
+    fireEvent.change(getByPlaceholderText('npx -y @my/server'), { target: { value: 'run' } });
+    fireEvent.click(getByText('Add Server'));
+    expect(await findByText('config unreadable')).toBeTruthy();
+    expect((getByPlaceholderText('my-server') as HTMLInputElement).value).toBe('srv');
+  });
+
+  it('a rejected save is surfaced and the form stays open', async () => {
+    mockSai.mcpAdd.mockRejectedValueOnce(new Error('ipc down'));
+    const { findByText, getByText, getByPlaceholderText } = render(<McpSidebar projectPath="/p" scope="s1" />);
+    fireEvent.click(await findByText('Add'));
+    fireEvent.change(getByPlaceholderText('my-server'), { target: { value: 'srv' } });
+    fireEvent.change(getByPlaceholderText('npx -y @my/server'), { target: { value: 'run' } });
+    fireEvent.click(getByText('Add Server'));
+    expect(await findByText('ipc down')).toBeTruthy();
+    expect(getByText('Add MCP Server')).toBeTruthy();
+  });
+
+  it('edit saves in place and returns to the detail view', async () => {
+    mockSai.mcpList.mockResolvedValue([{ name: 'gh', transport: 'sse', url: 'https://gh/sse', enabled: true, source: 'user' }]);
+    mockSai.mcpStatus.mockResolvedValue(liveSnap({ gh: { name: 'gh', status: 'connected' } }));
+    const { findByText, getByText, getByDisplayValue } = render(<McpSidebar projectPath="/p" scope="s1" />);
+    fireEvent.click(await findByText('gh'));
+    fireEvent.click(getByText('Edit'));
+    expect((getByDisplayValue('gh') as HTMLInputElement).readOnly).toBe(true);
+    fireEvent.change(getByDisplayValue('https://gh/sse'), { target: { value: 'https://gh/new' } });
+    fireEvent.click(getByText('Save'));
+    await waitFor(() => expect(mockSai.mcpAdd).toHaveBeenCalledWith(
+      { name: 'gh', transport: 'sse', url: 'https://gh/new', source: 'user' }, '/p', 's1'));
+    expect(await findByText('Servers')).toBeTruthy();
+  });
 });

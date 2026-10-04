@@ -6,7 +6,7 @@ import { useMcpLive, EMPTY_CAPS } from './useMcpLive';
 import { buildMcpRows, groupMcpRows, needsAttention, type McpRow } from './mcpView';
 import McpDetail from './McpDetail';
 import { isHttpUrl } from './McpAuthCard';
-import McpAddServer from './McpAddServer';
+import McpServerForm from './McpServerForm';
 import McpRegistryDetail from './McpRegistryDetail';
 import McpIcon from './McpIcon';
 import CodexMcpConfigPanel from './CodexMcpConfigPanel';
@@ -134,11 +134,23 @@ export default function McpSidebar({ provider = 'claude', projectPath, scope }: 
   // A stale banner must not follow the user into another view or tab.
   useEffect(() => { setActionError(null); }, [view, tab]);
 
-  const handleAdd = async (config: McpServerConfig) => {
-    await window.sai.mcpAdd(config, projectPath, scope);
-    setView('list');
-    loadInstalled();
+  // Failures (an {error} result or a rejection) go to actionError and leave the
+  // form open so the user's input isn't lost. Never include config values here:
+  // headers and env may hold secrets.
+  const handleSave = async (config: McpServerConfig) => {
+    setActionError(null);
+    try {
+      const res = await window.sai.mcpAdd(config, projectPath, scope);
+      if (res?.error) { setActionError(res.error); return; }
+    } catch (e: any) {
+      setActionError(e?.message || 'Failed to save server');
+      return;
+    }
+    await loadInstalled(true);
+    // Edit returns to the server's detail view when it still resolves, else the list.
+    setView(view === 'edit' && selectedKey?.endsWith(`:${config.name}`) ? 'detail' : 'list');
   };
+  const handleAdd = (config: McpServerConfig) => handleSave(config);
 
   const withBusy = async (row: McpRow, fn: () => Promise<{ ok: boolean; error?: string } | void>) => {
     setBusy((b) => ({ ...b, [row.key]: true }));
@@ -272,8 +284,16 @@ export default function McpSidebar({ provider = 'claude', projectPath, scope }: 
       );
     }
 
-    if (view === 'add') {
-      return <McpAddServer onBack={() => setView('list')} onAdd={handleAdd} />;
+    if (view === 'add' || (view === 'edit' && selectedRow?.editable && selectedRow.server)) {
+      return (
+        <McpServerForm
+          mode={view as 'add' | 'edit'}
+          initial={view === 'edit' ? selectedRow!.server : undefined}
+          hasProject={!!projectPath}
+          onBack={() => setView(view === 'edit' ? 'detail' : 'list')}
+          onSubmit={handleSave}
+        />
+      );
     }
 
     if (view === 'detail' && selectedRow) {
@@ -291,7 +311,6 @@ export default function McpSidebar({ provider = 'claude', projectPath, scope }: 
             onCancelAuth={(r) => { live.cancelAuth(r.controlName).catch(() => {}); }}
             onSubmitCallbackUrl={(r, url) => withBusy(r, () => live.submitCallbackUrl(r.controlName, url))}
             onSignOut={(r) => withBusy(r, () => live.signOut(r.controlName))}
-            // The edit form arrives with the server form task; until then fall through to the list.
             onEdit={() => setView('edit')}
             onRemove={handleRemove}
         />

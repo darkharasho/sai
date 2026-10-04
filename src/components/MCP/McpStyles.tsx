@@ -55,6 +55,31 @@ export default function McpStyles() {
       .mcp-auth p { margin: 0 0 8px; font-size: 12px; color: var(--text-secondary); }
       .mcp-auth-url { font: 11px 'Geist Mono', monospace; color: var(--text-secondary); background: var(--surface-2); border-radius: 5px; padding: 5px 7px; margin-bottom: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
       .mcp-auth-paste-row { display: flex; gap: 6px; margin-top: 6px; }
+      .mcp-server-form { width: var(--sidebar-width); background: var(--surface-1); border-right: 1px solid var(--border-subtle); overflow-y: auto; flex-shrink: 0; }
+      .mcp-server-form .add-form { padding: 12px; }
+      .mcp-server-form .add-title { font-weight: 700; font-size: 14px; margin-bottom: 12px; }
+      .mcp-server-form .form-field { margin-bottom: 10px; }
+      .mcp-server-form .form-label { display: block; font-size: 10px; color: var(--text-muted); margin-bottom: 4px; font-weight: 600; }
+      .mcp-server-form .form-optional { color: var(--text-muted); }
+      .mcp-server-form .form-static { font-size: 11px; color: var(--text-secondary); }
+      .mcp-server-form .form-input { width: 100%; padding: 6px 10px; background: var(--surface-2); border: 1px solid var(--border-hairline); border-radius: 6px; color: var(--text); font-size: 11px; outline: none; font-family: inherit; }
+      .mcp-server-form .form-input.mono { font-family: 'Geist Mono', monospace; }
+      .mcp-server-form .form-input:focus { border-color: var(--accent); }
+      .mcp-server-form .form-input[readonly] { opacity: .65; cursor: default; }
+      .mcp-server-form .form-input[aria-invalid="true"] { border-color: var(--red); }
+      .mcp-server-form .form-error { margin-top: 4px; font-size: 10.5px; color: var(--red); overflow-wrap: anywhere; }
+      .mcp-server-form .transport-toggle { display: flex; gap: 4px; }
+      .mcp-server-form .transport-btn { padding: 4px 10px; background: var(--surface-4); border: none; border-radius: 4px; font-size: 10px; color: var(--text-muted); cursor: pointer; }
+      .mcp-server-form .transport-btn.active { background: var(--accent); color: var(--bg-primary); font-weight: 600; }
+      .mcp-server-form .env-row { display: flex; align-items: center; gap: 4px; margin-bottom: 4px; }
+      .mcp-server-form .env-key { flex: 2; }
+      .mcp-server-form .env-eq { color: var(--text-muted); font-size: 11px; }
+      .mcp-server-form .env-val { flex: 3; }
+      .mcp-server-form .env-remove { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 14px; padding: 0 4px; }
+      .mcp-server-form .env-remove:hover { color: var(--red); }
+      .mcp-server-form .add-env-btn { display: flex; align-items: center; gap: 3px; background: none; border: none; color: var(--accent); cursor: pointer; font-size: 10px; padding: 4px 0; }
+      .mcp-server-form .submit-btn { width: 100%; padding: 8px; background: var(--accent); color: var(--bg-primary); border: none; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 12px; margin-top: 4px; }
+      .mcp-server-form .submit-btn:hover { background: var(--accent-hover); }
       .mcp-error { margin: 8px 10px; padding: 6px 8px; font-size: 11px; color: var(--red); background: var(--surface-2); border: 1px solid color-mix(in srgb, var(--red) 40%, transparent); border-radius: 6px; overflow-wrap: anywhere; }
     `}</style>
   );
