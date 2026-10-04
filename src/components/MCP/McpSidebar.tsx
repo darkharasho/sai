@@ -156,7 +156,7 @@ export default function McpSidebar({ provider = 'claude', projectPath, scope }: 
   const handleSignIn = (row: McpRow) => withBusy(row, async () => {
     const res = await live.authenticate(row.controlName);
     if (res.ok && res.state === 'awaiting-browser' && !isHttpUrl(res.authUrl)) {
-      void live.cancelAuth(row.controlName);
+      live.cancelAuth(row.controlName).catch(() => {});
       return { ok: false, error: "The server's sign-in link isn't a web address, so it was not opened." };
     }
     return res.ok ? { ok: true } : res;
@@ -288,7 +288,7 @@ export default function McpSidebar({ provider = 'claude', projectPath, scope }: 
             onReconnect={handleRetry}
             onToggle={handleToggle}
             onSignIn={handleSignIn}
-            onCancelAuth={(r) => { void live.cancelAuth(r.controlName); }}
+            onCancelAuth={(r) => { live.cancelAuth(r.controlName).catch(() => {}); }}
             onSubmitCallbackUrl={(r, url) => withBusy(r, () => live.submitCallbackUrl(r.controlName, url))}
             onSignOut={(r) => withBusy(r, () => live.signOut(r.controlName))}
             // The edit form arrives with the server form task; until then fall through to the list.

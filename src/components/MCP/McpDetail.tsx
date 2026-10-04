@@ -2,7 +2,7 @@ import { ArrowLeft, RotateCcw, Trash2, Pencil, LogOut, Power } from 'lucide-reac
 import { useState } from 'react';
 import type { McpCapabilities } from '../../types';
 import { MCP_SOURCE_ICON, MCP_TERMINAL_HINT, type McpRow } from './mcpView';
-import McpAuthCard from './McpAuthCard';
+import McpAuthCard, { isHttpUrl } from './McpAuthCard';
 
 interface McpDetailProps {
   row: McpRow;
@@ -26,7 +26,7 @@ const TOOL_PREVIEW = 8;
 
 function pillText(row: McpRow): string {
   if (!row.enabled) return 'Disabled';
-  if (row.auth?.phase === 'waiting') return 'Waiting for browser sign-in…';
+  if (row.auth?.phase === 'waiting' && (!row.auth.authUrl || isHttpUrl(row.auth.authUrl))) return 'Waiting for browser sign-in…';
   switch (row.live?.status) {
     case 'connected': return row.live.serverInfo ? `Connected · ${row.live.serverInfo.name} v${row.live.serverInfo.version}` : 'Connected';
     case 'pending': return 'Connecting…';
@@ -63,7 +63,7 @@ export default function McpDetail(props: McpDetailProps) {
         </div>
         <span className="mcp-pill"><span className={`mcp-dot ${row.dot}`} />{pillText(row)}</span>
         <div className="mcp-acts">
-          {row.fix === 'sign-in' && caps.authenticate && row.auth?.phase !== 'waiting' && (
+          {row.fix === 'sign-in' && caps.authenticate && !row.auth && (
             <button className="mcp-btn pri" disabled={!live} onClick={() => props.onSignIn(row)}>Sign in</button>
           )}
           {row.fix === 'sign-in' && !caps.authenticate && (

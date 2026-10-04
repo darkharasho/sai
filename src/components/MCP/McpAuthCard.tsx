@@ -59,7 +59,7 @@ export default function McpAuthCard({ auth, canPasteCallback, disabled, onOpenAg
             <div className="mcp-auth-paste-row">
               <input className="form-input mono" aria-label="Redirect URL" value={url} onChange={(e) => setUrl(e.target.value)}
                 placeholder="http://localhost:…/callback?code=…" />
-              <button className="mcp-btn" disabled={!url.trim()} onClick={() => onSubmitCallbackUrl(url.trim())}>Submit</button>
+              <button className="mcp-btn" disabled={disabled || !url.trim()} onClick={() => { onSubmitCallbackUrl(url.trim()); setUrl(''); }}>Submit</button>
             </div>
           )}
         </div>

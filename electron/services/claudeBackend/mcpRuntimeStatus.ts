@@ -60,6 +60,7 @@ export function recordMcpRuntimeStatus(
     const status = normalizeStatus(s.status);
     const prev = b.get(s.name);
     b.set(s.name, prev && prev.status === status ? { ...prev } : { name: s.name, status });
+    if (status === 'connected') clearStaleAuth(projectPath, scope, s.name);
   }
 }
 
@@ -68,9 +69,19 @@ export function replaceMcpRuntimeStatus(projectPath: string, scope: string | und
   const b = new Map<string, McpLiveServer>();
   for (const raw of reported) {
     const live = toLive(raw);
-    if (live) b.set(live.name, live);
+    if (live) {
+      b.set(live.name, live);
+      if (live.status === 'connected') clearStaleAuth(projectPath, scope, live.name);
+    }
   }
   servers.set(keyOf(projectPath, scope), b);
+}
+
+/** A connected server needs no sign-in: drop a leftover timeout/error entry.
+ *  An in-flight `waiting` stays — its poller clears it and pushes. */
+function clearStaleAuth(projectPath: string, scope: string | undefined, name: string): void {
+  const b = auth.get(keyOf(projectPath, scope));
+  if (b?.get(name)?.phase && b.get(name)!.phase !== 'waiting') b.delete(name);
 }
 
 export function setMcpAuthState(projectPath: string, scope: string | undefined, name: string, state: McpAuthState | null): void {

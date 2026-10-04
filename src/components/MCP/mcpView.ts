@@ -61,7 +61,9 @@ function sourceOfLive(l: McpLiveServer): McpSource {
   return 'user';
 }
 
-function finish(base: Omit<McpRow, 'subtitle' | 'dot' | 'fix'>): McpRow {
+function finish(input: Omit<McpRow, 'subtitle' | 'dot' | 'fix'>): McpRow {
+  // A connected server is signed in: a leftover auth entry is stale.
+  const base = input.live?.status === 'connected' ? { ...input, auth: undefined } : input;
   const { live, auth, enabled, transport, source, pluginShort } = base;
   const prefix = source === 'plugin' && pluginShort ? pluginShort
     : source === 'claudeai' ? 'connector'

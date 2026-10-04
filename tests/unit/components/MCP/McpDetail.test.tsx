@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, fireEvent } from '@testing-library/react';
 import McpDetail from '../../../../src/components/MCP/McpDetail';
-import { buildMcpRows } from '../../../../src/components/MCP/mcpView';
+import { buildMcpRows, needsAttention } from '../../../../src/components/MCP/mcpView';
 
 Object.defineProperty(window, 'sai', { value: { clipboardWrite: vi.fn(), openExternal: vi.fn() }, writable: true });
 
@@ -112,5 +112,21 @@ describe('McpDetail', () => {
     const row = rowOf({ name: 'gh', transport: 'stdio', command: 'x', enabled: true, source: 'user' });
     const { getByText } = render(<McpDetail row={row} capabilities={caps} available busy={false} error="boom" {...h} />);
     expect(getByText('boom')).toBeTruthy();
+  });
+
+  it('connected beats a stale timeout auth: no card, Connected pill, no attention', () => {
+    const row = rowOf({ name: 'cf', transport: 'sse', enabled: true, source: 'user' }, { name: 'cf', status: 'connected' }, { phase: 'timeout', authUrl: 'https://a' });
+    const { getByText, queryByText, container } = render(<McpDetail row={row} capabilities={caps} available busy={false} error={null} {...h} />);
+    expect(getByText('Connected')).toBeTruthy();
+    expect(queryByText("Sign-in didn't complete")).toBeNull();
+    expect(container.querySelector('.mcp-auth')).toBeNull();
+    expect(row.fix).toBeUndefined();
+    expect(needsAttention(row)).toBe(false);
+  });
+
+  it('bad-link waiting: pill does not claim to wait for the browser', () => {
+    const row = rowOf({ name: 'cf', transport: 'sse', enabled: true, source: 'user' }, { name: 'cf', status: 'needs-auth' }, { phase: 'waiting', authUrl: 'file:///x' });
+    const { queryByText } = render(<McpDetail row={row} capabilities={caps} available busy={false} error={null} {...h} />);
+    expect(queryByText('Waiting for browser sign-in…')).toBeNull();
   });
 });

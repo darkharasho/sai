@@ -62,4 +62,20 @@ describe('mcpRuntimeStatus (per scope)', () => {
     setMcpAuthState('/p', 'a', 'cf', null);
     expect(getMcpRuntimeStatus('/p', 'a').auth).toEqual({});
   });
+
+  it('a connected record clears a stale timeout/error auth entry but not an in-flight waiting one', () => {
+    setMcpAuthState('/p', 'a', 'cf', { phase: 'timeout', authUrl: 'https://auth' });
+    setMcpAuthState('/p', 'a', 'db', { phase: 'error', error: 'x' });
+    setMcpAuthState('/p', 'a', 'gh', { phase: 'waiting', authUrl: 'https://auth' });
+    replaceMcpRuntimeStatus('/p', 'a', [
+      { name: 'cf', status: 'connected' }, { name: 'db', status: 'failed' }, { name: 'gh', status: 'connected' },
+    ]);
+    const { auth } = getMcpRuntimeStatus('/p', 'a');
+    expect(auth.cf).toBeUndefined();
+    expect(auth.db).toEqual({ phase: 'error', error: 'x' });
+    expect(auth.gh?.phase).toBe('waiting');
+    setMcpAuthState('/p', 'a', 'x', { phase: 'timeout' });
+    recordMcpRuntimeStatus('/p', 'a', [{ name: 'x', status: 'connected' }]);
+    expect(getMcpRuntimeStatus('/p', 'a').auth.x).toBeUndefined();
+  });
 });

@@ -143,6 +143,8 @@ describe('mcpView', () => {
       expect(groupMcpRows(rows)[0].id).toBe('attention');
     }
     const rows = buildMcpRows([cfg({ name: 'ok' })], { ok: { name: 'ok', status: 'connected' } }, { ok: { phase: 'error' } });
-    expect(groupMcpRows(rows)[0].id).toBe('attention');
+    // live `connected` beats a stale auth entry
+    expect(needsAttention(rows[0])).toBe(false);
+    expect(groupMcpRows(rows)[0].id).toBe('user');
   });
 });

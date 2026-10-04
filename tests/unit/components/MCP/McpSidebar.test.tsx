@@ -12,6 +12,10 @@ const mockSai = {
   mcpRuntimeStatus: vi.fn(),
   mcpAuthenticate: vi.fn().mockResolvedValue({ ok: true, state: 'awaiting-browser', authUrl: 'https://a' }),
   mcpReconnect: vi.fn().mockResolvedValue({ ok: true }),
+  mcpAuthCancel: vi.fn().mockResolvedValue(undefined),
+  mcpSubmitCallbackUrl: vi.fn().mockResolvedValue({ ok: true }),
+  mcpSignOut: vi.fn().mockResolvedValue({ ok: true }),
+  openExternal: vi.fn(),
   onMcpRuntimeStatus: vi.fn(() => () => {}),
   codexMcpRuntimeStatus: vi.fn().mockResolvedValue({ available: true, servers: [] }),
   codexMcpConfigGet: vi.fn().mockResolvedValue({ ok: true, snapshot: { version: 'v1', impact: 'global-user-config', servers: [] } }),
@@ -34,6 +38,9 @@ describe('McpSidebar', () => {
     mockSai.mcpStatus.mockResolvedValue(liveSnap());
     mockSai.mcpAuthenticate.mockResolvedValue({ ok: true, state: 'awaiting-browser', authUrl: 'https://a' });
     mockSai.mcpReconnect.mockResolvedValue({ ok: true });
+    mockSai.mcpAuthCancel.mockResolvedValue(undefined);
+    mockSai.mcpSubmitCallbackUrl.mockResolvedValue({ ok: true });
+    mockSai.mcpSignOut.mockResolvedValue({ ok: true });
     mockSai.onMcpRuntimeStatus.mockImplementation(() => () => {});
     mockSai.mcpRegistryList.mockResolvedValue([]);
     mockSai.codexMcpRuntimeStatus.mockResolvedValue({ available: true, servers: [] });
@@ -206,5 +213,54 @@ describe('McpSidebar', () => {
     const { findByLabelText, findByText } = render(<McpSidebar projectPath="/p" scope="s1" />);
     fireEvent.click(await findByLabelText('Sign in to cf'));
     expect(await findByText('ipc down')).toBeTruthy();
+  });
+
+  it('detail: cancel, submit callback and sign out pass controlName with projectPath and scope', async () => {
+    // Plugin config names map to a different live name, so controlName !== name.
+    mockSai.mcpList.mockResolvedValue([{ name: 'plugin:pw:browser', transport: 'sse', enabled: true, source: 'plugin' }]);
+    mockSai.mcpStatus.mockResolvedValue(liveSnap({ browser: { name: 'browser', status: 'needs-auth' } }, { auth: { browser: { phase: 'waiting', authUrl: 'https://a/x' } } }));
+    const { findByText, getByText, getByPlaceholderText } = render(<McpSidebar projectPath="/p" scope="s1" />);
+    fireEvent.click(await findByText('browser'));
+    fireEvent.click(getByText('Cancel'));
+    expect(mockSai.mcpAuthCancel).toHaveBeenCalledWith('/p', 's1', 'browser');
+    fireEvent.click(getByText('Paste redirect URL'));
+    fireEvent.change(getByPlaceholderText('http://localhost:…/callback?code=…'), { target: { value: 'http://localhost:1/cb?code=1' } });
+    fireEvent.click(getByText('Submit'));
+    await waitFor(() => expect(mockSai.mcpSubmitCallbackUrl).toHaveBeenCalledWith('/p', 's1', 'browser', 'http://localhost:1/cb?code=1'));
+  });
+
+  it('detail: sign out passes controlName', async () => {
+    mockSai.mcpList.mockResolvedValue([{ name: 'plugin:pw:browser', transport: 'sse', enabled: true, source: 'plugin' }]);
+    mockSai.mcpStatus.mockResolvedValue(liveSnap({ browser: { name: 'browser', status: 'connected' } }));
+    const { findByText, getByText } = render(<McpSidebar projectPath="/p" scope="s1" />);
+    fireEvent.click(await findByText('browser'));
+    fireEvent.click(getByText('Sign out'));
+    await waitFor(() => expect(mockSai.mcpSignOut).toHaveBeenCalledWith('/p', 's1', 'browser'));
+  });
+
+  it('sign-in returning a non-http authUrl cancels, shows the error and opens nothing', async () => {
+    mockSai.mcpList.mockResolvedValue([{ name: 'plugin:pw:browser', transport: 'sse', enabled: true, source: 'plugin' }]);
+    mockSai.mcpStatus.mockResolvedValue(liveSnap({ browser: { name: 'browser', status: 'needs-auth' } }));
+    mockSai.mcpAuthenticate.mockResolvedValue({ ok: true, state: 'awaiting-browser', authUrl: 'javascript:alert(1)' });
+    const { findByLabelText, findByText } = render(<McpSidebar projectPath="/p" scope="s1" />);
+    fireEvent.click(await findByLabelText('Sign in to browser'));
+    expect(await findByText(/isn't a web address/)).toBeTruthy();
+    expect(mockSai.mcpAuthenticate).toHaveBeenCalledWith('/p', 's1', 'browser');
+    expect(mockSai.mcpAuthCancel).toHaveBeenCalledWith('/p', 's1', 'browser');
+    expect(mockSai.openExternal).not.toHaveBeenCalled();
+  });
+
+  it('an action error in a non-list view does not remount it (typed input survives)', async () => {
+    mockSai.mcpList.mockResolvedValue([{ name: 'cf', transport: 'sse', enabled: true, source: 'user' }]);
+    mockSai.mcpStatus.mockResolvedValue(liveSnap({ cf: { name: 'cf', status: 'needs-auth' } }, { auth: { cf: { phase: 'waiting', authUrl: 'https://a/x' } } }));
+    mockSai.mcpReconnect.mockRejectedValue(new Error('reconnect down'));
+    const { findByText, getByText, getByPlaceholderText } = render(<McpSidebar projectPath="/p" scope="s1" />);
+    fireEvent.click(await findByText('cf'));
+    fireEvent.click(getByText('Paste redirect URL'));
+    const input = getByPlaceholderText('http://localhost:…/callback?code=…') as HTMLInputElement;
+    fireEvent.change(input, { target: { value: 'http://localhost:1/cb?code=1' } });
+    fireEvent.click(getByText('Reconnect'));
+    expect(await findByText('reconnect down')).toBeTruthy();
+    expect((getByPlaceholderText('http://localhost:…/callback?code=…') as HTMLInputElement).value).toBe('http://localhost:1/cb?code=1');
   });
 });
