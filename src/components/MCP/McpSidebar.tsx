@@ -148,7 +148,7 @@ export default function McpSidebar({ provider = 'claude', projectPath, scope }: 
     }
     await loadInstalled(true);
     // Edit returns to the server's detail view when it still resolves, else the list.
-    setView(view === 'edit' && selectedKey?.endsWith(`:${config.name}`) ? 'detail' : 'list');
+    setView(view === 'edit' && selectedKey === `${config.source ?? 'user'}:${config.name}` ? 'detail' : 'list');
   };
   const handleAdd = (config: McpServerConfig) => handleSave(config);
 
@@ -290,6 +290,7 @@ export default function McpSidebar({ provider = 'claude', projectPath, scope }: 
           mode={view as 'add' | 'edit'}
           initial={view === 'edit' ? selectedRow!.server : undefined}
           hasProject={!!projectPath}
+          existing={installed}
           onBack={() => setView(view === 'edit' ? 'detail' : 'list')}
           onSubmit={handleSave}
         />
@@ -365,7 +366,7 @@ export default function McpSidebar({ provider = 'claude', projectPath, scope }: 
             <div className="mcp-unavailable">Live status unavailable — showing configuration only.</div>
           )}
           {!loading && !error && tab === 'installed' && actionError && (
-            <div className="mcp-error">{actionError}</div>
+            <div className="mcp-error" role="alert">{actionError}</div>
           )}
           {!loading && !error && tab === 'installed' && (
             <McpServerList
@@ -617,7 +618,7 @@ export default function McpSidebar({ provider = 'claude', projectPath, scope }: 
       {view === 'list' ? renderView() : (
         <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0, height: '100%' }}>
           {/* The detail view renders its own error; the container stays mounted so view state survives. */}
-          {actionError && view !== 'detail' && <div className="mcp-error">{actionError}</div>}
+          {actionError && view !== 'detail' && <div className="mcp-error" role="alert">{actionError}</div>}
           {renderView()}
         </div>
       )}

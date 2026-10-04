@@ -268,7 +268,7 @@ describe('McpSidebar', () => {
     const { findByText, getByText, getByPlaceholderText } = render(<McpSidebar projectPath="/p" scope="s1" />);
     fireEvent.click(await findByText('Add'));
     fireEvent.change(getByPlaceholderText('my-server'), { target: { value: 'srv' } });
-    fireEvent.change(getByPlaceholderText('npx -y @my/server'), { target: { value: 'run' } });
+    fireEvent.change(getByPlaceholderText('npx'), { target: { value: 'run' } });
     fireEvent.click(getByText('Add Server'));
     await waitFor(() => expect(mockSai.mcpAdd).toHaveBeenCalledWith(
       { name: 'srv', transport: 'stdio', command: 'run', source: 'user' }, '/p', 's1'));
@@ -280,7 +280,7 @@ describe('McpSidebar', () => {
     const { findByText, getByText, getByPlaceholderText } = render(<McpSidebar projectPath="/p" scope="s1" />);
     fireEvent.click(await findByText('Add'));
     fireEvent.change(getByPlaceholderText('my-server'), { target: { value: 'srv' } });
-    fireEvent.change(getByPlaceholderText('npx -y @my/server'), { target: { value: 'run' } });
+    fireEvent.change(getByPlaceholderText('npx'), { target: { value: 'run' } });
     fireEvent.click(getByText('Add Server'));
     expect(await findByText('config unreadable')).toBeTruthy();
     expect((getByPlaceholderText('my-server') as HTMLInputElement).value).toBe('srv');
@@ -291,7 +291,7 @@ describe('McpSidebar', () => {
     const { findByText, getByText, getByPlaceholderText } = render(<McpSidebar projectPath="/p" scope="s1" />);
     fireEvent.click(await findByText('Add'));
     fireEvent.change(getByPlaceholderText('my-server'), { target: { value: 'srv' } });
-    fireEvent.change(getByPlaceholderText('npx -y @my/server'), { target: { value: 'run' } });
+    fireEvent.change(getByPlaceholderText('npx'), { target: { value: 'run' } });
     fireEvent.click(getByText('Add Server'));
     expect(await findByText('ipc down')).toBeTruthy();
     expect(getByText('Add MCP Server')).toBeTruthy();

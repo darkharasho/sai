@@ -12,6 +12,8 @@ interface McpServerFormProps {
   initial?: McpServer;
   /** Offer the "This project" target. */
   hasProject: boolean;
+  /** Servers already configured; add mode rejects a name that exists in the chosen target. */
+  existing?: Array<{ name: string; source?: string }>;
   onBack(): void;
   onSubmit(config: McpServerConfig): void;
 }
@@ -20,6 +22,42 @@ const toPairs = (o?: Record<string, string>): Pair[] => Object.entries(o ?? {}).
 const fromPairs = (p: Pair[]) => Object.fromEntries(p.filter((x) => x.key.trim()).map((x) => [x.key.trim(), x.value]));
 /** A row with a value but no name would be dropped silently on save. */
 const hasNamelessRow = (p: Pair[]) => p.some((x) => !x.key.trim() && x.value !== '');
+
+/** Quote args that would not survive a whitespace split, so join/parse round-trip exactly. */
+export function joinArgs(args?: string[]): string {
+  return (args ?? []).map((a) => (a === '' || /[\s"']/.test(a) ? `"${a.replace(/[\\"]/g, '\\$&')}"` : a)).join(' ');
+}
+
+export function parseArgs(text: string): string[] {
+  const out: string[] = [];
+  let cur = '';
+  let has = false;
+  let quote: '"' | "'" | null = null;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (quote) {
+      if (c === quote) quote = null;
+      else if (quote === '"' && c === '\\' && (text[i + 1] === '"' || text[i + 1] === '\\')) cur += text[++i];
+      else cur += c;
+    } else if (c === '"' || c === "'") { quote = c; has = true; }
+    else if (/\s/.test(c)) { if (has || cur) out.push(cur); cur = ''; has = false; }
+    else cur += c;
+  }
+  if (has || cur) out.push(cur);
+  return out;
+}
+
+const hasDuplicateKey = (p: Pair[], fold: boolean) => {
+  const seen = new Set<string>();
+  for (const x of p) {
+    const k = x.key.trim();
+    if (!k) continue;
+    const id = fold ? k.toLowerCase() : k;
+    if (seen.has(id)) return true;
+    seen.add(id);
+  }
+  return false;
+};
 
 function PairEditor({ pairs, setPairs, keyPlaceholder, addLabel, label, error, errorId }: {
   pairs: Pair[]; setPairs(p: Pair[]): void; keyPlaceholder: string; addLabel: string; label: string;
@@ -56,13 +94,14 @@ function PairEditor({ pairs, setPairs, keyPlaceholder, addLabel, label, error, e
   );
 }
 
-export default function McpServerForm({ mode, initial, hasProject, onBack, onSubmit }: McpServerFormProps) {
+export default function McpServerForm({ mode, initial, hasProject, existing = [], onBack, onSubmit }: McpServerFormProps) {
   const editing = mode === 'edit';
   const uid = useId();
   const [name, setName] = useState(initial?.name ?? '');
   const [transport, setTransport] = useState<Transport>(initial?.transport ?? 'stdio');
   const [command, setCommand] = useState(initial?.command ?? '');
-  const [args, setArgs] = useState(initial?.args?.join(' ') ?? '');
+  const [args, setArgs] = useState(joinArgs(initial?.args))
+  const initialArgsText = joinArgs(initial?.args);
   const [url, setUrl] = useState(initial?.url ?? '');
   const [envVars, setEnvVars] = useState<Pair[]>(toPairs(initial?.env));
   const [headers, setHeaders] = useState<Pair[]>(toPairs(initial?.headers));
@@ -73,13 +112,17 @@ export default function McpServerForm({ mode, initial, hasProject, onBack, onSub
   const isStdio = transport === 'stdio';
   // Messages never include field values: headers and env commonly hold secrets.
   const errors = {
-    name: name.trim() ? undefined : 'Name is required.',
+    name: !name.trim() ? 'Name is required.'
+      : !editing && existing.some((e) => e.name === name.trim() && (e.source ?? 'user') === target)
+        ? `A server named ${name.trim()} already exists — open it to edit.` : undefined,
     command: isStdio && !command.trim() ? 'Command is required.' : undefined,
     url: isStdio ? undefined
       : !url.trim() ? 'URL is required.'
       : !isHttpUrl(url.trim()) ? 'URL must start with http:// or https://.' : undefined,
-    headers: !isStdio && hasNamelessRow(headers) ? 'Header name is required.' : undefined,
-    env: hasNamelessRow(envVars) ? 'Variable name is required.' : undefined,
+    headers: !isStdio && hasNamelessRow(headers) ? 'Header name is required.'
+      : !isStdio && hasDuplicateKey(headers, true) ? 'Header names must be unique.' : undefined,
+    env: hasNamelessRow(envVars) ? 'Variable name is required.'
+      : hasDuplicateKey(envVars, false) ? 'Variable names must be unique.' : undefined,
   };
   const isValid = !Object.values(errors).some(Boolean);
   const shown = (e?: string) => (attempted ? e : undefined);
@@ -93,7 +136,7 @@ export default function McpServerForm({ mode, initial, hasProject, onBack, onSub
       name: name.trim(),
       transport,
       ...(isStdio
-        ? { command: command.trim(), ...(args.trim() ? { args: args.trim().split(/\s+/) } : {}) }
+        ? { command: command.trim(), ...(args === initialArgsText && initial?.args?.length ? { args: initial.args } : parseArgs(args).length ? { args: parseArgs(args) } : {}) }
         : { url: url.trim(), ...(Object.keys(hdrs).length ? { headers: hdrs } : {}) }),
       ...(Object.keys(env).length ? { env } : {}),
       source: target,
@@ -170,7 +213,7 @@ export default function McpServerForm({ mode, initial, hasProject, onBack, onSub
                 {...fieldProps('command', errors.command)}
                 value={command}
                 onChange={e => setCommand(e.target.value)}
-                placeholder="npx -y @my/server"
+                placeholder="npx"
               />
               {fieldError('command', errors.command)}
             </div>
@@ -181,7 +224,7 @@ export default function McpServerForm({ mode, initial, hasProject, onBack, onSub
                 id={`${uid}-args`}
                 value={args}
                 onChange={e => setArgs(e.target.value)}
-                placeholder="--port 3000"
+                placeholder="-y @my/server --port 3000"
               />
             </div>
           </>
