@@ -83,6 +83,7 @@ import type { ChatMessage as ChatMessageType, ToolCall, PendingApproval, Pending
 import type { MetaWorkspaceRuntime, CodexEffort, CodexModelOption } from '../../types';
 import type { WaitMeta } from '../../../electron/services/waitClassifier';
 import { buildHelpMessage } from './helpText';
+import McpAuthNudge from './McpAuthNudge';
 import { buildTaskRegistry, TaskRegistryContext } from './taskRegistry';
 import { parseAiError, looksLikeApiError } from './parseAiError';
 import { buildMetaPreamble } from '../../lib/metaSystemPrompt';
@@ -174,6 +175,8 @@ interface ChatPanelProps {
    * the wrong process.
    */
   claudeScope?: string;
+  /** Opens the MCP sidebar (chat sign-in nudge "Review"). */
+  onOpenMcpPanel?: () => void;
   /** Optional: seed the pending-approval state on mount. Lets App.tsx hand off
    *  an already-pending approval when the user swaps into a session that
    *  fired approval_needed while its ChatPanel was unmounted. */
@@ -450,7 +453,7 @@ const THINKING_ROW_MOTION = {
 const LOAD_MORE_CHUNK = 30; // messages to load when scrolling up
 
 
-export default function ChatPanel({ projectPath, overlayControl, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, availableModels, claudeOverrideState, aiProvider, codexModel, onCodexModelChange, codexModels, onCodexModelsRefresh, codexPermission, onCodexPermissionChange, codexEffort, onCodexEffortChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, kimiModel, onKimiModelChange, kimiModels, kimiApprovalMode, onKimiApprovalModeChange, initialMessages, onMessagesChange, onTurnComplete, onClaudeSessionId, onGeminiSessionId, onKimiSessionId, onCodexSessionId, activeFilePath, onFileOpen, isActive, isStreaming = false, awaitingQuestion = false, initialDraft, onDraftChange, initialContextItems, onContextItemsChange, messageQueue = [], onQueueAdd, onQueueRemove, onQueueShift, onQueuePromote, sessionId, terminalTabs = [], onSlashCommandsUpdate, onInterceptSend, claudeScope = 'chat', claudeKind = 'chat', claudeOrchestratorContext, initialPendingApproval = null, renderToolCall, renderMessage, activeMetaRuntime, emptyStateVisual, conversationHeaderVisual, mentionInsertRef: mentionInsertRefProp, waiting = null }: ChatPanelProps) {
+export default function ChatPanel({ projectPath, overlayControl, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, availableModels, claudeOverrideState, aiProvider, codexModel, onCodexModelChange, codexModels, onCodexModelsRefresh, codexPermission, onCodexPermissionChange, codexEffort, onCodexEffortChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, kimiModel, onKimiModelChange, kimiModels, kimiApprovalMode, onKimiApprovalModeChange, initialMessages, onMessagesChange, onTurnComplete, onClaudeSessionId, onGeminiSessionId, onKimiSessionId, onCodexSessionId, activeFilePath, onFileOpen, isActive, isStreaming = false, awaitingQuestion = false, initialDraft, onDraftChange, initialContextItems, onContextItemsChange, messageQueue = [], onQueueAdd, onQueueRemove, onQueueShift, onQueuePromote, sessionId, terminalTabs = [], onSlashCommandsUpdate, onInterceptSend, claudeScope = 'chat', onOpenMcpPanel, claudeKind = 'chat', claudeOrchestratorContext, initialPendingApproval = null, renderToolCall, renderMessage, activeMetaRuntime, emptyStateVisual, conversationHeaderVisual, mentionInsertRef: mentionInsertRefProp, waiting = null }: ChatPanelProps) {
   const [messages, setMessagesRaw] = useState<ChatMessageType[]>(() => {
     const initial = initialMessages || [];
     // Anything present at mount is history, not a fresh arrival — a workspace/
@@ -2687,6 +2690,9 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
               request={pendingCodexMcpElicitation}
               onResolve={(decision) => { void resolveCodexMcpElicitation(pendingCodexMcpElicitation, decision); }}
             />
+          )}
+          {aiProvider === 'claude' && projectPath && (
+            <McpAuthNudge projectPath={projectPath} scope={claudeScope} onOpenMcpPanel={onOpenMcpPanel} />
           )}
           <ChatInput
             onSend={handleSend}

@@ -4833,6 +4833,7 @@ export default function App() {
                       onSlashCommandsUpdate={(cmds: SlashCommandInfo[]) => { slashCommandsRef.current = cmds; }}
                       terminalTabs={ws.terminalTabs ?? []}
                       claudeScope={orchSessionId}
+                      onOpenMcpPanel={() => setSidebarOpen('mcp')}
                       claudeKind="orchestrator"
                       activeMetaRuntime={
                         activeMetaRuntime && activeMetaRuntime.syntheticRoot === wsPath
@@ -5069,6 +5070,7 @@ export default function App() {
                   key={ws.activeSession.id}
                   projectPath={wsPath}
                   claudeScope={ws.activeSession.id}
+                  onOpenMcpPanel={() => setSidebarOpen('mcp')}
                   claudeKind={ws.activeSession.kind === 'task' ? 'task' : 'chat'}
                   permissionMode={permissionMode}
                   onPermissionChange={handlePermissionChange}
