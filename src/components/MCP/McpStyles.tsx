@@ -10,7 +10,8 @@ export default function McpStyles() {
       .mcp-info { flex: 1; min-width: 0; }
       .mcp-nm { font-size: 12.5px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
       .mcp-ds { font-size: 11px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-      .mcp-ds.err { color: #c9806c; }
+      .mcp-ds.err { color: color-mix(in srgb, var(--red) 70%, var(--text-muted)); }
+      .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
       .mcp-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
       .mcp-dot.ok { background: var(--green); }
       .mcp-dot.bad { background: var(--red); }
@@ -20,7 +21,7 @@ export default function McpStyles() {
       @keyframes mcp-pulse { to { opacity: .3; } }
       .mcp-btn { background: var(--surface-2); border: 1px solid var(--border-subtle); color: var(--text); border-radius: 6px; padding: 3px 9px; font-size: 11.5px; cursor: pointer; white-space: nowrap; }
       .mcp-btn:hover { border-color: var(--border-strong); }
-      .mcp-btn.pri { background: var(--accent); border-color: var(--accent); color: #111; font-weight: 600; }
+      .mcp-btn.pri { background: var(--accent); border-color: var(--accent); color: var(--bg-primary); font-weight: 600; }
       .mcp-btn.pri:hover { background: var(--accent-hover); }
       .mcp-btn.danger { color: var(--red); }
       .mcp-btn:disabled { opacity: .45; cursor: not-allowed; }

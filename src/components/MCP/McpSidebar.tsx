@@ -10,7 +10,6 @@ import McpRegistryDetail from './McpRegistryDetail';
 import McpIcon from './McpIcon';
 import CodexMcpConfigPanel from './CodexMcpConfigPanel';
 import SaiLogo from '../SaiLogo';
-import { DOT_MASK_URL } from '../../lib/assets';
 import type { AIProvider, McpServer, McpServerConfig, RegistryMcpServer } from '../../types';
 
 type Tab = 'installed' | 'browse';
@@ -49,8 +48,8 @@ export default function McpSidebar({ provider = 'claude', projectPath, scope }: 
   const [codexRuntime, setCodexRuntime] = useState<CodexMcpRuntimeStatus | null>(null);
   const [codexLoading, setCodexLoading] = useState(false);
 
-  const loadInstalled = async () => {
-    setLoading(true);
+  const loadInstalled = async (silent = false) => {
+    if (!silent) setLoading(true);
     setError(null);
     try {
       const result = await window.sai.mcpList(projectPath);
@@ -131,6 +130,9 @@ export default function McpSidebar({ provider = 'claude', projectPath, scope }: 
   const [busy, setBusy] = useState<Record<string, boolean>>({});
   const [actionError, setActionError] = useState<string | null>(null);
 
+  // A stale banner must not follow the user into another view or tab.
+  useEffect(() => { setActionError(null); }, [view, tab]);
+
   const handleAdd = async (config: McpServerConfig) => {
     await window.sai.mcpAdd(config, projectPath, scope);
     setView('list');
@@ -143,6 +145,8 @@ export default function McpSidebar({ provider = 'claude', projectPath, scope }: 
     try {
       const res = await fn();
       if (res && !res.ok) setActionError(res.error ?? 'Action failed');
+    } catch (e: any) {
+      setActionError(e?.message || 'Action failed');
     } finally {
       setBusy((b) => ({ ...b, [row.key]: false }));
     }
@@ -151,17 +155,24 @@ export default function McpSidebar({ provider = 'claude', projectPath, scope }: 
   const handleSignIn = (row: McpRow) => withBusy(row, () => live.authenticate(row.controlName));
   const handleRetry = (row: McpRow) => withBusy(row, () => live.reconnect(row.controlName));
   const handleToggle = (row: McpRow) => withBusy(row, async () => {
-    const res = await live.toggle(row.name, !row.enabled, row.source, row.controlName);
-    await loadInstalled();
-    return res;
+    try {
+      return await live.toggle(row.name, !row.enabled, row.source, row.controlName);
+    } finally {
+      await loadInstalled(true);
+    }
   });
   const handleRemove = async (row: McpRow) => {
     if (!row.removable) return;
-    const res = await window.sai.mcpRemove(row.name, row.source as 'user' | 'project', projectPath, scope);
-    if (res?.error) { setActionError(res.error); return; }
-    setView('list');
-    setSelectedKey(null);
-    loadInstalled();
+    setActionError(null);
+    try {
+      const res = await window.sai.mcpRemove(row.name, row.source as 'user' | 'project', projectPath, scope);
+      if (res?.error) { setActionError(res.error); return; }
+      setView('list');
+      setSelectedKey(null);
+      loadInstalled(true);
+    } catch (e: any) {
+      setActionError(e?.message || 'Failed to remove server');
+    }
   };
 
   const query = search.toLowerCase();
@@ -239,343 +250,340 @@ export default function McpSidebar({ provider = 'claude', projectPath, scope }: 
     );
   }
 
-  if (view === 'registry-detail' && selectedRegistryServer) {
-    return (
-      <>
-        <McpStyles />
+  const renderView = () => {
+    if (view === 'registry-detail' && selectedRegistryServer) {
+      return (
         <McpRegistryDetail
-          server={selectedRegistryServer}
-          onBack={() => { setView('list'); setSelectedRegistryServer(null); }}
-          onInstall={(config) => {
-            handleAdd(config);
-            setSelectedRegistryServer(null);
-          }}
+            server={selectedRegistryServer}
+            onBack={() => { setView('list'); setSelectedRegistryServer(null); }}
+            onInstall={(config) => {
+              handleAdd(config);
+              setSelectedRegistryServer(null);
+            }}
         />
-      </>
-    );
-  }
+      );
+    }
 
-  if (view === 'add') {
-    return <><McpStyles /><McpAddServer onBack={() => setView('list')} onAdd={handleAdd} /></>;
-  }
+    if (view === 'add') {
+      return <McpAddServer onBack={() => setView('list')} onAdd={handleAdd} />;
+    }
 
-  if (view === 'detail' && selectedRow) {
-    // Interim wiring until the new detail view lands.
-    return (
-      <>
-        <McpStyles />
+    if (view === 'detail' && selectedRow) {
+      // Interim wiring until the new detail view lands.
+      return (
         <McpDetail
-          server={selectedRow.server ?? { name: selectedRow.name, transport: 'stdio', enabled: true }}
-          onBack={() => { setView('list'); setSelectedKey(null); }}
-          onRemove={() => handleRemove(selectedRow)}
-          onToggleEnabled={() => handleToggle(selectedRow)}
-          onRestart={() => handleRetry(selectedRow)}
+            server={selectedRow.server ?? { name: selectedRow.name, transport: 'stdio', enabled: true }}
+            onBack={() => { setView('list'); setSelectedKey(null); }}
+            onRemove={() => handleRemove(selectedRow)}
+            onToggleEnabled={() => handleToggle(selectedRow)}
+            onRestart={() => handleRetry(selectedRow)}
         />
-      </>
+      );
+    }
+
+    return (
+      <div className="mcp-sidebar sidebar-mount">
+        <div className="sidebar-tabs">
+          <button
+            className={`sidebar-tab ${tab === 'installed' ? 'active' : ''}`}
+            onClick={() => setTab('installed')}
+          >
+            Installed{attentionCount > 0 && <span className="tab-badge">{attentionCount}</span>}
+          </button>
+          <button
+            className={`sidebar-tab ${tab === 'browse' ? 'active' : ''}`}
+            onClick={() => setTab('browse')}
+          >
+            Browse
+          </button>
+        </div>
+
+        <div className="sidebar-search-row">
+          <div className="sidebar-search-wrap">
+            <Search size={12} className="sidebar-search-icon" />
+            <input
+              className="sidebar-search"
+              placeholder="Search servers..."
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+            />
+          </div>
+          <button className="add-btn" onClick={() => setView('add')}><Plus size={12} /> Add</button>
+        </div>
+
+        <div className="sidebar-list">
+          {loading && (
+            <div className="sidebar-empty" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+              <SaiLogo mode="scanner" size={28} />
+              <span>Loading...</span>
+            </div>
+          )}
+          {error && (
+            <div className="sidebar-error">
+              <div>{error}</div>
+              <button className="retry-btn" onClick={() => (tab === 'installed' ? loadInstalled() : loadRegistry())}>Retry</button>
+            </div>
+          )}
+
+          {!loading && !error && tab === 'installed' && live.snapshot && !live.snapshot.available && (
+            <div className="mcp-unavailable">Live status unavailable — showing configuration only.</div>
+          )}
+          {!loading && !error && tab === 'installed' && actionError && (
+            <div className="mcp-error">{actionError}</div>
+          )}
+          {!loading && !error && tab === 'installed' && (
+            <McpServerList
+              groups={groups}
+              canSignIn={!!live.snapshot?.capabilities.authenticate}
+              liveAvailable={!!live.snapshot?.available}
+              busy={busy}
+              onOpen={(r) => { setSelectedKey(r.key); setView('detail'); }}
+              onSignIn={handleSignIn}
+              onRetry={handleRetry}
+            />
+          )}
+
+          {!loading && !error && tab === 'installed' && filteredRows.length === 0 && (
+            <div className="sidebar-empty sidebar-empty-stack">
+              {search
+                ? <SaiLogo mode="static" size={40} className="sai-fallen" ariaLabel="" />
+                : <SaiLogo mode="idle" size={40} ariaLabel="" />}
+              <span>{search ? 'No matching servers' : 'No MCP servers configured'}</span>
+            </div>
+          )}
+
+          {!loading && !error && tab === 'browse' && filteredRegistry.map(server => (
+            <div
+              key={server.name}
+              className="sidebar-card"
+              onClick={() => { setSelectedRegistryServer(server); setView('registry-detail'); }}
+            >
+              <McpIcon iconUrl={server.iconUrl} />
+              <div className="card-info">
+                <div className="card-name">{server.title || server.name}</div>
+                <div className="card-desc">{server.description}</div>
+              </div>
+              <div className="card-right">
+                {server.installed ? (
+                  <span className="card-installed">Installed</span>
+                ) : (
+                  <button className="card-install-btn" onClick={(e) => {
+                    e.stopPropagation();
+                    handleAdd({ name: server.name, transport: server.transport });
+                  }}>Install</button>
+                )}
+                <ChevronRight size={12} className="card-chevron" />
+              </div>
+            </div>
+          ))}
+
+          {!loading && !error && tab === 'browse' && filteredRegistry.length === 0 && (
+            <div className="sidebar-empty sidebar-empty-stack">
+              {search
+                ? <SaiLogo mode="static" size={40} className="sai-fallen" ariaLabel="" />
+                : <SaiLogo mode="idle" size={40} ariaLabel="" />}
+              <span>{search ? 'No matching servers' : 'No servers found'}</span>
+            </div>
+          )}
+        </div>
+
+        <style>{`
+          .mcp-sidebar {
+            width: var(--sidebar-width);
+            background: var(--surface-1);
+            border-right: 1px solid var(--border-subtle);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            flex-shrink: 0;
+          }
+          .sidebar-tabs {
+            display: flex;
+            border-bottom: 1px solid var(--border-hairline);
+          }
+          .sidebar-tab {
+            flex: 1;
+            padding: 9px 12px;
+            text-align: center;
+            font-size: 11px;
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            position: relative;
+            transition: color var(--dur-fast) var(--ease-out-soft);
+          }
+          .sidebar-tab::after {
+            content: '';
+            position: absolute;
+            left: 8px;
+            right: 8px;
+            bottom: 0;
+            height: 2px;
+            background: var(--accent);
+            transform: scaleX(0);
+            transform-origin: center;
+            transition: transform var(--dur-base) var(--ease-out-soft);
+          }
+          .sidebar-tab.active {
+            color: var(--accent);
+            font-weight: 600;
+          }
+          .sidebar-tab.active::after { transform: scaleX(1); }
+          .sidebar-tab:hover { color: var(--text); }
+          .sidebar-search-row {
+            display: flex;
+            gap: 6px;
+            padding: 8px;
+          }
+          .sidebar-search-wrap {
+            position: relative;
+            flex: 1;
+          }
+          .sidebar-search-icon {
+            position: absolute;
+            left: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--text-muted);
+          }
+          .sidebar-search {
+            width: 100%;
+            padding: 6px 10px 6px 28px;
+            background: var(--surface-2);
+            border: 1px solid var(--border-hairline);
+            border-radius: 6px;
+            color: var(--text);
+            font-size: 11px;
+            outline: none;
+            font-family: inherit;
+          }
+          .sidebar-search:focus { border-color: var(--accent); }
+          .add-btn {
+            padding: 6px 10px;
+            background: var(--surface-4);
+            border: none;
+            border-radius: 6px;
+            color: var(--accent);
+            font-size: 11px;
+            cursor: pointer;
+            font-weight: 600;
+            white-space: nowrap;
+          }
+          .add-btn:hover { background: var(--border-subtle); }
+          .sidebar-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 0 8px 8px;
+          }
+          .sidebar-card {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px;
+            background: var(--surface-2);
+            border-radius: 6px;
+            margin-bottom: 4px;
+            cursor: pointer;
+            transition: background 0.15s;
+          }
+          .sidebar-card:hover { background: var(--surface-4); }
+          .card-icon {
+            width: 28px;
+            height: 28px;
+            background: var(--surface-4);
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            flex-shrink: 0;
+          }
+          .card-icon-img {
+            width: 28px;
+            height: 28px;
+            border-radius: 6px;
+            object-fit: cover;
+            flex-shrink: 0;
+          }
+          .card-info { flex: 1; min-width: 0; }
+          .card-name {
+            font-weight: 600;
+            font-size: 12px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+          }
+          .card-desc {
+            font-size: 10px;
+            color: var(--text-muted);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+          }
+          .card-right {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            flex-shrink: 0;
+          }
+          .sidebar-tab .tab-badge { display: inline-block; min-width: 16px; padding: 0 5px; margin-left: 5px; border-radius: 8px; background: var(--red); color: var(--bg-primary); font-size: 10px; line-height: 15px; }
+          .mcp-unavailable { margin: 8px 10px; padding: 6px 8px; font-size: 11px; color: var(--text-secondary); background: var(--surface-2); border: 1px solid var(--border-subtle); border-radius: 6px; }
+          .card-chevron { color: var(--text-muted); font-size: 10px; }
+          .card-install-btn {
+            padding: 2px 8px;
+            background: var(--surface-4);
+            border: none;
+            border-radius: 4px;
+            font-size: 10px;
+            color: var(--accent);
+            cursor: pointer;
+          }
+          .card-install-btn:hover { background: var(--border-subtle); }
+          .card-installed { font-size: 10px; color: var(--text-muted); }
+          .sidebar-empty {
+            text-align: center;
+            padding: 24px;
+            color: var(--text-muted);
+            font-size: 12px;
+          }
+          .sidebar-empty-stack {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 12px;
+            padding: 32px 16px;
+          }
+          .sidebar-error {
+            text-align: center;
+            padding: 16px;
+            color: var(--red);
+            font-size: 11px;
+          }
+          .retry-btn {
+            margin-top: 8px;
+            padding: 4px 12px;
+            background: var(--surface-4);
+            border: none;
+            border-radius: 4px;
+            color: var(--accent);
+            cursor: pointer;
+            font-size: 11px;
+          }
+        `}</style>
+      </div>
     );
-  }
+  };
 
   return (
-    <div className="mcp-sidebar sidebar-mount">
+    <>
       <McpStyles />
-      <div className="sidebar-tabs">
-        <button
-          className={`sidebar-tab ${tab === 'installed' ? 'active' : ''}`}
-          onClick={() => setTab('installed')}
-        >
-          Installed{attentionCount > 0 && <span className="tab-badge">{attentionCount}</span>}
-        </button>
-        <button
-          className={`sidebar-tab ${tab === 'browse' ? 'active' : ''}`}
-          onClick={() => setTab('browse')}
-        >
-          Browse
-        </button>
-      </div>
-
-      <div className="sidebar-search-row">
-        <div className="sidebar-search-wrap">
-          <Search size={12} className="sidebar-search-icon" />
-          <input
-            className="sidebar-search"
-            placeholder="Search servers..."
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-          />
-        </div>
-        <button className="add-btn" onClick={() => setView('add')}><Plus size={12} /> Add</button>
-      </div>
-
-      <div className="sidebar-list">
-        {loading && (
-          <div className="sidebar-empty" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
-            <SaiLogo mode="scanner" size={28} />
-            <span>Loading...</span>
-          </div>
-        )}
-        {error && (
-          <div className="sidebar-error">
-            <div>{error}</div>
-            <button className="retry-btn" onClick={tab === 'installed' ? loadInstalled : loadRegistry}>Retry</button>
-          </div>
-        )}
-
-        {!loading && !error && tab === 'installed' && live.snapshot && !live.snapshot.available && (
-          <div className="mcp-unavailable">Live status unavailable — showing configuration only.</div>
-        )}
-        {!loading && !error && tab === 'installed' && actionError && (
+      {view !== 'list' && actionError ? (
+        <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0, height: '100%' }}>
           <div className="mcp-error">{actionError}</div>
-        )}
-        {!loading && !error && tab === 'installed' && (
-          <McpServerList
-            groups={groups}
-            canSignIn={!!live.snapshot?.capabilities.authenticate}
-            liveAvailable={!!live.snapshot?.available}
-            busy={busy}
-            onOpen={(r) => { setSelectedKey(r.key); setView('detail'); }}
-            onSignIn={handleSignIn}
-            onRetry={handleRetry}
-          />
-        )}
-
-        {!loading && !error && tab === 'installed' && filteredRows.length === 0 && (
-          <div className="sidebar-empty sidebar-empty-stack">
-            {search
-              ? <SaiLogo mode="static" size={40} className="sai-fallen" ariaLabel="" />
-              : <SaiLogo mode="idle" size={40} ariaLabel="" />}
-            <span>{search ? 'No matching servers' : 'No MCP servers configured'}</span>
-          </div>
-        )}
-
-        {!loading && !error && tab === 'browse' && filteredRegistry.map(server => (
-          <div
-            key={server.name}
-            className="sidebar-card"
-            onClick={() => { setSelectedRegistryServer(server); setView('registry-detail'); }}
-          >
-            <McpIcon iconUrl={server.iconUrl} />
-            <div className="card-info">
-              <div className="card-name">{server.title || server.name}</div>
-              <div className="card-desc">{server.description}</div>
-            </div>
-            <div className="card-right">
-              {server.installed ? (
-                <span className="card-installed">Installed</span>
-              ) : (
-                <button className="card-install-btn" onClick={(e) => {
-                  e.stopPropagation();
-                  handleAdd({ name: server.name, transport: server.transport });
-                }}>Install</button>
-              )}
-              <ChevronRight size={12} className="card-chevron" />
-            </div>
-          </div>
-        ))}
-
-        {!loading && !error && tab === 'browse' && filteredRegistry.length === 0 && (
-          <div className="sidebar-empty sidebar-empty-stack">
-            {search
-              ? <SaiLogo mode="static" size={40} className="sai-fallen" ariaLabel="" />
-              : <SaiLogo mode="idle" size={40} ariaLabel="" />}
-            <span>{search ? 'No matching servers' : 'No servers found'}</span>
-          </div>
-        )}
-      </div>
-
-      <style>{`
-        .mcp-sidebar {
-          width: var(--sidebar-width);
-          background: var(--surface-1);
-          border-right: 1px solid var(--border-subtle);
-          display: flex;
-          flex-direction: column;
-          overflow: hidden;
-          flex-shrink: 0;
-        }
-        .sidebar-tabs {
-          display: flex;
-          border-bottom: 1px solid var(--border-hairline);
-        }
-        .sidebar-tab {
-          flex: 1;
-          padding: 9px 12px;
-          text-align: center;
-          font-size: 11px;
-          background: none;
-          border: none;
-          color: var(--text-muted);
-          cursor: pointer;
-          position: relative;
-          transition: color var(--dur-fast) var(--ease-out-soft);
-        }
-        .sidebar-tab::after {
-          content: '';
-          position: absolute;
-          left: 8px;
-          right: 8px;
-          bottom: 0;
-          height: 2px;
-          background: var(--accent);
-          transform: scaleX(0);
-          transform-origin: center;
-          transition: transform var(--dur-base) var(--ease-out-soft);
-        }
-        .sidebar-tab.active {
-          color: var(--accent);
-          font-weight: 600;
-        }
-        .sidebar-tab.active::after { transform: scaleX(1); }
-        .sidebar-tab:hover { color: var(--text); }
-        .sidebar-search-row {
-          display: flex;
-          gap: 6px;
-          padding: 8px;
-        }
-        .sidebar-search-wrap {
-          position: relative;
-          flex: 1;
-        }
-        .sidebar-search-icon {
-          position: absolute;
-          left: 10px;
-          top: 50%;
-          transform: translateY(-50%);
-          color: var(--text-muted);
-        }
-        .sidebar-search {
-          width: 100%;
-          padding: 6px 10px 6px 28px;
-          background: var(--surface-2);
-          border: 1px solid var(--border-hairline);
-          border-radius: 6px;
-          color: var(--text);
-          font-size: 11px;
-          outline: none;
-          font-family: inherit;
-        }
-        .sidebar-search:focus { border-color: var(--accent); }
-        .add-btn {
-          padding: 6px 10px;
-          background: var(--surface-4);
-          border: none;
-          border-radius: 6px;
-          color: var(--accent);
-          font-size: 11px;
-          cursor: pointer;
-          font-weight: 600;
-          white-space: nowrap;
-        }
-        .add-btn:hover { background: var(--border-subtle); }
-        .sidebar-list {
-          flex: 1;
-          overflow-y: auto;
-          padding: 0 8px 8px;
-        }
-        .sidebar-card {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          padding: 10px;
-          background: var(--surface-2);
-          border-radius: 6px;
-          margin-bottom: 4px;
-          cursor: pointer;
-          transition: background 0.15s;
-        }
-        .sidebar-card:hover { background: var(--surface-4); }
-        .card-icon {
-          width: 28px;
-          height: 28px;
-          background: var(--surface-4);
-          border-radius: 6px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-size: 14px;
-          flex-shrink: 0;
-        }
-        .card-icon-img {
-          width: 28px;
-          height: 28px;
-          border-radius: 6px;
-          object-fit: cover;
-          flex-shrink: 0;
-        }
-        .card-info { flex: 1; min-width: 0; }
-        .card-name {
-          font-weight: 600;
-          font-size: 12px;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
-        }
-        .card-desc {
-          font-size: 10px;
-          color: var(--text-muted);
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
-        }
-        .card-right {
-          display: flex;
-          align-items: center;
-          gap: 6px;
-          flex-shrink: 0;
-        }
-        .status-dot {
-          display: inline-block;
-          width: 8px;
-          height: 8px;
-          background: currentColor;
-          -webkit-mask: url("${DOT_MASK_URL}") center / contain no-repeat;
-          mask: url("${DOT_MASK_URL}") center / contain no-repeat;
-        }
-        .status-dot.active { color: var(--green); }
-        .status-dot.inactive { color: var(--red); }
-        .sidebar-tab .tab-badge { display: inline-block; min-width: 16px; padding: 0 5px; margin-left: 5px; border-radius: 8px; background: var(--red); color: #fff; font-size: 10px; line-height: 15px; }
-        .mcp-unavailable { margin: 8px 10px; padding: 6px 8px; font-size: 11px; color: var(--text-secondary); background: var(--surface-2); border: 1px solid var(--border-subtle); border-radius: 6px; }
-        .card-chevron { color: var(--text-muted); font-size: 10px; }
-        .card-install-btn {
-          padding: 2px 8px;
-          background: var(--surface-4);
-          border: none;
-          border-radius: 4px;
-          font-size: 10px;
-          color: var(--accent);
-          cursor: pointer;
-        }
-        .card-install-btn:hover { background: var(--border-subtle); }
-        .card-installed { font-size: 10px; color: var(--text-muted); }
-        .sidebar-empty {
-          text-align: center;
-          padding: 24px;
-          color: var(--text-muted);
-          font-size: 12px;
-        }
-        .sidebar-empty-stack {
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          gap: 12px;
-          padding: 32px 16px;
-        }
-        .sidebar-error {
-          text-align: center;
-          padding: 16px;
-          color: var(--red);
-          font-size: 11px;
-        }
-        .retry-btn {
-          margin-top: 8px;
-          padding: 4px 12px;
-          background: var(--surface-4);
-          border: none;
-          border-radius: 4px;
-          color: var(--accent);
-          cursor: pointer;
-          font-size: 11px;
-        }
-      `}</style>
-    </div>
+          {renderView()}
+        </div>
+      ) : renderView()}
+    </>
   );
 }

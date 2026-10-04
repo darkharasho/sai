@@ -188,4 +188,23 @@ describe('McpSidebar', () => {
     expect(await findByTitle('Manage this server from a terminal with `claude mcp`.')).toBeTruthy();
     expect(queryByText('Sign in')).toBeNull();
   });
+
+  it('pressing Enter on Sign in does not open the detail view', async () => {
+    mockSai.mcpList.mockResolvedValue([{ name: 'cf', transport: 'sse', enabled: true, source: 'user' }]);
+    mockSai.mcpStatus.mockResolvedValue(liveSnap({ cf: { name: 'cf', status: 'needs-auth' } }));
+    const { findByLabelText, container } = render(<McpSidebar projectPath="/p" scope="s1" />);
+    const btn = await findByLabelText('Sign in to cf');
+    fireEvent.keyDown(btn, { key: 'Enter' });
+    expect(container.querySelector('.mcp-detail')).toBeNull();
+    expect(container.querySelector('.mcp-sidebar')).toBeTruthy();
+  });
+
+  it('shows the error when sign-in rejects', async () => {
+    mockSai.mcpList.mockResolvedValue([{ name: 'cf', transport: 'sse', enabled: true, source: 'user' }]);
+    mockSai.mcpStatus.mockResolvedValue(liveSnap({ cf: { name: 'cf', status: 'needs-auth' } }));
+    mockSai.mcpAuthenticate.mockRejectedValue(new Error('ipc down'));
+    const { findByLabelText, findByText } = render(<McpSidebar projectPath="/p" scope="s1" />);
+    fireEvent.click(await findByLabelText('Sign in to cf'));
+    expect(await findByText('ipc down')).toBeTruthy();
+  });
 });

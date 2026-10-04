@@ -13,18 +13,25 @@ interface McpServerListProps {
 
 type RowProps = { row: McpRow; busy: boolean } & Pick<McpServerListProps, 'canSignIn' | 'liveAvailable' | 'onOpen' | 'onSignIn' | 'onRetry'>;
 
+const DOT_LABEL: Record<McpRow['dot'], string> = {
+  ok: 'Connected', pending: 'Connecting', bad: 'Needs attention', off: 'Disabled', unknown: 'Status unknown',
+};
+
 function Row({ row, busy, canSignIn, liveAvailable, onOpen, onSignIn, onRetry }: RowProps) {
   const Icon = MCP_SOURCE_ICON[row.source];
   const stop = (fn: () => void) => (e: React.MouseEvent) => { e.stopPropagation(); fn(); };
-  let right: React.ReactNode = <span className={`mcp-dot ${row.dot}`} />;
+  let right: React.ReactNode = <span className={`mcp-dot ${row.dot}`} role="img" aria-label={DOT_LABEL[row.dot]} />;
   if (busy) right = <Loader2 size={12} className="mcp-spin" />;
-  else if (row.fix === 'sign-in' && canSignIn) right = <button className="mcp-btn pri" disabled={!liveAvailable} onClick={stop(() => onSignIn(row))}>Sign in</button>;
-  else if (row.fix === 'sign-in') right = <span className="mcp-hint" title={MCP_TERMINAL_HINT}>CLI</span>;
-  else if (row.fix === 'retry') right = <button className="mcp-btn" disabled={!liveAvailable} onClick={stop(() => onRetry(row))}>Retry</button>;
+  else if (row.fix === 'sign-in' && canSignIn) right = <button className="mcp-btn pri" aria-label={`Sign in to ${row.displayName}`} disabled={!liveAvailable} onClick={stop(() => onSignIn(row))}>Sign in</button>;
+  else if (row.fix === 'sign-in') right = <span className="mcp-hint" title={MCP_TERMINAL_HINT}>CLI<span className="sr-only"> — {MCP_TERMINAL_HINT}</span></span>;
+  else if (row.fix === 'retry') right = <button className="mcp-btn" aria-label={`Retry ${row.displayName}`} disabled={!liveAvailable} onClick={stop(() => onRetry(row))}>Retry</button>;
 
   return (
     <div className="mcp-row" onClick={() => onOpen(row)} role="button" tabIndex={0}
-      onKeyDown={(e) => { if (e.key === 'Enter') onOpen(row); }}>
+      onKeyDown={(e) => {
+        if (e.target !== e.currentTarget) return;
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(row); }
+      }}>
       <div className="mcp-ico"><Icon size={13} /></div>
       <div className="mcp-info">
         <div className="mcp-nm">{row.displayName}</div>
@@ -49,7 +56,7 @@ export default function McpServerList({ groups, canSignIn, liveAvailable, busy, 
         </div>
       ))}
       <style>{`
-        .mcp-attn { margin: 6px 10px 4px; border: 1px solid rgba(212,92,60,.35); background: rgba(212,92,60,.06); border-radius: 8px; }
+        .mcp-attn { margin: 6px 10px 4px; border: 1px solid color-mix(in srgb, var(--red) 35%, transparent); background: color-mix(in srgb, var(--red) 6%, transparent); border-radius: 8px; }
         .mcp-attn .mcp-grp { color: var(--red); padding-top: 8px; }
         .mcp-chev { color: var(--text-muted); flex-shrink: 0; }
       `}</style>
