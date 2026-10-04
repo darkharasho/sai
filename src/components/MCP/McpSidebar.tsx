@@ -1,5 +1,9 @@
 import { useState, useEffect, useMemo } from 'react';
 import { ChevronRight, Plus, Search, Server } from 'lucide-react';
+import McpServerList from './McpServerList';
+import McpStyles from './McpStyles';
+import { useMcpLive } from './useMcpLive';
+import { buildMcpRows, groupMcpRows, needsAttention, type McpRow } from './mcpView';
 import McpDetail from './McpDetail';
 import McpAddServer from './McpAddServer';
 import McpRegistryDetail from './McpRegistryDetail';
@@ -41,9 +45,7 @@ export default function McpSidebar({ provider = 'claude', projectPath, scope }: 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [view, setView] = useState<View>('list');
-  const [selectedServer, setSelectedServer] = useState<McpServer | null>(null);
   const [selectedRegistryServer, setSelectedRegistryServer] = useState<RegistryMcpServer | null>(null);
-  const [runtime, setRuntime] = useState<Record<string, { status: string }>>({});
   const [codexRuntime, setCodexRuntime] = useState<CodexMcpRuntimeStatus | null>(null);
   const [codexLoading, setCodexLoading] = useState(false);
 
@@ -51,7 +53,7 @@ export default function McpSidebar({ provider = 'claude', projectPath, scope }: 
     setLoading(true);
     setError(null);
     try {
-      const result = await window.sai.mcpList();
+      const result = await window.sai.mcpList(projectPath);
       if (Array.isArray(result)) {
         setInstalled(result);
       } else if (result?.error) {
@@ -85,7 +87,7 @@ export default function McpSidebar({ provider = 'claude', projectPath, scope }: 
 
   useEffect(() => {
     if (!isCodex) loadInstalled();
-  }, [isCodex]);
+  }, [isCodex, projectPath]);
 
   // Codex App Server owns an isolated runtime and configuration. Do not call
   // the Claude MCP APIs here: their installed list is neither shared nor safe
@@ -118,70 +120,63 @@ export default function McpSidebar({ provider = 'claude', projectPath, scope }: 
     return () => { cancelled = true; };
   }, [isCodex, projectPath, scope]);
 
-  // Live connection status from the SDK backend (init-message report). The CLI
-  // backend never reports this, so badges only appear in SDK mode.
-  useEffect(() => {
-    if (isCodex) return;
-    const api = window.sai as any;
-    let cancelled = false;
-    api.mcpRuntimeStatus?.().then((r: any) => {
-      if (!cancelled && r?.servers) setRuntime(r.servers);
-    }).catch(() => {});
-    const off = api.onMcpRuntimeStatus?.((r: any) => {
-      if (r?.servers) setRuntime(r.servers);
-    });
-    return () => { cancelled = true; off?.(); };
-  }, [isCodex]);
-
-  // Runtime entries are keyed by the name the SDK saw; plugin servers appear in
-  // the sidebar as `plugin:<short>:<name>` — fall back to matching the bare
-  // server name or the `<short>-<name>` key used when SAI owns the connection.
-  const runtimeFor = (sidebarName: string): string | undefined => {
-    if (runtime[sidebarName]) return runtime[sidebarName].status;
-    const m = /^plugin:([^:]+):(.+)$/.exec(sidebarName);
-    if (m) {
-      return runtime[m[2]]?.status ?? runtime[`${m[1]}-${m[2]}`]?.status;
-    }
-    return undefined;
-  };
-
   useEffect(() => {
     if (!isCodex && tab === 'browse' && registry.length === 0) {
       loadRegistry();
     }
   }, [isCodex, tab]);
 
+  const live = useMcpLive(projectPath, scope, { spawn: true, enabled: !isCodex });
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [busy, setBusy] = useState<Record<string, boolean>>({});
+  const [actionError, setActionError] = useState<string | null>(null);
+
   const handleAdd = async (config: McpServerConfig) => {
-    await window.sai.mcpAdd(config);
+    await window.sai.mcpAdd(config, projectPath, scope);
     setView('list');
     loadInstalled();
   };
 
-  const handleRemove = async (name: string) => {
-    await window.sai.mcpRemove(name);
+  const withBusy = async (row: McpRow, fn: () => Promise<{ ok: boolean; error?: string } | void>) => {
+    setBusy((b) => ({ ...b, [row.key]: true }));
+    setActionError(null);
+    try {
+      const res = await fn();
+      if (res && !res.ok) setActionError(res.error ?? 'Action failed');
+    } finally {
+      setBusy((b) => ({ ...b, [row.key]: false }));
+    }
+  };
+
+  const handleSignIn = (row: McpRow) => withBusy(row, () => live.authenticate(row.controlName));
+  const handleRetry = (row: McpRow) => withBusy(row, () => live.reconnect(row.controlName));
+  const handleToggle = (row: McpRow) => withBusy(row, async () => {
+    const res = await live.toggle(row.name, !row.enabled, row.source, row.controlName);
+    await loadInstalled();
+    return res;
+  });
+  const handleRemove = async (row: McpRow) => {
+    if (!row.removable) return;
+    const res = await window.sai.mcpRemove(row.name, row.source as 'user' | 'project', projectPath, scope);
+    if (res?.error) { setActionError(res.error); return; }
     setView('list');
-    setSelectedServer(null);
-    loadInstalled();
-  };
-
-  const handleToggleEnabled = async (name: string, enabled: boolean) => {
-    await window.sai.mcpUpdate(name, { disabled: !enabled });
-    loadInstalled();
-  };
-
-  const handleRestart = async (_name: string) => {
+    setSelectedKey(null);
     loadInstalled();
   };
 
   const query = search.toLowerCase();
 
-  const filteredInstalled = useMemo(
-    () => installed.filter(s =>
-      (s.name || '').toLowerCase().includes(query) ||
-      (s.description || '').toLowerCase().includes(query)
-    ),
-    [installed, query]
+  const rows = useMemo(
+    () => buildMcpRows(installed, live.snapshot?.servers ?? {}, live.snapshot?.auth ?? {}),
+    [installed, live.snapshot],
   );
+  const filteredRows = useMemo(
+    () => rows.filter((r) => r.name.toLowerCase().includes(query) || r.subtitle.toLowerCase().includes(query)),
+    [rows, query],
+  );
+  const groups = useMemo(() => groupMcpRows(filteredRows), [filteredRows]);
+  const attentionCount = rows.filter(needsAttention).length;
+  const selectedRow = rows.find((r) => r.key === selectedKey) ?? null;
 
   const filteredRegistry = useMemo(
     () => registry.filter(s =>
@@ -246,41 +241,49 @@ export default function McpSidebar({ provider = 'claude', projectPath, scope }: 
 
   if (view === 'registry-detail' && selectedRegistryServer) {
     return (
-      <McpRegistryDetail
-        server={selectedRegistryServer}
-        onBack={() => { setView('list'); setSelectedRegistryServer(null); }}
-        onInstall={(config) => {
-          handleAdd(config);
-          setSelectedRegistryServer(null);
-        }}
-      />
+      <>
+        <McpStyles />
+        <McpRegistryDetail
+          server={selectedRegistryServer}
+          onBack={() => { setView('list'); setSelectedRegistryServer(null); }}
+          onInstall={(config) => {
+            handleAdd(config);
+            setSelectedRegistryServer(null);
+          }}
+        />
+      </>
     );
   }
 
   if (view === 'add') {
-    return <McpAddServer onBack={() => setView('list')} onAdd={handleAdd} />;
+    return <><McpStyles /><McpAddServer onBack={() => setView('list')} onAdd={handleAdd} /></>;
   }
 
-  if (view === 'detail' && selectedServer) {
+  if (view === 'detail' && selectedRow) {
+    // Interim wiring until the new detail view lands.
     return (
-      <McpDetail
-        server={selectedServer}
-        onBack={() => { setView('list'); setSelectedServer(null); }}
-        onRemove={handleRemove}
-        onToggleEnabled={handleToggleEnabled}
-        onRestart={handleRestart}
-      />
+      <>
+        <McpStyles />
+        <McpDetail
+          server={selectedRow.server ?? { name: selectedRow.name, transport: 'stdio', enabled: true }}
+          onBack={() => { setView('list'); setSelectedKey(null); }}
+          onRemove={() => handleRemove(selectedRow)}
+          onToggleEnabled={() => handleToggle(selectedRow)}
+          onRestart={() => handleRetry(selectedRow)}
+        />
+      </>
     );
   }
 
   return (
     <div className="mcp-sidebar sidebar-mount">
+      <McpStyles />
       <div className="sidebar-tabs">
         <button
           className={`sidebar-tab ${tab === 'installed' ? 'active' : ''}`}
           onClick={() => setTab('installed')}
         >
-          Installed
+          Installed{attentionCount > 0 && <span className="tab-badge">{attentionCount}</span>}
         </button>
         <button
           className={`sidebar-tab ${tab === 'browse' ? 'active' : ''}`}
@@ -317,31 +320,25 @@ export default function McpSidebar({ provider = 'claude', projectPath, scope }: 
           </div>
         )}
 
-        {!loading && !error && tab === 'installed' && filteredInstalled.map(server => (
-          <div
-            key={server.name}
-            className="sidebar-card"
-            onClick={() => { setSelectedServer(server); setView('detail'); }}
-          >
-            <div className="card-icon"><Server size={14} /></div>
-            <div className="card-info">
-              <div className="card-name">{server.name}</div>
-              <div className="card-desc">{server.description || server.transport}</div>
-            </div>
-            <div className="card-right">
-              {(() => {
-                const rt = runtimeFor(server.name);
-                if (!rt) return null;
-                const ok = rt === 'connected';
-                return <span className={`card-runtime ${ok ? 'ok' : 'bad'}`}>{ok ? 'connected' : rt}</span>;
-              })()}
-              <span className={`status-dot ${server.enabled ? 'active' : 'inactive'}`} />
-              <ChevronRight size={12} className="card-chevron" />
-            </div>
-          </div>
-        ))}
+        {!loading && !error && tab === 'installed' && live.snapshot && !live.snapshot.available && (
+          <div className="mcp-unavailable">Live status unavailable — showing configuration only.</div>
+        )}
+        {!loading && !error && tab === 'installed' && actionError && (
+          <div className="mcp-error">{actionError}</div>
+        )}
+        {!loading && !error && tab === 'installed' && (
+          <McpServerList
+            groups={groups}
+            canSignIn={!!live.snapshot?.capabilities.authenticate}
+            liveAvailable={!!live.snapshot?.available}
+            busy={busy}
+            onOpen={(r) => { setSelectedKey(r.key); setView('detail'); }}
+            onSignIn={handleSignIn}
+            onRetry={handleRetry}
+          />
+        )}
 
-        {!loading && !error && tab === 'installed' && filteredInstalled.length === 0 && (
+        {!loading && !error && tab === 'installed' && filteredRows.length === 0 && (
           <div className="sidebar-empty sidebar-empty-stack">
             {search
               ? <SaiLogo mode="static" size={40} className="sai-fallen" ariaLabel="" />
@@ -535,16 +532,8 @@ export default function McpSidebar({ provider = 'claude', projectPath, scope }: 
         }
         .status-dot.active { color: var(--green); }
         .status-dot.inactive { color: var(--red); }
-        .card-runtime {
-          font-size: 9px;
-          padding: 1px 6px;
-          border-radius: 999px;
-          border: 1px solid var(--border-subtle);
-          color: var(--text-muted);
-          white-space: nowrap;
-        }
-        .card-runtime.ok { color: var(--green); border-color: color-mix(in srgb, var(--green) 40%, transparent); }
-        .card-runtime.bad { color: var(--red); border-color: color-mix(in srgb, var(--red) 40%, transparent); }
+        .sidebar-tab .tab-badge { display: inline-block; min-width: 16px; padding: 0 5px; margin-left: 5px; border-radius: 8px; background: var(--red); color: #fff; font-size: 10px; line-height: 15px; }
+        .mcp-unavailable { margin: 8px 10px; padding: 6px 8px; font-size: 11px; color: var(--text-secondary); background: var(--surface-2); border: 1px solid var(--border-subtle); border-radius: 6px; }
         .card-chevron { color: var(--text-muted); font-size: 10px; }
         .card-install-btn {
           padding: 2px 8px;
