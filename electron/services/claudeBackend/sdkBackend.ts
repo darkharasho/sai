@@ -86,6 +86,9 @@ interface ScopeSession {
    *  Cleared on the first real send. A warm session has no conversation, so
    *  its session id must not be stashed for resume when it is torn down. */
   warm?: boolean;
+  /** MCP config changed on disk since this session spawned (markMcpStale) —
+   *  the next send resume-respawns it, exactly like a config change. */
+  mcpStale?: boolean;
   /** Normalized per-session config; a send with different values recreates the
    *  session (CLI ensureProcess parity) so model/effort/permMode/feature-setting
    *  changes apply. */
@@ -435,6 +438,58 @@ export class SdkBackend implements ClaudeBackend {
     } catch { /* SDK unavailable — the list stays empty until the first turn */ }
   }
 
+  // ─── live MCP control ──────────────────────────────────────────────────────
+
+  /** Live Query for the MCP panel's control calls. With `create`, spins up a
+   *  session for a scope that has none — resuming a pending conversation if
+   *  there is one (then it is a real session, not warm, so the resume id
+   *  survives a later config respawn). */
+  getLiveQuery(projectPath: string, scope: string | undefined, opts: { create: boolean }): unknown | null {
+    const scopeKey = toScopeKey(projectPath, scope);
+    const existing = this.sessions.get(scopeKey);
+    if (existing) return existing.query;
+    if (!opts.create) return null;
+    return this._spawnLive(scopeKey, projectPath, scope, {});
+  }
+
+  /** MCP config changed on disk (panel add/edit/remove/enable). The SDK can't
+   *  hot-swap file-sourced servers — setMcpServers replaces ALL dynamic
+   *  servers, SAI's in-process ones included — so every live session is
+   *  flagged and resume-respawns on its next send. The panel's own scope
+   *  restarts right away when idle, so the panel reflects the edit without
+   *  waiting for a turn; a busy one picks it up on its next send. */
+  markMcpStale(projectPath: string, scope?: string): void {
+    // Orchestrator sessions carry only the in-process swarm server — no
+    // file-sourced MCP to reload.
+    for (const s of this.sessions.values()) if (s.kind !== 'orchestrator') s.mcpStale = true;
+    const scopeKey = toScopeKey(projectPath, scope);
+    const session = this.sessions.get(scopeKey);
+    if (!session || this._isBusy(session)) return;
+    if (session.sessionId && !session.warm) this.pendingResume.set(scopeKey, session.sessionId);
+    session.query.close();
+    this.sessions.delete(scopeKey);
+    const { permMode, effort, model } = session.config;
+    this._spawnLive(scopeKey, projectPath, scope, { permMode, effort: effort || undefined, model: model || undefined });
+  }
+
+  /** Create a session nobody has sent to yet. Warm unless it consumed a
+   *  pending resume. Null when the query cannot be created. */
+  private _spawnLive(
+    scopeKey: string,
+    projectPath: string,
+    scope: string | undefined,
+    queryArgs: { permMode?: string; effort?: string; model?: string },
+  ): unknown | null {
+    const resuming = this.pendingResume.has(scopeKey);
+    try {
+      const session = this._createSession(scopeKey, projectPath, scope, queryArgs);
+      session.warm = !resuming;
+      return session.query;
+    } catch {
+      return null;
+    }
+  }
+
   // ─── slash commands ────────────────────────────────────────────────────────
 
   refreshSlashCommands(projectPath: string, scope?: string): Promise<SlashCommandInfo[]> {
@@ -488,7 +543,7 @@ export class SdkBackend implements ClaudeBackend {
       // model switches and bypass toggles until the scope was idle-swept.
       let session = this.sessions.get(scopeKey);
       const wantConfig = normalizeConfig(effectivePermMode, effort, model);
-      if (session && !configEquals(session.config, wantConfig)) {
+      if (session && (session.mcpStale || !configEquals(session.config, wantConfig))) {
         this._resolveGatesForScope(scopeKey, 'Session restarted with new settings');
         if (session.mapperState.streaming) {
           // End the in-flight turn in the UI — its result will never arrive.
@@ -664,12 +719,7 @@ export class SdkBackend implements ClaudeBackend {
       // any chat that was streaming in the background the moment the user
       // switched back to it. The live session IS the requested session — its
       // id is stashed for resume when it's closed (sweep/config restart).
-      const busy = session.mapperState.streaming
-        || session.awaitingInput
-        || session.awaitingInterruptResult
-        || session.pendingBackgroundResume
-        || (session.pendingWakeup && (session.wakeupDeadline == null || Date.now() < session.wakeupDeadline));
-      if (busy) return;
+      if (this._isBusy(session)) return;
       this._resolveGatesForScope(scopeKey, 'Session switched');
       session.query.close();
       this.sessions.delete(scopeKey);
@@ -679,6 +729,16 @@ export class SdkBackend implements ClaudeBackend {
     } else {
       this.pendingResume.delete(scopeKey);
     }
+  }
+
+  /** Mid-turn, blocked on the user, or holding a live wait that only this
+   *  query can resume — closing it now would lose work. */
+  private _isBusy(session: ScopeSession): boolean {
+    return session.mapperState.streaming
+      || session.awaitingInput
+      || session.awaitingInterruptResult
+      || session.pendingBackgroundResume
+      || (session.pendingWakeup && (session.wakeupDeadline == null || Date.now() < session.wakeupDeadline));
   }
 
   // ─── compact ───────────────────────────────────────────────────────────────

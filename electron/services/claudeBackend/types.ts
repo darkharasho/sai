@@ -54,6 +54,12 @@ export interface ClaudeBackend {
    *  supportedCommands()), falling back to the per-project cache when no
    *  session exists. Drives the renderer's on-demand refresh. */
   refreshSlashCommands(projectPath: string, scope?: string): Promise<SlashCommandInfo[]>;
+  /** SDK only: the scope's live Query for MCP control calls (status, reconnect,
+   *  toggle, OAuth). `create` spins up a session when none exists. */
+  getLiveQuery?(projectPath: string, scope: string | undefined, opts: { create: boolean }): unknown | null;
+  /** SDK only: MCP config changed on disk — sessions resume-respawn to load it
+   *  (the given scope immediately when idle, the rest on their next send). */
+  markMcpStale?(projectPath: string, scope?: string): void;
   send(args: SendArgs): void;
   interrupt(projectPath: string, scope?: string): void;
   /** Re-assert backend truth for a scope the renderer believes is streaming.
