@@ -2951,6 +2951,43 @@ describe('SdkBackend live MCP control', () => {
       backend.destroy();
     });
 
+    it('a send whose settings differ from a panel-spawned session does not respawn it while a sign-in waits', async () => {
+      __resetMcpRuntimeStatusForTests();
+      const { backend, queryFn, queries } = setup();
+      backend.getLiveQuery('/p', 's1', { create: true }); // panel/nudge spawn: empty settings
+      setMcpAuthState('/p', 's1', 'cf', { phase: 'waiting', authUrl: 'https://auth/x' });
+      (queries[0] as any).setModel = vi.fn(async () => {});
+
+      backend.send({ projectPath: '/p', message: 'a', scope: 's1', permMode: 'default', effort: 'high', model: 'sonnet' } as any);
+      await tick();
+      expect(queryFn).toHaveBeenCalledTimes(1);
+      expect(queries[0].closeSpy).not.toHaveBeenCalled();
+      expect((queries[0] as any).setModel).toHaveBeenCalledWith('sonnet'); // the turn still runs on the chosen model
+
+      // Sign-in settled → the next idle send applies the settings by respawn.
+      setMcpAuthState('/p', 's1', 'cf', null);
+      const live = (backend as any).sessions.get('/p s1');
+      live.mapperState = { ...live.mapperState, streaming: false };
+      backend.send({ projectPath: '/p', message: 'b', scope: 's1', permMode: 'default', effort: 'high', model: 'sonnet' } as any);
+      await tick();
+      expect(queryFn).toHaveBeenCalledTimes(2);
+      __resetMcpRuntimeStatusForTests();
+      backend.destroy();
+    });
+
+    it('turning bypass off still respawns during a sign-in — permission gating wins', async () => {
+      __resetMcpRuntimeStatusForTests();
+      const { backend, queryFn } = setup();
+      backend.send({ projectPath: '/p', message: 'a', scope: 's1', permMode: 'bypass' } as any);
+      await tick();
+      setMcpAuthState('/p', 's1', 'cf', { phase: 'waiting', authUrl: 'https://auth/x' });
+      backend.send({ projectPath: '/p', message: 'b', scope: 's1', permMode: 'default' } as any);
+      await tick();
+      expect(queryFn).toHaveBeenCalledTimes(2);
+      __resetMcpRuntimeStatusForTests();
+      backend.destroy();
+    });
+
     it('a busy panel scope is not restarted mid-turn, only marked stale', async () => {
       const { backend, queryFn, queries } = setup();
       backend.send({ projectPath: '/p', message: 'a', scope: 's1' } as any);

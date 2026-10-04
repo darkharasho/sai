@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-const { backend, mcpConfig } = vi.hoisted(() => ({
+const { backend, mcpConfig, win } = vi.hoisted(() => ({
+  win: { current: null as null | { isDestroyed: () => boolean; webContents: { send: (...a: any[]) => void } } },
   backend: {
     getLiveQuery: vi.fn(),
     markMcpStale: vi.fn(),
@@ -28,7 +29,7 @@ vi.mock('node:fs', () => ({
   mkdirSync: vi.fn(),
 }));
 vi.mock('../../../electron/services/claudeBackend/index', () => ({ getClaudeBackend: () => backend }));
-vi.mock('../../../electron/services/claude', () => ({ getMainWin: () => null }));
+vi.mock('../../../electron/services/claude', () => ({ getMainWin: () => win.current }));
 vi.mock('../../../electron/services/mcpConfig', () => mcpConfig);
 
 import { ipcMain } from 'electron';
@@ -57,6 +58,7 @@ describe('mcp service', () => {
   let q: ReturnType<typeof liveQuery>;
   beforeEach(() => {
     vi.clearAllMocks();
+    win.current = null;
     __resetMcpRuntimeStatusForTests();
     q = liveQuery();
     backend.getLiveQuery.mockImplementation(() => q);
@@ -69,7 +71,7 @@ describe('mcp service', () => {
     expect(channels).toContain('mcp:list');
     expect(channels).toContain('mcp:add');
     expect(channels).toContain('mcp:remove');
-    expect(channels).toContain('mcp:update');
+    expect(channels).not.toContain('mcp:update');
     expect(channels).toContain('mcp:registryList');
     for (const ch of ['mcp:runtimeStatus', 'mcp:status', 'mcp:reconnect', 'mcp:toggle', 'mcp:authenticate',
       'mcp:authCancel', 'mcp:submitCallbackUrl', 'mcp:signOut']) {
@@ -91,19 +93,16 @@ describe('mcp service', () => {
     it('a project-source edit marks only that project stale', async () => {
       await handler('mcp:add')({ name: 'gh', transport: 'stdio', command: 'x', source: 'project' }, '/p', 's1');
       await handler('mcp:remove')('gh', 'project', '/p', 's1');
-      await handler('mcp:update')('gh', { disabled: true, source: 'project' }, '/p', 's1');
       await flush();
-      expect(backend.markMcpStale).toHaveBeenCalledTimes(3);
+      expect(backend.markMcpStale).toHaveBeenCalledTimes(2);
       for (const call of backend.markMcpStale.mock.calls) expect(call).toEqual(['/p', 's1', { restart: true, projectOnly: true }]);
     });
 
-    it('remove and update persist, then apply', async () => {
+    it('remove persists, then applies', async () => {
       expect(await handler('mcp:remove')('gh', 'user', '/p', 's1')).toEqual({ success: true });
-      expect(await handler('mcp:update')('gh', { disabled: false, source: 'user' }, '/p', 's1')).toEqual({ success: true });
       await flush();
       expect(mcpConfig.removeMcpServer).toHaveBeenCalledWith(expect.anything(), 'gh', 'user');
-      expect(mcpConfig.setMcpServerDisabled).toHaveBeenCalledWith(expect.anything(), 'gh', 'user', false);
-      expect(backend.markMcpStale).toHaveBeenCalledTimes(2);
+      expect(backend.markMcpStale).toHaveBeenCalledTimes(1);
     });
 
     it('a failed write returns { error } and applies nothing', async () => {
@@ -178,6 +177,29 @@ describe('mcp service', () => {
       await vi.advanceTimersByTimeAsync(2000);
       expect(backend.getLiveQuery).toHaveBeenCalledWith('/p', 's1', { create: false });
       expect(q.mcpServerStatus).toHaveBeenCalled();
+    });
+
+    it('pushes a FULL snapshot (available + capabilities) so a nudge mounted before the session sees it', () => {
+      const send = vi.fn();
+      win.current = { isDestroyed: () => false, webContents: { send } };
+      (q as any).mcpAuthenticate = vi.fn();
+      recordMcpRuntimeStatus('/p', 's1', [{ name: 'cf', status: 'needs-auth' }]);
+      notifyMcpInitFrame('/p', 's1');
+      expect(backend.getLiveQuery).toHaveBeenCalledWith('/p', 's1', { create: false });
+      expect(send).toHaveBeenCalledWith('mcp:runtime-status', expect.objectContaining({
+        projectPath: '/p', scope: 's1', available: true,
+        capabilities: expect.objectContaining({ authenticate: true }),
+        servers: { cf: { name: 'cf', status: 'needs-auth' } },
+      }));
+    });
+
+    it('never sends to a destroyed window', async () => {
+      const send = vi.fn(() => { throw new Error('Object has been destroyed'); });
+      win.current = { isDestroyed: () => true, webContents: { send } };
+      recordMcpRuntimeStatus('/p', 's1', [{ name: 'gh', status: 'pending' }]);
+      expect(() => notifyMcpInitFrame('/p', 's1')).not.toThrow();
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(send).not.toHaveBeenCalled();
     });
   });
 });

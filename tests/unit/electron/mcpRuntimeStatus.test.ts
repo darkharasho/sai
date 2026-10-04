@@ -78,4 +78,20 @@ describe('mcpRuntimeStatus (per scope)', () => {
     recordMcpRuntimeStatus('/p', 'a', [{ name: 'x', status: 'connected' }]);
     expect(getMcpRuntimeStatus('/p', 'a').auth.x).toBeUndefined();
   });
+
+  it('record() is authoritative for membership: an unlisted server is dropped, listed ones keep details and in-flight auth', () => {
+    replaceMcpRuntimeStatus('/p', 'a', [
+      { name: 'a', status: 'needs-auth' },
+      { name: 'b', status: 'needs-auth' },
+      { name: 'c', status: 'connected', tools: [{ name: 't' }] },
+    ]);
+    setMcpAuthState('/p', 'a', 'a', { phase: 'waiting', authUrl: 'https://auth' });
+    setMcpAuthState('/p', 'a', 'b', { phase: 'error', error: 'x' });
+    recordMcpRuntimeStatus('/p', 'a', [{ name: 'a', status: 'needs-auth' }, { name: 'c', status: 'connected' }]);
+    const { servers, auth } = getMcpRuntimeStatus('/p', 'a');
+    expect(Object.keys(servers).sort()).toEqual(['a', 'c']);
+    expect(servers.c.tools).toEqual([{ name: 't' }]);
+    expect(auth.a).toEqual({ phase: 'waiting', authUrl: 'https://auth' });
+    expect(auth.b).toBeUndefined();
+  });
 });

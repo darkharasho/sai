@@ -10,13 +10,20 @@ import { createMcpControl, type McpControlQuery } from './claudeBackend/mcpContr
 const pathsFor = (projectPath?: string) => ({ home: os.homedir(), projectPath: projectPath || undefined });
 const fail = (err: any, fallback: string) => ({ error: err?.message || fallback });
 
+/** Pushes run from pollers long after the window may be gone: a destroyed
+ *  window's webContents throws on send. */
+function pushToRenderer(snap: unknown): void {
+  const w = getMainWin();
+  if (w && !w.isDestroyed()) w.webContents.send('mcp:runtime-status', snap);
+}
+
 let control: ReturnType<typeof createMcpControl> | null = null;
 function mcpControl() {
   control ??= createMcpControl({
     getQuery: (projectPath, scope, create) =>
       (getClaudeBackend().getLiveQuery?.(projectPath, scope, { create }) as McpControlQuery | null | undefined) ?? null,
     openExternal: (url) => { if (/^https?:\/\//i.test(url)) void shell.openExternal(url); },
-    push: (snap) => getMainWin()?.webContents.send('mcp:runtime-status', snap),
+    push: pushToRenderer,
     markMcpStale: (projectPath, scope, opts) => getClaudeBackend().markMcpStale?.(projectPath, scope, opts),
   });
   return control;
@@ -33,8 +40,15 @@ function applyConfig(projectPath: string | undefined, scope: string | undefined,
 }
 
 export function registerMcpHandlers() {
-  // Each init-frame report may carry `pending` servers the SDK never re-reports.
-  setMcpInitFrameListener((projectPath, scope) => mcpControl().watchPending(projectPath, scope));
+  // An init frame is the first sign a session exists for the scope: push a
+  // FULL snapshot (available + capabilities), so a chat nudge that mounted
+  // before the session did stops showing the "no session" state. It may also
+  // carry `pending` servers the SDK never re-reports — watch those.
+  setMcpInitFrameListener((projectPath, scope) => {
+    const c = mcpControl();
+    pushToRenderer(c.peek(projectPath, scope));
+    c.watchPending(projectPath, scope);
+  });
 
   ipcMain.handle('mcp:list', async (_e, projectPath?: string) => {
     try { return listMcpServers(pathsFor(projectPath)); } catch (err) { return fail(err, 'Failed to read MCP config'); }
@@ -51,17 +65,6 @@ export function registerMcpHandlers() {
     if (name.startsWith('plugin:')) return { error: 'Plugin-provided MCP servers must be removed via the plugin itself' };
     try { removeMcpServer(pathsFor(projectPath), name, source); }
     catch (err) { return fail(err, 'Failed to remove MCP server'); }
-    applyConfig(projectPath, scope, source);
-    return { success: true };
-  });
-
-  ipcMain.handle('mcp:update', async (_e, name: string, updates: { disabled?: boolean; source?: McpSource }, projectPath?: string, scope?: string) => {
-    let source: McpSource;
-    try {
-      if (typeof updates?.disabled !== 'boolean') return { error: 'Only { disabled } updates are supported; use mcp:add to edit' };
-      source = updates.source ?? (name.startsWith('plugin:') ? 'plugin' : 'user');
-      setMcpServerDisabled(pathsFor(projectPath), name, source, updates.disabled);
-    } catch (err) { return fail(err, 'Failed to update MCP server'); }
     applyConfig(projectPath, scope, source);
     return { success: true };
   });

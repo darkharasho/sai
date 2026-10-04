@@ -1,8 +1,8 @@
 /**
  * mcpRuntimeStatus.ts — per-scope record of live MCP server state for the MCP
  * sidebar and the chat sign-in nudge. Seeded by the SDK's `system/init` frame
- * (names + status only, merged) and replaced wholesale by `mcpServerStatus()`
- * control calls (full entries). Also holds in-flight OAuth sign-in state.
+ * (names + status only; membership replaced, per-name details merged) and
+ * replaced wholesale by `mcpServerStatus()` control calls (full entries). Also holds in-flight OAuth sign-in state.
  * SDK backend only — the CLI path never reports connection state.
  */
 import type { McpAuthState, McpLiveServer, McpLiveStatus, McpRuntimePush } from '../../../src/types';
@@ -46,22 +46,30 @@ function toLive(raw: any): McpLiveServer | null {
   return out;
 }
 
-/** Init-frame report: names + statuses only. Merges into the scope's entries;
- *  a server whose status changed loses its stale tools/serverInfo/error. */
+/** Init-frame report: names + statuses only. The frame lists every server the
+ *  session loaded, so it is authoritative for membership: a server it no
+ *  longer lists (removed, or disabled elsewhere) is dropped along with any
+ *  settled auth entry. Per name it merges — a server whose status is
+ *  unchanged keeps its tools/serverInfo; a changed one loses them. */
 export function recordMcpRuntimeStatus(
   projectPath: string,
   scope: string | undefined,
   reported: Array<{ name?: string; status?: string } | null>,
-  _plugins?: Array<{ name?: string; path?: string }>,
 ): void {
-  const b = bucket(servers, keyOf(projectPath, scope));
+  const key = keyOf(projectPath, scope);
+  const prevBucket = servers.get(key);
+  const b = new Map<string, McpLiveServer>();
   for (const s of reported) {
     if (!s || typeof s.name !== 'string' || !s.name) continue;
     const status = normalizeStatus(s.status);
-    const prev = b.get(s.name);
+    const prev = prevBucket?.get(s.name);
     b.set(s.name, prev && prev.status === status ? { ...prev } : { name: s.name, status });
     if (status === 'connected') clearStaleAuth(projectPath, scope, s.name);
   }
+  servers.set(key, b);
+  // An in-flight `waiting` entry stays: its poller owns it and settles it.
+  const a = auth.get(key);
+  for (const [name, state] of a ?? []) if (!b.has(name) && state.phase !== 'waiting') a!.delete(name);
 }
 
 /** Authoritative full report from `mcpServerStatus()`. */

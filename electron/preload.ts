@@ -433,8 +433,6 @@ contextBridge.exposeInMainWorld('sai', {
   mcpAdd: (config: any, projectPath?: string, scope?: string) => ipcRenderer.invoke('mcp:add', config, projectPath, scope),
   mcpRemove: (name: string, source?: 'user' | 'project', projectPath?: string, scope?: string) =>
     ipcRenderer.invoke('mcp:remove', name, source, projectPath, scope),
-  mcpUpdate: (name: string, updates: any, projectPath?: string, scope?: string) =>
-    ipcRenderer.invoke('mcp:update', name, updates, projectPath, scope),
   mcpRegistryList: () => ipcRenderer.invoke('mcp:registryList'),
   mcpRuntimeStatus: (projectPath: string, scope?: string) => ipcRenderer.invoke('mcp:runtimeStatus', projectPath, scope),
   mcpStatus: (projectPath: string, scope?: string) => ipcRenderer.invoke('mcp:status', projectPath, scope),

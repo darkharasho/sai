@@ -45,6 +45,7 @@ export type McpControl = ReturnType<typeof createMcpControl>;
 
 const NO_SESSION = 'Live status unavailable — no Claude session';
 const NO_AUTH = 'This Claude runtime does not support in-app sign-in';
+const SESSION_RESTARTED = 'Session restarted during sign-in — try again';
 /** How long watchPending() waits for `pending` servers to settle. */
 const PENDING_WATCH_MS = 30_000;
 const fn = <K extends keyof McpControlQuery>(q: McpControlQuery | null, k: K): q is McpControlQuery & Required<Pick<McpControlQuery, K>> =>
@@ -112,7 +113,10 @@ export function createMcpControl(deps: McpControlDeps) {
     if (t) { clearInterval(t); pollers.delete(k); }
   }
 
-  function startPoll(projectPath: string, scope: string | undefined, name: string) {
+  /** `q` is the session the sign-in started on: the CLI's OAuth callback
+   *  listener lives there, so once the scope's session is replaced or gone
+   *  (respawn, sweep, suspend, drain death) the sign-in can never complete. */
+  function startPoll(projectPath: string, scope: string | undefined, name: string, q: McpControlQuery) {
     stopPoll(projectPath, scope, name);
     const startedAt = now();
     const k = pollKey(projectPath, scope, name);
@@ -132,6 +136,11 @@ export function createMcpControl(deps: McpControlDeps) {
         return;
       }
       if (inFlight) return; // previous tick's status call still pending — never stack them
+      if (deps.getQuery(projectPath, scope, false) !== q) {
+        setMcpAuthState(projectPath, scope, name, { phase: 'error', error: SESSION_RESTARTED });
+        finish();
+        return;
+      }
       inFlight = true;
       let snap: McpLiveSnapshot;
       try { snap = await refresh(projectPath, scope, false); } finally { inFlight = false; }
@@ -243,7 +252,7 @@ export function createMcpControl(deps: McpControlDeps) {
       }
       setMcpAuthState(projectPath, scope, name, { phase: 'waiting', authUrl: res.authUrl });
       deps.openExternal(res.authUrl);
-      startPoll(projectPath, scope, name);
+      startPoll(projectPath, scope, name, q);
       await refresh(projectPath, scope, false);
       return { ok: true, state: 'awaiting-browser', authUrl: res.authUrl };
     },

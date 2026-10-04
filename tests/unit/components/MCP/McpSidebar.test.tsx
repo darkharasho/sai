@@ -6,8 +6,6 @@ const mockSai = {
   mcpRegistryList: vi.fn().mockResolvedValue([]),
   mcpAdd: vi.fn().mockResolvedValue({ success: true }),
   mcpRemove: vi.fn().mockResolvedValue({ success: true }),
-  mcpUpdate: vi.fn().mockResolvedValue({ success: true }),
-  mcpGetTools: vi.fn().mockResolvedValue([]),
   mcpStatus: vi.fn(),
   mcpRuntimeStatus: vi.fn(),
   mcpAuthenticate: vi.fn().mockResolvedValue({ ok: true, state: 'awaiting-browser', authUrl: 'https://a' }),

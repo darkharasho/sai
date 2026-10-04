@@ -116,6 +116,29 @@ describe('mcpControl', () => {
     expect(getMcpRuntimeStatus('/p', 's1').auth.cf).toEqual({ phase: 'error', error: 'invalid_grant' });
   });
 
+  it('authenticate(): the session the sign-in started on is replaced → error, polling stops', async () => {
+    const q = fakeQuery();
+    const { ctl, getQuery, push } = make(q);
+    await ctl.authenticate('/p', 's1', 'cf');
+    const other = fakeQuery();
+    getQuery.mockImplementation(() => other); // respawned (send, sweep, suspend…)
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(getMcpRuntimeStatus('/p', 's1').auth.cf).toEqual({ phase: 'error', error: 'Session restarted during sign-in — try again' });
+    expect(push).toHaveBeenLastCalledWith(expect.objectContaining({ auth: { cf: expect.objectContaining({ phase: 'error' }) } }));
+    (other.mcpServerStatus as any).mockClear();
+    await vi.advanceTimersByTimeAsync(6000);
+    expect(other.mcpServerStatus).not.toHaveBeenCalled();
+  });
+
+  it('authenticate(): the session the sign-in started on is gone → error', async () => {
+    const q = fakeQuery();
+    const { ctl, getQuery } = make(q);
+    await ctl.authenticate('/p', 's1', 'cf');
+    getQuery.mockImplementation(() => null);
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(getMcpRuntimeStatus('/p', 's1').auth.cf).toMatchObject({ phase: 'error' });
+  });
+
   it('second authenticate() replaces the first poller', async () => {
     const q = fakeQuery();
     const { ctl } = make(q);

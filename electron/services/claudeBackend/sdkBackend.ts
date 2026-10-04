@@ -552,7 +552,18 @@ export class SdkBackend implements ClaudeBackend {
       // an edit elsewhere, so it must never kill a live turn, a pending
       // background resume or a silent /compact — the message goes into the
       // live query and the flag waits for the next idle send.
-      const configChanged = !!session && !configEquals(session.config, wantConfig);
+      let configChanged = !!session && !configEquals(session.config, wantConfig);
+      // A waiting MCP sign-in pins the session too: the CLI's OAuth callback
+      // listener lives in this query, and a panel/nudge-spawned session (empty
+      // settings) always differs from the first send. The settings change is
+      // deferred until the sign-in settles — the next idle send still sees
+      // the mismatch and respawns. Exception: dropping out of bypass must take
+      // effect now, since a bypass session has no permission gate at all.
+      if (session && configChanged && isMcpSignInWaiting(projectPath, effectiveScope)
+        && !(session.config.permMode === 'bypass' && wantConfig.permMode !== 'bypass')) {
+        configChanged = false;
+        this._applyModelLive(session, wantConfig.model);
+      }
       const mcpRespawn = !!session?.mcpStale && !this._isBusyForMcpRestart(session);
       if (session && (configChanged || mcpRespawn)) {
         this._resolveGatesForScope(scopeKey, 'Session restarted with new settings');
@@ -750,6 +761,14 @@ export class SdkBackend implements ClaudeBackend {
       || session.awaitingInterruptResult
       || session.pendingBackgroundResume
       || (session.pendingWakeup && (session.wakeupDeadline == null || Date.now() < session.wakeupDeadline));
+  }
+
+  /** Best-effort: run a deferred-respawn turn on the model the user picked.
+   *  session.config is left unchanged so the respawn still happens later. */
+  private _applyModelLive(session: ScopeSession, model: string): void {
+    const q = session.query as { setModel?: (m?: string) => Promise<void> };
+    if (!model || model === session.config.model || typeof q.setModel !== 'function') return;
+    try { void q.setModel(model).catch(() => { /* respawn applies it once the sign-in settles */ }); } catch { /* same */ }
   }
 
   /** _isBusy plus an in-flight silent /compact (suppressForward — compact()
@@ -1505,13 +1524,9 @@ export class SdkBackend implements ClaudeBackend {
           // Live MCP/plugin status for the sidebar (SDK-only capability — the
           // CLI never reports per-server connection state).
           if (m?.type === 'system' && m?.subtype === 'init' && Array.isArray(m?.mcp_servers)) {
-            recordMcpRuntimeStatus(
-              projectPath,
-              effectiveScope,
-              m.mcp_servers as Array<{ name?: string; status?: string }>,
-              Array.isArray(m?.plugins) ? (m.plugins as Array<{ name?: string; path?: string }>) : undefined,
-            );
-            getMainWin()?.webContents.send('mcp:runtime-status', getMcpRuntimeStatus(projectPath, effectiveScope));
+            recordMcpRuntimeStatus(projectPath, effectiveScope, m.mcp_servers as Array<{ name?: string; status?: string }>);
+            const win = getMainWin();
+            if (win && !win.isDestroyed()) win.webContents.send('mcp:runtime-status', getMcpRuntimeStatus(projectPath, effectiveScope));
             notifyMcpInitFrame(projectPath, effectiveScope);
           }
           // Mid-session command-list changes (skills discovered dynamically):
