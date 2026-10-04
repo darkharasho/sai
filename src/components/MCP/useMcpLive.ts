@@ -27,8 +27,13 @@ export function useMcpLive(
   // install another scope's state nor clobber newer pushed servers/auth.
   const epoch = useRef(0);
   const pushed = useRef(false);
+  /** Last snapshot, readable from the push listener without a state updater. */
+  const latest = useRef<McpLiveSnapshot | null>(null);
+  latest.current = snapshot;
 
-  const refresh = useCallback(async () => {
+  /** `factsOnly`: keep the current servers/auth and take only available +
+   *  capabilities from the fetch (a push already carried newer servers). */
+  const refresh = useCallback(async (factsOnly = false) => {
     if (!enabled || !projectPath) return;
     const fetcher = opts.spawn ? api.mcpStatus : api.mcpRuntimeStatus;
     if (typeof fetcher !== 'function') return;
@@ -39,7 +44,7 @@ export function useMcpLive(
       if (!s || typeof s !== 'object') return;
       if (epoch.current !== startEpoch) return;
       if (s.projectPath !== projectPath || s.scope !== wantScope) return;
-      if (pushed.current !== startPushed) {
+      if (factsOnly || pushed.current !== startPushed) {
         // A push landed while we waited: keep its servers/auth, take the facts only a full snapshot carries.
         setSnapshot((prev) => (prev ? { ...prev, available: s.available, capabilities: s.capabilities } : prev));
       } else {
@@ -54,16 +59,21 @@ export function useMcpLive(
     setSnapshot(null);
     if (!enabled) return;
     void refresh();
-    // A push is either per-scope (servers + auth) or a full snapshot; either
-    // way keep capabilities/available from the last full snapshot.
+    // A push is either per-scope (servers + auth) or a full snapshot. A
+    // per-scope push keeps capabilities/available from the last full one —
+    // unless that said "no session": then the push is the first sign of one
+    // (an init frame), so re-fetch the facts only a full snapshot carries.
     const off = api.onMcpRuntimeStatus?.((p: McpRuntimePush | McpLiveSnapshot) => {
       if (!p || p.projectPath !== projectPath || p.scope !== wantScope) return;
+      const full = 'capabilities' in p && !!p.capabilities;
+      const sessionAppeared = !full && !latest.current?.available; // null too: the first fetch may predate the session
       pushed.current = true;
       setSnapshot((prev) => ({
-        available: prev?.available ?? true,
+        available: prev?.available ?? false,
         capabilities: prev?.capabilities ?? EMPTY_CAPS,
         ...p,
       }));
+      if (sessionAppeared) void refresh(true);
     });
     return () => { epoch.current++; off?.(); };
   }, [enabled, projectPath, wantScope, refresh]);
@@ -75,11 +85,12 @@ export function useMcpLive(
 
   return {
     snapshot,
-    refresh,
+    refresh: () => refresh(),
     reconnect: (name: string) => call<McpActionResult>('mcpReconnect', name),
-    /** Persists by config `name`; live-toggles by `controlName` (the SDK's name). */
+    /** Persists by config `name`; live-toggles by `controlName` (the SDK's name).
+     *  Without `spawn` (config-only) main only persists and flags sessions. */
     toggle: (name: string, on: boolean, source: McpSource, controlName: string = name) =>
-      call<McpActionResult>('mcpToggle', name, on, source, controlName),
+      call<McpActionResult>('mcpToggle', name, on, source, controlName, opts.spawn),
     authenticate: (name: string) => call<McpAuthResult>('mcpAuthenticate', name),
     cancelAuth: (name: string) => call<void>('mcpAuthCancel', name),
     submitCallbackUrl: (name: string, url: string) => call<McpActionResult>('mcpSubmitCallbackUrl', name, url),

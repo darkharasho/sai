@@ -1,3 +1,14 @@
+/** `.mcp-btn` — shared by the panel and the chat nudge (which renders outside
+ *  the panel, so it injects this rule set itself). */
+export const MCP_BUTTON_CSS = `
+      .mcp-btn { background: var(--surface-2); border: 1px solid var(--border-subtle); color: var(--text); border-radius: 6px; padding: 3px 9px; font-size: 11.5px; cursor: pointer; white-space: nowrap; }
+      .mcp-btn:hover { border-color: var(--border-strong); }
+      .mcp-btn.pri { background: var(--accent); border-color: var(--accent); color: var(--bg-primary); font-weight: 600; }
+      .mcp-btn.pri:hover { background: var(--accent-hover); }
+      .mcp-btn.danger { color: var(--red); }
+      .mcp-btn:disabled { opacity: .45; cursor: not-allowed; }
+`;
+
 /** Shared MCP panel CSS (rows, dots, group headers, buttons, error banner).
  *  Rendered once at the McpSidebar root, above every view. */
 export default function McpStyles() {
@@ -19,12 +30,7 @@ export default function McpStyles() {
       .mcp-dot.off { border: 1px solid var(--text-muted); }
       .mcp-dot.unknown { background: var(--text-muted); opacity: .5; }
       @keyframes mcp-pulse { to { opacity: .3; } }
-      .mcp-btn { background: var(--surface-2); border: 1px solid var(--border-subtle); color: var(--text); border-radius: 6px; padding: 3px 9px; font-size: 11.5px; cursor: pointer; white-space: nowrap; }
-      .mcp-btn:hover { border-color: var(--border-strong); }
-      .mcp-btn.pri { background: var(--accent); border-color: var(--accent); color: var(--bg-primary); font-weight: 600; }
-      .mcp-btn.pri:hover { background: var(--accent-hover); }
-      .mcp-btn.danger { color: var(--red); }
-      .mcp-btn:disabled { opacity: .45; cursor: not-allowed; }
+      ${MCP_BUTTON_CSS}
       .mcp-hint { font-size: 10px; color: var(--text-muted); border: 1px dashed var(--border-strong); border-radius: 4px; padding: 1px 5px; }
       .mcp-spin { animation: mcp-rot 1s linear infinite; color: var(--text-muted); }
       @keyframes mcp-rot { to { transform: rotate(360deg); } }
@@ -72,9 +78,10 @@ export default function McpStyles() {
       .mcp-server-form .transport-btn { padding: 4px 10px; background: var(--surface-4); border: none; border-radius: 4px; font-size: 10px; color: var(--text-muted); cursor: pointer; }
       .mcp-server-form .transport-btn.active { background: var(--accent); color: var(--bg-primary); font-weight: 600; }
       .mcp-server-form .env-row { display: flex; align-items: center; gap: 4px; margin-bottom: 4px; }
-      .mcp-server-form .env-key { flex: 2; }
-      .mcp-server-form .env-eq { color: var(--text-muted); font-size: 11px; }
-      .mcp-server-form .env-val { flex: 3; }
+      /* Keys like "Authorization" must fit (~16 mono chars at 300px); long values may truncate. */
+      .mcp-server-form .env-key { flex: 1.15 1 0; min-width: 0; padding-left: 8px; padding-right: 8px; }
+      .mcp-server-form .env-eq { color: var(--text-muted); font-size: 11px; flex-shrink: 0; }
+      .mcp-server-form .env-val { flex: 1 1 0; min-width: 0; padding-left: 8px; padding-right: 8px; }
       .mcp-server-form .env-remove { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 14px; padding: 0 4px; }
       .mcp-server-form .env-remove:hover { color: var(--red); }
       .mcp-server-form .add-env-btn { display: flex; align-items: center; gap: 3px; background: none; border: none; color: var(--accent); cursor: pointer; font-size: 10px; padding: 4px 0; }

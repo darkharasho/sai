@@ -56,7 +56,26 @@ describe('useMcpLive', () => {
   it('toggle passes scope and controlName', async () => {
     const { result } = renderHook(() => useMcpLive('/p', 's1', { spawn: true }));
     await act(() => result.current.toggle('plugin:cf:api', false, 'plugin', 'api'));
-    expect(sai.mcpToggle).toHaveBeenCalledWith('/p', 's1', 'plugin:cf:api', false, 'plugin', 'api');
+    expect(sai.mcpToggle).toHaveBeenCalledWith('/p', 's1', 'plugin:cf:api', false, 'plugin', 'api', true);
+  });
+
+  it('config-only (spawn:false) toggles tell main not to touch a live session', async () => {
+    const { result } = renderHook(() => useMcpLive('/p', 's1', { spawn: false }));
+    await act(() => result.current.toggle('gh', true, 'user'));
+    expect(sai.mcpToggle).toHaveBeenCalledWith('/p', 's1', 'gh', true, 'user', 'gh', false);
+  });
+
+  it('a per-scope push after a "no session" snapshot re-fetches only available + capabilities', async () => {
+    const none = { status: false, reconnect: false, toggle: false, authenticate: false, clearAuth: false, submitCallbackUrl: false };
+    sai.mcpRuntimeStatus.mockResolvedValueOnce(snap({ available: false, capabilities: none }));
+    const { result } = renderHook(() => useMcpLive('/p', 's1', { spawn: false }));
+    await waitFor(() => expect(result.current.snapshot?.available).toBe(false));
+    sai.mcpRuntimeStatus.mockResolvedValueOnce(snap({ servers: { stale: { name: 'stale', status: 'pending' } } }));
+    act(() => pushCb?.({ projectPath: '/p', scope: 's1', servers: { cf: { name: 'cf', status: 'needs-auth' } }, auth: {} }));
+    await waitFor(() => expect(result.current.snapshot?.available).toBe(true));
+    expect(result.current.snapshot!.capabilities.authenticate).toBe(true);
+    expect(Object.keys(result.current.snapshot!.servers)).toEqual(['cf']);
+    expect(sai.mcpStatus).not.toHaveBeenCalled();
   });
 
   it('accepts a full-snapshot push', async () => {

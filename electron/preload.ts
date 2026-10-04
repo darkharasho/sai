@@ -430,16 +430,16 @@ contextBridge.exposeInMainWorld('sai', {
   // `scope` on add/remove/update is the panel's chat scope, restarted (when
   // idle) so the edit shows up live.
   mcpList: (projectPath?: string) => ipcRenderer.invoke('mcp:list', projectPath),
-  mcpAdd: (config: any, projectPath?: string, scope?: string) => ipcRenderer.invoke('mcp:add', config, projectPath, scope),
-  mcpRemove: (name: string, source?: 'user' | 'project', projectPath?: string, scope?: string) =>
-    ipcRenderer.invoke('mcp:remove', name, source, projectPath, scope),
+  mcpAdd: (config: any, projectPath?: string, scope?: string, live?: boolean) => ipcRenderer.invoke('mcp:add', config, projectPath, scope, live),
+  mcpRemove: (name: string, source?: 'user' | 'project', projectPath?: string, scope?: string, live?: boolean) =>
+    ipcRenderer.invoke('mcp:remove', name, source, projectPath, scope, live),
   mcpRegistryList: () => ipcRenderer.invoke('mcp:registryList'),
   mcpRuntimeStatus: (projectPath: string, scope?: string) => ipcRenderer.invoke('mcp:runtimeStatus', projectPath, scope),
   mcpStatus: (projectPath: string, scope?: string) => ipcRenderer.invoke('mcp:status', projectPath, scope),
   mcpReconnect: (projectPath: string, scope: string | undefined, name: string) => ipcRenderer.invoke('mcp:reconnect', projectPath, scope, name),
   // `name` = config key (persisted), `controlName` = live session name (defaults to `name`).
-  mcpToggle: (projectPath: string, scope: string | undefined, name: string, enabled: boolean, source: string, controlName?: string) =>
-    ipcRenderer.invoke('mcp:toggle', projectPath, scope, name, enabled, source, controlName),
+  mcpToggle: (projectPath: string, scope: string | undefined, name: string, enabled: boolean, source: string, controlName?: string, live?: boolean) =>
+    ipcRenderer.invoke('mcp:toggle', projectPath, scope, name, enabled, source, controlName, live),
   mcpAuthenticate: (projectPath: string, scope: string | undefined, name: string) => ipcRenderer.invoke('mcp:authenticate', projectPath, scope, name),
   mcpAuthCancel: (projectPath: string, scope: string | undefined, name: string) => ipcRenderer.invoke('mcp:authCancel', projectPath, scope, name),
   mcpSubmitCallbackUrl: (projectPath: string, scope: string | undefined, name: string, url: string) =>

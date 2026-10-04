@@ -114,6 +114,20 @@ describe('mcp service', () => {
       expect(backend.getLiveQuery).not.toHaveBeenCalled();
     });
 
+    it('config-only (live:false, a non-Claude chat): edits and toggles only flag sessions — nothing is spawned or restarted', async () => {
+      await handler('mcp:add')({ name: 'gh', transport: 'stdio', command: 'x', source: 'project' }, '/p', 's1', false);
+      await handler('mcp:remove')('gh', 'user', '/p', 's1', false);
+      expect(await handler('mcp:toggle')('/p', 's1', 'gh', true, 'user', 'gh', false)).toEqual({ ok: true });
+      await flush();
+      expect(backend.markMcpStale.mock.calls).toEqual([
+        ['/p', undefined, { restart: false, projectOnly: true }],
+        ['/p', undefined, { restart: false, projectOnly: false }],
+        ['/p', undefined, { restart: false, projectOnly: false }],
+      ]);
+      expect(mcpConfig.setMcpServerDisabled).toHaveBeenCalledWith(expect.anything(), 'gh', 'user', false);
+      expect(backend.getLiveQuery).not.toHaveBeenCalled();
+    });
+
     it('with no project open, sessions are only flagged — nothing is spawned', async () => {
       await handler('mcp:add')({ name: 'gh', transport: 'stdio' });
       await flush();

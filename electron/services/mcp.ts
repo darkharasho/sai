@@ -32,10 +32,16 @@ function mcpControl() {
 /** A saved config change reaches sessions by resume-respawn: the panel scope
  *  right away when idle, the rest on their next idle send. A user/plugin edit
  *  touches every project; a project .mcp.json edit only its own. With no
- *  project open there is no panel scope to restart — sessions are only flagged.
- *  Not awaited: the respawned session's status arrives as a push. */
-function applyConfig(projectPath: string | undefined, scope: string | undefined, source: McpSource | undefined): void {
+ *  project open, or from a config-only panel (`live: false` — a non-Claude
+ *  chat, which has no Claude session to restart and must never get one),
+ *  sessions are only flagged. Not awaited: the respawned session's status
+ *  arrives as a push. */
+function applyConfig(projectPath: string | undefined, scope: string | undefined, source: McpSource | undefined, live = true): void {
   if (!projectPath) { getClaudeBackend().markMcpStale?.('', undefined, { restart: false }); return; }
+  if (!live) {
+    getClaudeBackend().markMcpStale?.(projectPath, undefined, { restart: false, projectOnly: source === 'project' });
+    return;
+  }
   mcpControl().applyConfig(projectPath, scope, { projectOnly: source === 'project' }).catch(() => { /* next status call shows it */ });
 }
 
@@ -54,18 +60,19 @@ export function registerMcpHandlers() {
     try { return listMcpServers(pathsFor(projectPath)); } catch (err) { return fail(err, 'Failed to read MCP config'); }
   });
 
-  ipcMain.handle('mcp:add', async (_e, config: McpServerConfig, projectPath?: string, scope?: string) => {
+  // `live: false` = config-only panel (non-Claude chat): never spawn or restart.
+  ipcMain.handle('mcp:add', async (_e, config: McpServerConfig, projectPath?: string, scope?: string, live?: boolean) => {
     try { upsertMcpServer(pathsFor(projectPath), config); }
     catch (err) { return fail(err, 'Failed to save MCP server'); }
-    applyConfig(projectPath, scope, config.source ?? 'user');
+    applyConfig(projectPath, scope, config.source ?? 'user', live !== false);
     return { success: true };
   });
 
-  ipcMain.handle('mcp:remove', async (_e, name: string, source: 'user' | 'project' = 'user', projectPath?: string, scope?: string) => {
+  ipcMain.handle('mcp:remove', async (_e, name: string, source: 'user' | 'project' = 'user', projectPath?: string, scope?: string, live?: boolean) => {
     if (name.startsWith('plugin:')) return { error: 'Plugin-provided MCP servers must be removed via the plugin itself' };
     try { removeMcpServer(pathsFor(projectPath), name, source); }
     catch (err) { return fail(err, 'Failed to remove MCP server'); }
-    applyConfig(projectPath, scope, source);
+    applyConfig(projectPath, scope, source, live !== false);
     return { success: true };
   });
 
@@ -77,12 +84,17 @@ export function registerMcpHandlers() {
   // live session knows the server by (plugin servers differ).
   ipcMain.handle('mcp:toggle', async (
     _e, projectPath: string, scope: string | undefined, name: string, enabled: boolean, source: McpSource, controlName: string = name,
+    liveArg?: boolean,
   ): Promise<McpActionResult> => {
+    const allowLive = liveArg !== false;
     // claude.ai connectors have no local config — the live session is all there is.
-    if (source === 'claudeai') return mcpControl().toggle(projectPath, scope, controlName, enabled);
+    if (source === 'claudeai') {
+      return allowLive ? mcpControl().toggle(projectPath, scope, controlName, enabled) : { ok: false, error: 'claude.ai connectors are toggled from a Claude chat' };
+    }
     // Persist first so new sessions agree, then flip the live one.
     try { setMcpServerDisabled(pathsFor(projectPath), name, source, !enabled); }
     catch (err: any) { return { ok: false, error: err?.message || 'Failed to save' }; }
+    if (!allowLive) { applyConfig(projectPath, scope, source, false); return { ok: true }; }
     // Only an existing session is flipped — one spawned now reads the saved file.
     const hasLive = !!getClaudeBackend().getLiveQuery?.(projectPath, scope, { create: false });
     const live: McpActionResult = hasLive ? await mcpControl().toggle(projectPath, scope, controlName, enabled) : { ok: true };

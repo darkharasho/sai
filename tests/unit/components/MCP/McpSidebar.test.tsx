@@ -269,7 +269,7 @@ describe('McpSidebar', () => {
     fireEvent.change(getByPlaceholderText('npx'), { target: { value: 'run' } });
     fireEvent.click(getByText('Add Server'));
     await waitFor(() => expect(mockSai.mcpAdd).toHaveBeenCalledWith(
-      { name: 'srv', transport: 'stdio', command: 'run', source: 'user' }, '/p', 's1'));
+      { name: 'srv', transport: 'stdio', command: 'run', source: 'user' }, '/p', 's1', true));
     expect(await findByText('Installed')).toBeTruthy();
   });
 
@@ -305,7 +305,39 @@ describe('McpSidebar', () => {
     fireEvent.change(getByDisplayValue('https://gh/sse'), { target: { value: 'https://gh/new' } });
     fireEvent.click(getByText('Save'));
     await waitFor(() => expect(mockSai.mcpAdd).toHaveBeenCalledWith(
-      { name: 'gh', transport: 'sse', url: 'https://gh/new', source: 'user' }, '/p', 's1'));
+      { name: 'gh', transport: 'sse', url: 'https://gh/new', source: 'user' }, '/p', 's1', true));
     expect(await findByText('Servers')).toBeTruthy();
+  });
+
+  for (const provider of ['gemini', 'kimi'] as const) {
+    it(`${provider} chats are config-only: no Claude session is spawned, even by an edit`, async () => {
+      mockSai.mcpList.mockResolvedValue([{ name: 'gh', transport: 'stdio', command: 'gh', enabled: true, source: 'user' }]);
+      mockSai.mcpRuntimeStatus.mockResolvedValue(liveSnap({}, {
+        available: false,
+        capabilities: { status: false, reconnect: false, toggle: false, authenticate: false, clearAuth: false, submitCallbackUrl: false },
+      }));
+      mockSai.mcpToggle = vi.fn().mockResolvedValue({ ok: true });
+      const { findByText, getByText } = render(<McpSidebar provider={provider} projectPath="/p" scope="s1" />);
+      expect(await findByText('Live status unavailable — showing configuration only.')).toBeTruthy();
+      expect(mockSai.mcpRuntimeStatus).toHaveBeenCalledWith('/p', 's1');
+      fireEvent.click(getByText('gh'));
+      fireEvent.click(getByText('Disable'));
+      await waitFor(() => expect((mockSai as any).mcpToggle).toHaveBeenCalledWith('/p', 's1', 'gh', false, 'user', 'gh', false));
+      expect(mockSai.mcpStatus).not.toHaveBeenCalled();
+      expect(mockSai.codexMcpRuntimeStatus).not.toHaveBeenCalled();
+    });
+  }
+
+  it('registry Install refuses a name already configured', async () => {
+    mockSai.mcpList.mockResolvedValue([{ name: 'github', transport: 'stdio', command: 'gh', enabled: true, source: 'user' }]);
+    mockSai.mcpRegistryList.mockResolvedValue([
+      { name: 'github', title: 'GitHub', description: 'd', transport: 'stdio', installed: false, packages: [], remotes: [] },
+    ]);
+    const { findByText, getByText } = render(<McpSidebar projectPath="/p" scope="s1" />);
+    await findByText('github');
+    fireEvent.click(getByText('Browse'));
+    fireEvent.click(await findByText('Install'));
+    expect(await findByText(/already exists/)).toBeTruthy();
+    expect(mockSai.mcpAdd).not.toHaveBeenCalled();
   });
 });

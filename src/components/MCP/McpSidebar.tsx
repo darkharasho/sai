@@ -38,6 +38,10 @@ interface McpSidebarProps {
 
 export default function McpSidebar({ provider = 'claude', projectPath, scope }: McpSidebarProps) {
   const isCodex = provider === 'codex';
+  // Only a Claude chat has a Claude session behind it. Every other provider
+  // gets config-only mode: config + cached status, no session spawned (not
+  // even by a config edit), live actions off.
+  const isClaude = provider === 'claude';
   const [tab, setTab] = useState<Tab>('installed');
   const [search, setSearch] = useState('');
   const [installed, setInstalled] = useState<McpServer[]>([]);
@@ -126,7 +130,7 @@ export default function McpSidebar({ provider = 'claude', projectPath, scope }: 
     }
   }, [isCodex, tab]);
 
-  const live = useMcpLive(projectPath, scope, { spawn: true, enabled: !isCodex });
+  const live = useMcpLive(projectPath, scope, { spawn: isClaude, enabled: !isCodex });
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [busy, setBusy] = useState<Record<string, boolean>>({});
   const [actionError, setActionError] = useState<string | null>(null);
@@ -140,7 +144,7 @@ export default function McpSidebar({ provider = 'claude', projectPath, scope }: 
   const handleSave = async (config: McpServerConfig) => {
     setActionError(null);
     try {
-      const res = await window.sai.mcpAdd(config, projectPath, scope);
+      const res = await window.sai.mcpAdd(config, projectPath, scope, isClaude);
       if (res?.error) { setActionError(res.error); return; }
     } catch (e: any) {
       setActionError(e?.message || 'Failed to save server');
@@ -151,6 +155,16 @@ export default function McpSidebar({ provider = 'claude', projectPath, scope }: 
     setView(view === 'edit' && selectedKey === `${config.source ?? 'user'}:${config.name}` ? 'detail' : 'list');
   };
   const handleAdd = (config: McpServerConfig) => handleSave(config);
+  /** Registry installs skip the form, so they get its duplicate-name check here. */
+  const handleInstall = (config: McpServerConfig): boolean => {
+    const target = config.source ?? 'user';
+    if (installed.some((s) => s.name === config.name && (s.source ?? 'user') === target)) {
+      setActionError(`A server named "${config.name}" already exists in ${target === 'project' ? 'this project' : 'the global config'}.`);
+      return false;
+    }
+    void handleAdd(config);
+    return true;
+  };
 
   const withBusy = async (row: McpRow, fn: () => Promise<{ ok: boolean; error?: string } | void>) => {
     setBusy((b) => ({ ...b, [row.key]: true }));
@@ -185,7 +199,7 @@ export default function McpSidebar({ provider = 'claude', projectPath, scope }: 
     if (!row.removable) return;
     setActionError(null);
     try {
-      const res = await window.sai.mcpRemove(row.name, row.source as 'user' | 'project', projectPath, scope);
+      const res = await window.sai.mcpRemove(row.name, row.source as 'user' | 'project', projectPath, scope, isClaude);
       if (res?.error) { setActionError(res.error); return; }
       setView('list');
       setSelectedKey(null);
@@ -277,8 +291,7 @@ export default function McpSidebar({ provider = 'claude', projectPath, scope }: 
             server={selectedRegistryServer}
             onBack={() => { setView('list'); setSelectedRegistryServer(null); }}
             onInstall={(config) => {
-              handleAdd(config);
-              setSelectedRegistryServer(null);
+              if (handleInstall(config)) setSelectedRegistryServer(null);
             }}
         />
       );
@@ -365,7 +378,7 @@ export default function McpSidebar({ provider = 'claude', projectPath, scope }: 
           {!loading && !error && tab === 'installed' && live.snapshot && !live.snapshot.available && (
             <div className="mcp-unavailable">Live status unavailable — showing configuration only.</div>
           )}
-          {!loading && !error && tab === 'installed' && actionError && (
+          {!loading && !error && actionError && (
             <div className="mcp-error" role="alert">{actionError}</div>
           )}
           {!loading && !error && tab === 'installed' && (
@@ -406,7 +419,7 @@ export default function McpSidebar({ provider = 'claude', projectPath, scope }: 
                 ) : (
                   <button className="card-install-btn" onClick={(e) => {
                     e.stopPropagation();
-                    handleAdd({ name: server.name, transport: server.transport });
+                    handleInstall({ name: server.name, transport: server.transport });
                   }}>Install</button>
                 )}
                 <ChevronRight size={12} className="card-chevron" />

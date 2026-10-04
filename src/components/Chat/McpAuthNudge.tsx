@@ -1,8 +1,9 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { X } from 'lucide-react';
 import { useMcpLive } from '../MCP/useMcpLive';
 import { HIDDEN_LIVE_NAMES, MCP_TERMINAL_HINT, mcpDisplayName } from '../MCP/mcpView';
 import { isHttpUrl } from '../MCP/McpAuthCard';
+import { MCP_BUTTON_CSS } from '../MCP/McpStyles';
 
 interface McpAuthNudgeProps {
   projectPath: string;
@@ -19,7 +20,9 @@ const NOT_WEB = "The server's sign-in link isn't a web address, so it was not op
 export default function McpAuthNudge({ projectPath, scope, enabled = true, onOpenMcpPanel }: McpAuthNudgeProps) {
   const live = useMcpLive(projectPath, scope, { spawn: false, enabled });
   const [dismissedKey, setDismissedKey] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  /** Errors and in-flight starts belong to the server they came from. */
+  const [error, setError] = useState<{ name: string; message: string } | null>(null);
+  const [starting, setStarting] = useState<string | null>(null);
 
   // A live `connected` status always wins over leftover auth state, so only
   // servers whose current status is needs-auth count.
@@ -31,43 +34,55 @@ export default function McpAuthNudge({ projectPath, scope, enabled = true, onOpe
     [live.snapshot],
   );
   const key = needs.join('|');
+  // A dismissal covers one set of servers: any change to the set (even back
+  // to the dismissed one later) brings the nudge back.
+  useEffect(() => { setDismissedKey((d) => (d === key ? d : null)); }, [key]);
   if (!enabled || needs.length === 0 || dismissedKey === key) return null;
 
   const caps = live.snapshot?.capabilities;
   const only = needs.length === 1 ? needs[0] : null;
   const auth = only ? live.snapshot?.auth?.[only] : undefined;
+  const waitingCount = needs.filter((n) => live.snapshot?.auth?.[n]?.phase === 'waiting').length;
 
   const signIn = async (name: string) => {
     setError(null);
+    setStarting(name);
     try {
       const res = await live.authenticate(name);
-      if (!res.ok) setError(res.error || 'Sign-in failed.');
+      if (!res.ok) setError({ name, message: res.error || 'Sign-in failed.' });
       else if (res.state === 'awaiting-browser' && !isHttpUrl(res.authUrl)) {
         live.cancelAuth(name).catch(() => {});
-        setError(NOT_WEB);
+        setError({ name, message: NOT_WEB });
       }
     } catch (e: any) {
-      setError(e?.message || 'Sign-in failed.');
+      setError({ name, message: e?.message || 'Sign-in failed.' });
+    } finally {
+      setStarting(null);
     }
   };
 
   const badLink = auth?.phase === 'waiting' && !!auth.authUrl && !isHttpUrl(auth.authUrl);
+  // A live waiting state is newer than a local error from an earlier attempt.
+  const waiting = auth?.phase === 'waiting' && !badLink;
+  const ownError = only && error?.name === only && !waiting ? error.message : null;
   let message: React.ReactNode;
   let action: React.ReactNode = null;
   if (!only) {
-    message = <span>{needs.length} servers need sign-in</span>;
-    action = onOpenMcpPanel && <button type="button" className="mcp-nudge-btn pri" onClick={onOpenMcpPanel}>Review</button>;
-  } else if (auth?.phase === 'waiting' && !badLink && !error) {
+    message = <span>{needs.length} servers need sign-in{waitingCount > 0 ? ` · ${waitingCount} waiting for browser sign-in` : ''}</span>;
+    action = onOpenMcpPanel && <button type="button" className="mcp-btn pri" onClick={onOpenMcpPanel}>Review</button>;
+  } else if (waiting) {
     message = <span><b>{mcpDisplayName(only)}</b> — Waiting for browser sign-in…</span>;
-    action = <button type="button" className="mcp-nudge-btn" onClick={() => void live.cancelAuth(only)}>Cancel</button>;
+    action = <button type="button" className="mcp-btn" onClick={() => void live.cancelAuth(only)}>Cancel</button>;
+  } else if (starting === only) {
+    message = <span><b>{mcpDisplayName(only)}</b> — Opening your browser to sign in…</span>;
   } else {
-    const failed = !!error || badLink || auth?.phase === 'timeout' || auth?.phase === 'error';
-    const detail = error ?? (badLink ? NOT_WEB : auth?.phase === 'timeout' ? "Sign-in didn't complete." : auth?.phase === 'error' ? auth.error || 'Sign-in failed.' : null);
+    const failed = !!ownError || badLink || auth?.phase === 'timeout' || auth?.phase === 'error';
+    const detail = ownError ?? (badLink ? NOT_WEB : auth?.phase === 'timeout' ? "Sign-in didn't complete." : auth?.phase === 'error' ? auth.error || 'Sign-in failed.' : null);
     message = failed
       ? <span><b>{mcpDisplayName(only)}</b> — {detail}</span>
       : <span><b>{mcpDisplayName(only)}</b> needs sign-in — its tools aren't available in this chat.</span>;
     action = caps?.authenticate
-      ? <button type="button" className="mcp-nudge-btn pri" onClick={() => void signIn(only)}>{failed ? 'Retry' : 'Sign in'}</button>
+      ? <button type="button" className="mcp-btn pri" onClick={() => void signIn(only)}>{failed ? 'Retry' : 'Sign in'}</button>
       : <span className="mcp-nudge-hint">{MCP_TERMINAL_HINT}</span>;
   }
 
@@ -84,10 +99,7 @@ export default function McpAuthNudge({ projectPath, scope, enabled = true, onOpe
         .mcp-nudge-hint { font-size:11px; color:var(--text-secondary); }
         .mcp-nudge-x { margin-left:auto; background:none; border:none; color:var(--text-muted); cursor:pointer; padding:2px; display:flex; }
         .mcp-nudge-x:hover { color:var(--text); }
-        .mcp-nudge-btn { background:var(--surface-2); border:1px solid var(--border-subtle); color:var(--text); border-radius:6px; padding:3px 9px; font-size:11.5px; cursor:pointer; white-space:nowrap; }
-        .mcp-nudge-btn:hover { border-color:var(--border-strong); }
-        .mcp-nudge-btn.pri { background:var(--accent); border-color:var(--accent); color:var(--bg-primary); font-weight:600; }
-        .mcp-nudge-btn.pri:hover { background:var(--accent-hover); }
+        ${MCP_BUTTON_CSS}
       `}</style>
     </div>
   );
