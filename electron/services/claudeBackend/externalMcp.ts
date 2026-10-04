@@ -142,7 +142,7 @@ function readJson<T>(p: string, fallback: T): T {
   return fallback;
 }
 
-function readPluginMcpFile(installPath: string): Record<string, McpConfigEntry> {
+export function readPluginMcpFile(installPath: string): Record<string, McpConfigEntry> {
   const data = readJson<Record<string, unknown>>(path.join(installPath, '.mcp.json'), {});
   const servers = data.mcpServers && typeof data.mcpServers === 'object'
     ? (data.mcpServers as Record<string, McpConfigEntry>)
