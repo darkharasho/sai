@@ -2,9 +2,10 @@ import { useState, useEffect, useMemo } from 'react';
 import { ChevronRight, Plus, Search, Server } from 'lucide-react';
 import McpServerList from './McpServerList';
 import McpStyles from './McpStyles';
-import { useMcpLive } from './useMcpLive';
+import { useMcpLive, EMPTY_CAPS } from './useMcpLive';
 import { buildMcpRows, groupMcpRows, needsAttention, type McpRow } from './mcpView';
 import McpDetail from './McpDetail';
+import { isHttpUrl } from './McpAuthCard';
 import McpAddServer from './McpAddServer';
 import McpRegistryDetail from './McpRegistryDetail';
 import McpIcon from './McpIcon';
@@ -13,7 +14,7 @@ import SaiLogo from '../SaiLogo';
 import type { AIProvider, McpServer, McpServerConfig, RegistryMcpServer } from '../../types';
 
 type Tab = 'installed' | 'browse';
-type View = 'list' | 'detail' | 'add' | 'registry-detail';
+type View = 'list' | 'detail' | 'add' | 'edit' | 'registry-detail';
 
 type CodexMcpRuntimeStatus = {
   available: boolean;
@@ -152,7 +153,14 @@ export default function McpSidebar({ provider = 'claude', projectPath, scope }: 
     }
   };
 
-  const handleSignIn = (row: McpRow) => withBusy(row, () => live.authenticate(row.controlName));
+  const handleSignIn = (row: McpRow) => withBusy(row, async () => {
+    const res = await live.authenticate(row.controlName);
+    if (res.ok && res.state === 'awaiting-browser' && !isHttpUrl(res.authUrl)) {
+      void live.cancelAuth(row.controlName);
+      return { ok: false, error: "The server's sign-in link isn't a web address, so it was not opened." };
+    }
+    return res.ok ? { ok: true } : res;
+  });
   const handleRetry = (row: McpRow) => withBusy(row, () => live.reconnect(row.controlName));
   const handleToggle = (row: McpRow) => withBusy(row, async () => {
     try {
@@ -269,14 +277,23 @@ export default function McpSidebar({ provider = 'claude', projectPath, scope }: 
     }
 
     if (view === 'detail' && selectedRow) {
-      // Interim wiring until the new detail view lands.
       return (
         <McpDetail
-            server={selectedRow.server ?? { name: selectedRow.name, transport: 'stdio', enabled: true }}
+            row={selectedRow}
+            capabilities={live.snapshot?.capabilities ?? EMPTY_CAPS}
+            available={!!live.snapshot?.available}
+            busy={!!busy[selectedRow.key]}
+            error={actionError}
             onBack={() => { setView('list'); setSelectedKey(null); }}
-            onRemove={() => handleRemove(selectedRow)}
-            onToggleEnabled={() => handleToggle(selectedRow)}
-            onRestart={() => handleRetry(selectedRow)}
+            onReconnect={handleRetry}
+            onToggle={handleToggle}
+            onSignIn={handleSignIn}
+            onCancelAuth={(r) => { void live.cancelAuth(r.controlName); }}
+            onSubmitCallbackUrl={(r, url) => withBusy(r, () => live.submitCallbackUrl(r.controlName, url))}
+            onSignOut={(r) => withBusy(r, () => live.signOut(r.controlName))}
+            // The edit form arrives with the server form task; until then fall through to the list.
+            onEdit={() => setView('edit')}
+            onRemove={handleRemove}
         />
       );
     }
@@ -578,12 +595,13 @@ export default function McpSidebar({ provider = 'claude', projectPath, scope }: 
   return (
     <>
       <McpStyles />
-      {view !== 'list' && actionError ? (
+      {view === 'list' ? renderView() : (
         <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0, height: '100%' }}>
-          <div className="mcp-error">{actionError}</div>
+          {/* The detail view renders its own error; the container stays mounted so view state survives. */}
+          {actionError && view !== 'detail' && <div className="mcp-error">{actionError}</div>}
           {renderView()}
         </div>
-      ) : renderView()}
+      )}
     </>
   );
 }

@@ -28,6 +28,33 @@ export default function McpStyles() {
       .mcp-hint { font-size: 10px; color: var(--text-muted); border: 1px dashed var(--border-strong); border-radius: 4px; padding: 1px 5px; }
       .mcp-spin { animation: mcp-rot 1s linear infinite; color: var(--text-muted); }
       @keyframes mcp-rot { to { transform: rotate(360deg); } }
+      .mcp-btn { display: inline-flex; align-items: center; gap: 4px; }
+      .mcp-btn.ghost { background: none; }
+      .mcp-acts { display: flex; gap: 6px; flex-wrap: wrap; }
+      .mcp-link { background: none; border: none; color: var(--accent); font-size: 11px; padding: 8px 0 0; cursor: pointer; }
+      .mcp-detail { width: var(--sidebar-width); background: var(--surface-1); border-right: 1px solid var(--border-subtle); overflow-y: auto; flex-shrink: 0; }
+      .mcp-back { display: flex; align-items: center; gap: 6px; padding: 8px 12px; border: none; border-bottom: 1px solid var(--border-hairline); background: none; color: var(--text-muted); cursor: pointer; font-size: 11px; width: 100%; }
+      .mcp-back:hover { color: var(--text); }
+      .mcp-dhd { padding: 12px; border-bottom: 1px solid var(--border-hairline); }
+      .mcp-dht { display: flex; gap: 10px; align-items: center; margin-bottom: 8px; }
+      .mcp-ico.lg { width: 32px; height: 32px; }
+      .mcp-dnm { font-size: 14px; font-weight: 600; color: var(--text); overflow-wrap: anywhere; }
+      .mcp-pill { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; padding: 2px 8px; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--border-subtle); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .mcp-dhd .mcp-acts { margin-top: 10px; }
+      .mcp-dhint { margin-top: 8px; white-space: normal; }
+      .mcp-derr { margin-top: 8px; font-size: 11px; color: var(--red); overflow-wrap: anywhere; }
+      .mcp-sec { padding: 10px 12px; border-bottom: 1px solid var(--border-hairline); }
+      .mcp-sec h4 { margin: 0 0 6px; font-size: 10.5px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .08em; font-weight: 500; }
+      .mcp-tool { font: 11.5px 'Geist Mono', monospace; padding: 3px 0; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .mcp-tool span { color: var(--text-muted); font-family: inherit; margin-left: 6px; font-size: 11px; }
+      .mcp-config { padding: 8px 10px; background: var(--surface-2); border-radius: 6px; font-family: 'Geist Mono', monospace; font-size: 10.5px; color: var(--text-secondary); line-height: 1.6; border: 1px solid var(--border-hairline); word-break: break-all; }
+      .mcp-ck { color: var(--text-muted); }
+      .mcp-auth { margin: 12px; padding: 12px; border-radius: 8px; background: var(--accent-dim); border: 1px solid var(--border-accent); }
+      .mcp-auth.bad { background: color-mix(in srgb, var(--red) 8%, transparent); border-color: color-mix(in srgb, var(--red) 35%, transparent); }
+      .mcp-auth b { display: block; margin-bottom: 4px; font-size: 12.5px; }
+      .mcp-auth p { margin: 0 0 8px; font-size: 12px; color: var(--text-secondary); }
+      .mcp-auth-url { font: 11px 'Geist Mono', monospace; color: var(--text-secondary); background: var(--surface-2); border-radius: 5px; padding: 5px 7px; margin-bottom: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .mcp-auth-paste-row { display: flex; gap: 6px; margin-top: 6px; }
       .mcp-error { margin: 8px 10px; padding: 6px 8px; font-size: 11px; color: var(--red); background: var(--surface-2); border: 1px solid color-mix(in srgb, var(--red) 40%, transparent); border-radius: 6px; overflow-wrap: anywhere; }
     `}</style>
   );

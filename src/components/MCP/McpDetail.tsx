@@ -1,201 +1,135 @@
-import { useState, useEffect } from 'react';
-import { ArrowLeft, RotateCcw, Server, Trash2 } from 'lucide-react';
-import type { McpServer, McpTool } from '../../types';
-import { DOT_MASK_URL } from '../../lib/assets';
+import { ArrowLeft, RotateCcw, Trash2, Pencil, LogOut, Power } from 'lucide-react';
+import { useState } from 'react';
+import type { McpCapabilities } from '../../types';
+import { MCP_SOURCE_ICON, MCP_TERMINAL_HINT, type McpRow } from './mcpView';
+import McpAuthCard from './McpAuthCard';
 
 interface McpDetailProps {
-  server: McpServer;
-  onBack: () => void;
-  onRemove: (name: string) => void;
-  onToggleEnabled: (name: string, enabled: boolean) => void;
-  onRestart: (name: string) => void;
+  row: McpRow;
+  capabilities: McpCapabilities;
+  available: boolean;
+  busy: boolean;
+  error: string | null;
+  onBack(): void;
+  onReconnect(row: McpRow): void;
+  onToggle(row: McpRow): void;
+  onSignIn(row: McpRow): void;
+  onCancelAuth(row: McpRow): void;
+  onSubmitCallbackUrl(row: McpRow, url: string): void;
+  onSignOut(row: McpRow): void;
+  onEdit(row: McpRow): void;
+  onRemove(row: McpRow): void;
 }
 
-export default function McpDetail({ server, onBack, onRemove, onToggleEnabled, onRestart }: McpDetailProps) {
-  const [tools, setTools] = useState<McpTool[]>([]);
+const SOURCE_LABEL = { user: 'global', project: 'project', plugin: 'plugin', claudeai: 'claude.ai' } as const;
+const TOOL_PREVIEW = 8;
 
-  useEffect(() => {
-    if (window.sai.mcpGetTools) {
-      window.sai.mcpGetTools(server.name)
-        .then((result: McpTool[]) => {
-          if (Array.isArray(result)) setTools(result);
-        })
-        .catch(() => {});
-    }
-  }, [server.name]);
+function pillText(row: McpRow): string {
+  if (!row.enabled) return 'Disabled';
+  if (row.auth?.phase === 'waiting') return 'Waiting for browser sign-in…';
+  switch (row.live?.status) {
+    case 'connected': return row.live.serverInfo ? `Connected · ${row.live.serverInfo.name} v${row.live.serverInfo.version}` : 'Connected';
+    case 'pending': return 'Connecting…';
+    case 'needs-auth': return 'Needs sign-in';
+    case 'failed': return `Failed — ${row.live.error || 'unknown error'}`;
+    case 'disabled': return 'Disabled';
+    default: return 'Status unknown';
+  }
+}
 
-  const maskedEnv = server.env
-    ? Object.fromEntries(
-        Object.entries(server.env).map(([k, v]) => [k, v.length > 4 ? v.slice(0, 2) + '•••' : '•••'])
-      )
-    : null;
+export default function McpDetail(props: McpDetailProps) {
+  const { row, capabilities: caps, available, busy, error } = props;
+  const [showAllTools, setShowAllTools] = useState(false);
+  const Icon = MCP_SOURCE_ICON[row.source];
+  const remote = row.transport !== 'stdio';
+  const live = available && !busy;
+  const tools = row.live?.tools ?? [];
+  const shownTools = showAllTools ? tools : tools.slice(0, TOOL_PREVIEW);
+  const server = row.server;
+  const url = server?.url ?? row.live?.config?.url;
+  const transportLabel = row.transport === 'streamable-http' ? 'http' : row.transport === 'unknown' ? 'remote' : row.transport;
 
   return (
     <div className="mcp-detail">
-      <button className="detail-back" onClick={onBack}>
-        <ArrowLeft size={12} /> Back to servers
-      </button>
+      <button className="mcp-back" onClick={props.onBack}><ArrowLeft size={12} /> Servers</button>
 
-      <div className="detail-header">
-        <div className="detail-icon"><Server size={20} /></div>
-        <div>
-          <div className="detail-name">{server.name}</div>
-          <div className={`detail-status ${server.enabled ? 'connected' : 'disconnected'}`}>
-            <span className="status-dot-lg" /> {server.enabled ? 'Connected' : 'Disconnected'}
+      <div className="mcp-dhd">
+        <div className="mcp-dht">
+          <div className="mcp-ico lg"><Icon size={16} /></div>
+          <div className="mcp-info">
+            <div className="mcp-dnm">{row.displayName}</div>
+            <div className="mcp-ds">{transportLabel} · {row.source === 'plugin' && row.pluginShort ? `plugin: ${row.pluginShort}` : SOURCE_LABEL[row.source]}</div>
           </div>
         </div>
+        <span className="mcp-pill"><span className={`mcp-dot ${row.dot}`} />{pillText(row)}</span>
+        <div className="mcp-acts">
+          {row.fix === 'sign-in' && caps.authenticate && row.auth?.phase !== 'waiting' && (
+            <button className="mcp-btn pri" disabled={!live} onClick={() => props.onSignIn(row)}>Sign in</button>
+          )}
+          {row.fix === 'sign-in' && !caps.authenticate && (
+            <span className="mcp-hint" title="Run `claude` in a terminal, then /mcp">Sign in from a terminal: claude → /mcp</span>
+          )}
+          <button className="mcp-btn" disabled={!live || !caps.reconnect} onClick={() => props.onReconnect(row)}>
+            <RotateCcw size={11} /> Reconnect
+          </button>
+          {row.source !== 'claudeai' && (
+            <button className="mcp-btn" disabled={busy} onClick={() => props.onToggle(row)}>
+              <Power size={11} /> {row.enabled ? 'Disable' : 'Enable'}
+            </button>
+          )}
+          {remote && caps.clearAuth && row.live?.status === 'connected' && (
+            <button className="mcp-btn" disabled={!live} onClick={() => props.onSignOut(row)}><LogOut size={11} /> Sign out</button>
+          )}
+          {row.editable && <button className="mcp-btn ghost" disabled={busy} onClick={() => props.onEdit(row)}><Pencil size={11} /> Edit</button>}
+          {row.removable && <button className="mcp-btn ghost danger" disabled={busy} onClick={() => props.onRemove(row)}><Trash2 size={11} /> Remove</button>}
+        </div>
+        {!row.editable && <div className="mcp-ds mcp-dhint">{MCP_TERMINAL_HINT}</div>}
+        {error && <div className="mcp-derr" role="alert">{error}</div>}
       </div>
 
-      <div className="detail-actions">
-        <button className="detail-btn restart" onClick={() => onRestart(server.name)}>
-          <RotateCcw size={12} /> Restart
-        </button>
-        <button
-          className="detail-btn toggle"
-          onClick={() => onToggleEnabled(server.name, !server.enabled)}
-        >
-          {server.enabled ? 'Disable' : 'Enable'}
-        </button>
-        {server.source !== 'plugin' && (
-          <button className="detail-btn danger" onClick={() => onRemove(server.name)}>
-            <Trash2 size={12} /> Remove
+      {row.auth && (
+        <McpAuthCard
+          auth={row.auth}
+          canPasteCallback={caps.submitCallbackUrl}
+          disabled={!live}
+          onOpenAgain={() => props.onSignIn(row)}
+          onCancel={() => props.onCancelAuth(row)}
+          onSubmitCallbackUrl={(u) => props.onSubmitCallbackUrl(row, u)}
+        />
+      )}
+
+      <div className="mcp-sec">
+        <h4>Tools{tools.length ? ` · ${tools.length}` : ''}</h4>
+        {tools.length === 0 && (
+          <div className="mcp-ds">{row.live?.status === 'needs-auth' ? 'Tools appear after sign-in.' : 'No tools reported.'}</div>
+        )}
+        {shownTools.map((t) => (
+          <div key={t.name} className="mcp-tool" title={t.description}>
+            {t.name}{t.description && <span>{t.description}</span>}
+          </div>
+        ))}
+        {tools.length > TOOL_PREVIEW && (
+          <button className="mcp-link" onClick={() => setShowAllTools((s) => !s)}>
+            {showAllTools ? 'Show fewer' : `+ ${tools.length - TOOL_PREVIEW} more`}
           </button>
         )}
       </div>
 
-      {tools.length > 0 && (
-        <div className="detail-section">
-          <div className="detail-label">Available Tools ({tools.length})</div>
-          {tools.map(tool => (
-            <div key={tool.name} className="tool-row">
-              <span className="tool-name">{tool.name}</span>
-              {tool.parameters && <span className="tool-param">{tool.parameters}</span>}
-            </div>
-          ))}
-        </div>
-      )}
-
-      <div className="detail-section">
-        <div className="detail-label">Configuration</div>
-        <div className="config-block">
-          {server.command && <div><span className="config-key">"command":</span> "{server.command}"</div>}
-          {server.args && <div><span className="config-key">"args":</span> {JSON.stringify(server.args)}</div>}
-          {server.url && <div><span className="config-key">"url":</span> "{server.url}"</div>}
-          {maskedEnv && (
-            <div>
-              <span className="config-key">"env":</span> {JSON.stringify(maskedEnv).replace(/"/g, '')}
-            </div>
+      <div className="mcp-sec">
+        <h4>Config</h4>
+        <div className="mcp-config">
+          {server?.command && <div><span className="mcp-ck">command:</span> {server.command}</div>}
+          {server?.args?.length ? <div><span className="mcp-ck">args:</span> {server.args.join(' ')}</div> : null}
+          {url && <div><span className="mcp-ck">url:</span> {url}</div>}
+          {server?.env && Object.keys(server.env).length > 0 && (
+            <div><span className="mcp-ck">env:</span> {Object.keys(server.env).map((k) => `${k}=••••••`).join(' ')}</div>
           )}
+          {server?.headers && Object.keys(server.headers).length > 0 && (
+            <div><span className="mcp-ck">headers:</span> {Object.keys(server.headers).map((k) => `${k}: ••••••`).join(', ')}</div>
+          )}
+          {!server && !url && <div className="mcp-ck">Managed outside SAI</div>}
         </div>
       </div>
-
-      <style>{`
-        .mcp-detail {
-          width: var(--sidebar-width);
-          background: var(--surface-1);
-          border-right: 1px solid var(--border-subtle);
-          overflow-y: auto;
-          flex-shrink: 0;
-        }
-        .detail-back {
-          display: flex;
-          align-items: center;
-          gap: 6px;
-          padding: 8px 12px;
-          border: none;
-          border-bottom: 1px solid var(--border-hairline);
-          background: none;
-          color: var(--text-muted);
-          cursor: pointer;
-          font-size: 11px;
-          width: 100%;
-        }
-        .detail-back:hover { color: var(--text); }
-        .detail-header {
-          display: flex;
-          align-items: center;
-          gap: 10px;
-          padding: 12px;
-          border-bottom: 1px solid var(--border-hairline);
-        }
-        .detail-icon {
-          width: 36px;
-          height: 36px;
-          background: var(--surface-4);
-          border-radius: 8px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-size: 20px;
-        }
-        .detail-name { font-weight: 700; font-size: 14px; }
-        .detail-status { font-size: 10px; display: flex; align-items: center; gap: 4px; }
-        .detail-status.connected { color: var(--green); }
-        .detail-status.disconnected { color: var(--red); }
-        .status-dot-lg {
-          display: inline-block;
-          width: 9px;
-          height: 9px;
-          background: currentColor;
-          -webkit-mask: url("${DOT_MASK_URL}") center / contain no-repeat;
-          mask: url("${DOT_MASK_URL}") center / contain no-repeat;
-        }
-        .detail-actions {
-          display: flex;
-          gap: 6px;
-          padding: 12px;
-          border-bottom: 1px solid var(--border-hairline);
-        }
-        .detail-btn {
-          display: flex;
-          align-items: center;
-          gap: 4px;
-          padding: 4px 10px;
-          border: none;
-          border-radius: 4px;
-          font-size: 10px;
-          cursor: pointer;
-        }
-        .detail-btn.restart { background: var(--surface-4); color: var(--accent); }
-        .detail-btn.toggle { background: var(--surface-4); color: var(--text-muted); }
-        .detail-btn.danger { background: var(--red); color: #fff; }
-        .detail-section { padding: 12px; }
-        .detail-label {
-          font-size: 9px;
-          color: var(--text-muted);
-          text-transform: uppercase;
-          letter-spacing: 1px;
-          margin-bottom: 6px;
-          font-weight: 600;
-        }
-        .tool-row {
-          padding: 6px 10px;
-          background: var(--surface-2);
-          border-radius: 4px;
-          margin-bottom: 3px;
-          display: flex;
-          justify-content: space-between;
-        }
-        .tool-name {
-          font-family: 'Geist Mono', monospace;
-          font-size: 11px;
-        }
-        .tool-param {
-          font-size: 10px;
-          color: var(--text-muted);
-        }
-        .config-block {
-          padding: 8px 10px;
-          background: var(--surface-2);
-          border-radius: 6px;
-          font-family: 'Geist Mono', monospace;
-          font-size: 10px;
-          color: var(--text-secondary);
-          line-height: 1.6;
-          border: 1px solid var(--border-hairline);
-        }
-        .config-key { color: var(--text-muted); }
-      `}</style>
     </div>
   );
 }
