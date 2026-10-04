@@ -89,7 +89,7 @@ describe('collectPluginSdkConfigs', () => {
     };
     const { plugins, servers } = collectPluginSdkConfigs(installed, {}, config, HOME, read);
     expect(plugins[0]).toEqual({ type: 'local', path: '/plugins/tools', skipMcpDiscovery: true });
-    expect(Object.keys(servers)).toEqual(['tools-beta']);
+    expect(Object.keys(servers)).toEqual(['plugin:tools:beta']);
   });
 
   it('fully-disabled plugin servers → skipMcpDiscovery with no re-added servers', () => {

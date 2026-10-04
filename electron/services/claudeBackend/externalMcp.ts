@@ -91,7 +91,8 @@ export function collectClaudeJsonServers(
  * disabled list) doesn't exist on the SDK `plugins` option, so when any of a
  * plugin's servers is disabled we set `skipMcpDiscovery` (skills/agents/hooks
  * still load) and hand the *enabled* subset back as plain `mcpServers` entries
- * keyed `<pluginShort>-<serverName>`.
+ * keyed `plugin:<pluginShort>:<serverName>` — the CLI's own name for plugin
+ * servers, so OAuth tokens (keyed by server name) are shared with the CLI.
  */
 export function collectPluginSdkConfigs(
   installed: InstalledPluginsFile,
@@ -126,7 +127,7 @@ export function collectPluginSdkConfigs(
       plugins.push({ type: 'local', path: inst.installPath, skipMcpDiscovery: true });
       for (const name of names) {
         if (disabledHere.includes(name)) continue;
-        servers[`${pluginShort}-${name}`] = normalizeServerEntry(pluginServers[name]);
+        servers[`plugin:${pluginShort}:${name}`] = normalizeServerEntry(pluginServers[name]);
       }
     }
   }
