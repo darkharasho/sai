@@ -3,8 +3,13 @@
  *   user    → ~/.claude.json `mcpServers`
  *   project → <projectPath>/.mcp.json `mcpServers`
  *   plugin  → <installPath>/.mcp.json of enabled plugins (read-only)
- * Disables mirror the CLI: user/plugin names in projects[home].disabledMcpServers,
- * project names in projects[projectPath].disabledMcpjsonServers.
+ * Disables: user/plugin names in projects[home].disabledMcpServers (SAI filters
+ * those itself when it hands them to the SDK); project names in
+ * projects[projectPath].disabledMcpServers — the per-server list the CLI's
+ * loader filters every server on, and what CLI `/mcp disable` writes.
+ * `disabledMcpjsonServers` in a projects entry is a legacy approval field the
+ * CLI migrates into settings.local.json as a *rejection* on startup: it is
+ * read as disabled and cleared on enable, never written.
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -26,12 +31,15 @@ interface McpConfigEntry {
 interface ProjectEntry { disabledMcpServers?: string[]; disabledMcpjsonServers?: string[]; [k: string]: unknown }
 interface ClaudeConfig { mcpServers?: Record<string, McpConfigEntry>; projects?: Record<string, ProjectEntry>; [k: string]: unknown }
 
-const PROJECT_DISABLE_KEY = 'disabledMcpjsonServers';
+const LEGACY_PROJECT_DISABLE_KEY = 'disabledMcpjsonServers';
 const claudeJson = (p: McpPaths) => path.join(p.home, '.claude.json');
-const projectJson = (p: McpPaths) => {
+/** The renderer supplies projectPath: only an absolute path is ever joined. */
+function projectDir(p: McpPaths): string {
   if (!p.projectPath) throw new Error('No project open');
-  return path.join(p.projectPath, '.mcp.json');
-};
+  if (!path.isAbsolute(p.projectPath)) throw new Error('Project path must be absolute');
+  return p.projectPath;
+}
+const projectJson = (p: McpPaths) => path.join(projectDir(p), '.mcp.json');
 
 function readJson<T>(file: string, fallback: T): T {
   try {
@@ -111,7 +119,7 @@ export function detectTransport(entry: McpConfigEntry): McpServer['transport'] {
   return 'stdio';
 }
 
-function disabledSet(cfg: ClaudeConfig, scopeDir: string | undefined, key: 'disabledMcpServers' | typeof PROJECT_DISABLE_KEY): Set<string> {
+function disabledSet(cfg: ClaudeConfig, scopeDir: string | undefined, key: 'disabledMcpServers' | typeof LEGACY_PROJECT_DISABLE_KEY): Set<string> {
   const list = scopeDir ? cfg.projects?.[scopeDir]?.[key] : undefined;
   return new Set(Array.isArray(list) ? list : []);
 }
@@ -156,10 +164,13 @@ export function listMcpServers(paths: McpPaths): McpServer[] {
     items.push(toServer(name, entry, 'user', !homeDisabled.has(name) && !entry.disabled));
   }
   if (paths.projectPath) {
-    const projDisabled = disabledSet(cfg, paths.projectPath, PROJECT_DISABLE_KEY);
-    const proj = serverMap(readJson<Record<string, unknown>>(projectJson(paths), {}));
+    const file = projectJson(paths);
+    const projDisabled = disabledSet(cfg, paths.projectPath, 'disabledMcpServers');
+    const legacyDisabled = disabledSet(cfg, paths.projectPath, LEGACY_PROJECT_DISABLE_KEY);
+    const proj = serverMap(readJson<Record<string, unknown>>(file, {}));
     for (const [name, entry] of Object.entries(proj)) {
-      items.push(toServer(name, entry, 'project', !projDisabled.has(name) && !entry.disabled));
+      const off = projDisabled.has(name) || legacyDisabled.has(name) || !!entry.disabled;
+      items.push(toServer(name, entry, 'project', !off));
     }
   }
   for (const ps of listPluginServers(paths.home)) {
@@ -202,14 +213,17 @@ export function removeMcpServer(paths: McpPaths, name: string, source: 'user' | 
 
 export function setMcpServerDisabled(paths: McpPaths, name: string, source: McpSource, disabled: boolean): void {
   if (source === 'claudeai') throw new Error('claude.ai connectors are managed on claude.ai');
+  const scopeDir = source === 'project' ? projectDir(paths) : paths.home;
   const cfg = readJsonForWrite<ClaudeConfig>(claudeJson(paths));
-  const scopeDir = source === 'project' ? paths.projectPath : paths.home;
-  if (!scopeDir) throw new Error('No project open');
-  const key = source === 'project' ? PROJECT_DISABLE_KEY : 'disabledMcpServers';
   cfg.projects ??= {};
   cfg.projects[scopeDir] ??= {};
-  const set = disabledSet(cfg, scopeDir, key);
+  const entry = cfg.projects[scopeDir];
+  const set = disabledSet(cfg, scopeDir, 'disabledMcpServers');
   if (disabled) set.add(name); else set.delete(name);
-  cfg.projects[scopeDir][key] = Array.from(set);
+  entry.disabledMcpServers = Array.from(set);
+  // A legacy entry would come back as a settings rejection on the CLI's next start.
+  if (!disabled && source === 'project' && Array.isArray(entry[LEGACY_PROJECT_DISABLE_KEY])) {
+    entry[LEGACY_PROJECT_DISABLE_KEY] = entry[LEGACY_PROJECT_DISABLE_KEY]!.filter((n) => n !== name);
+  }
   writeJson(claudeJson(paths), cfg);
 }

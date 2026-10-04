@@ -71,12 +71,13 @@ describe('mcpConfig', () => {
     expect(read(path.join(home, '.claude.json')).mcpServers.a).toBeDefined();
   });
 
-  it('disable: user/plugin → home disabledMcpServers; project → project disabledMcpjsonServers', () => {
+  it('disable: user/plugin → home disabledMcpServers; project → the project entry\'s disabledMcpServers (the list the CLI filters on)', () => {
     setMcpServerDisabled({ home, projectPath: proj }, 'gh', 'user', true);
     setMcpServerDisabled({ home, projectPath: proj }, 'e2e', 'project', true);
     const cfg = read(path.join(home, '.claude.json'));
     expect(cfg.projects[home].disabledMcpServers).toEqual(['gh']);
-    expect(cfg.projects[proj].disabledMcpjsonServers).toEqual(['e2e']);
+    expect(cfg.projects[proj].disabledMcpServers).toEqual(['e2e']);
+    expect(cfg.projects[proj].disabledMcpjsonServers).toBeUndefined();
     setMcpServerDisabled({ home, projectPath: proj }, 'gh', 'user', false);
     expect(read(path.join(home, '.claude.json')).projects[home].disabledMcpServers).toEqual([]);
   });
@@ -85,6 +86,30 @@ describe('mcpConfig', () => {
     write(path.join(proj, '.mcp.json'), { mcpServers: { e2e: { command: 'node' } } });
     setMcpServerDisabled({ home, projectPath: proj }, 'e2e', 'project', true);
     expect(listMcpServers({ home, projectPath: proj })[0].enabled).toBe(false);
+  });
+
+  it('a project server disabled by the CLI (/mcp disable) lists as disabled', () => {
+    write(path.join(proj, '.mcp.json'), { mcpServers: { e2e: { command: 'node' } } });
+    write(path.join(home, '.claude.json'), { projects: { [proj]: { disabledMcpServers: ['e2e'] } } });
+    expect(listMcpServers({ home, projectPath: proj })[0].enabled).toBe(false);
+  });
+
+  it('a legacy disabledMcpjsonServers entry reads as disabled and is cleared on enable', () => {
+    write(path.join(proj, '.mcp.json'), { mcpServers: { e2e: { command: 'node' } } });
+    write(path.join(home, '.claude.json'), { projects: { [proj]: { disabledMcpjsonServers: ['e2e', 'other'] } } });
+    expect(listMcpServers({ home, projectPath: proj })[0].enabled).toBe(false);
+    setMcpServerDisabled({ home, projectPath: proj }, 'e2e', 'project', false);
+    const entry = read(path.join(home, '.claude.json')).projects[proj];
+    expect(entry.disabledMcpjsonServers).toEqual(['other']);
+    expect(entry.disabledMcpServers).toEqual([]);
+    expect(listMcpServers({ home, projectPath: proj })[0].enabled).toBe(true);
+  });
+
+  it('rejects a relative project path on read and write', () => {
+    expect(() => listMcpServers({ home, projectPath: 'rel/dir' })).toThrow(/absolute/);
+    expect(() => upsertMcpServer({ home, projectPath: 'rel/dir' }, { name: 'a', transport: 'stdio', command: 'x', source: 'project' })).toThrow(/absolute/);
+    expect(() => setMcpServerDisabled({ home, projectPath: '../x' }, 'a', 'project', true)).toThrow(/absolute/);
+    expect(fs.existsSync(path.join(home, '.claude.json'))).toBe(false);
   });
 
   it('write paths throw and leave a malformed ~/.claude.json byte-identical', () => {
