@@ -86,4 +86,32 @@ describe('mcpConfig', () => {
     setMcpServerDisabled({ home, projectPath: proj }, 'e2e', 'project', true);
     expect(listMcpServers({ home, projectPath: proj })[0].enabled).toBe(false);
   });
+
+  it('write paths throw and leave a malformed ~/.claude.json byte-identical', () => {
+    const f = path.join(home, '.claude.json');
+    fs.writeFileSync(f, '{"projects": {"x": 1}, trunc');
+    const before = fs.readFileSync(f);
+    expect(() => upsertMcpServer({ home }, { name: 'a', transport: 'stdio', command: 'x' })).toThrow(/not valid JSON/);
+    expect(() => removeMcpServer({ home }, 'a', 'user')).toThrow(/not valid JSON/);
+    expect(() => setMcpServerDisabled({ home }, 'a', 'user', true)).toThrow(/not valid JSON/);
+    expect(fs.readFileSync(f).equals(before)).toBe(true);
+    expect(fs.readdirSync(home).filter((n) => n.endsWith('.tmp'))).toEqual([]);
+  });
+
+  it('array-valued files are rejected on write and read as empty on list', () => {
+    const f = path.join(home, '.claude.json');
+    fs.writeFileSync(f, '[1,2]');
+    expect(listMcpServers({ home })).toEqual([]);
+    expect(() => upsertMcpServer({ home }, { name: 'a', transport: 'stdio', command: 'x' })).toThrow(/not valid JSON/);
+    expect(fs.readFileSync(f, 'utf-8')).toBe('[1,2]');
+  });
+
+  it('bare-map project .mcp.json is normalized to { mcpServers } without losing entries', () => {
+    write(path.join(proj, '.mcp.json'), { a: { command: 'x' }, b: { command: 'y' } });
+    upsertMcpServer({ home, projectPath: proj }, { name: 'a', transport: 'stdio', command: 'z', source: 'project' });
+    expect(read(path.join(proj, '.mcp.json'))).toEqual({ mcpServers: { a: { command: 'z' }, b: { command: 'y' } } });
+    write(path.join(proj, '.mcp.json'), { a: { command: 'x' }, b: { command: 'y' } });
+    removeMcpServer({ home, projectPath: proj }, 'a', 'project');
+    expect(read(path.join(proj, '.mcp.json'))).toEqual({ mcpServers: { b: { command: 'y' } } });
+  });
 });

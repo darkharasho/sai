@@ -42,7 +42,57 @@ function readJson<T>(file: string, fallback: T): T {
   } catch { /* missing or malformed → fallback */ }
   return fallback;
 }
-const writeJson = (file: string, data: unknown) => fs.writeFileSync(file, JSON.stringify(data, null, 2), 'utf-8');
+/**
+ * Strict read for the write paths: missing file → `{}`, anything unparseable or
+ * non-object throws so we never overwrite a file we couldn't understand.
+ */
+function readJsonForWrite<T>(file: string): T {
+  let raw: string;
+  try {
+    raw = fs.readFileSync(file, 'utf-8');
+  } catch (err: any) {
+    if (err?.code === 'ENOENT') return {} as T;
+    throw new Error(`Cannot update ${file}: ${err?.message || 'unreadable'}`);
+  }
+  let parsed: unknown;
+  try { parsed = JSON.parse(raw); } catch { parsed = undefined; }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`Cannot update ${file}: file is not valid JSON`);
+  }
+  return parsed as T;
+}
+
+/** Atomic write: temp file in the same directory, then rename (keeps existing mode). */
+function writeJson(file: string, data: unknown): void {
+  let mode = 0o644;
+  try { mode = fs.statSync(file).mode & 0o777; } catch { /* new file */ }
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
+  try {
+    fs.writeFileSync(tmp, JSON.stringify(data, null, 2), { encoding: 'utf-8', mode });
+    fs.renameSync(tmp, file);
+  } catch (err) {
+    try { fs.rmSync(tmp, { force: true }); } catch { /* best effort */ }
+    throw err;
+  }
+}
+
+/** A bare-map `.mcp.json` is normalized to `{ mcpServers }` on write, keeping every entry. */
+function normalizeProjectFile(data: ClaudeConfig): ClaudeConfig {
+  if (data.mcpServers && typeof data.mcpServers === 'object') return data;
+  const servers: Record<string, McpConfigEntry> = {};
+  const rest: ClaudeConfig = {};
+  for (const [k, v] of Object.entries(data)) {
+    if (v && typeof v === 'object' && !Array.isArray(v)) servers[k] = v as McpConfigEntry;
+    else rest[k] = v;
+  }
+  return { ...rest, mcpServers: servers };
+}
+
+const readConfigForWrite = (file: string, source: 'user' | 'project'): ClaudeConfig => {
+  const data = readJsonForWrite<ClaudeConfig>(file);
+  return source === 'project' ? normalizeProjectFile(data) : data;
+};
 
 /** `.mcp.json` may be `{ mcpServers: {...} }` or a bare server map. */
 function serverMap(data: Record<string, unknown>): Record<string, McpConfigEntry> {
@@ -124,7 +174,7 @@ const TRANSPORT_KEYS = ['type', 'url', 'headers', 'command', 'args', 'env'] as c
 export function upsertMcpServer(paths: McpPaths, config: McpServerConfig): void {
   const source = config.source ?? 'user';
   const file = source === 'project' ? projectJson(paths) : claudeJson(paths);
-  const data = readJson<ClaudeConfig>(file, {});
+  const data = readConfigForWrite(file, source);
   if (!data.mcpServers || typeof data.mcpServers !== 'object') data.mcpServers = {};
   const entry: McpConfigEntry = { ...(data.mcpServers[config.name] ?? {}) };
   for (const k of TRANSPORT_KEYS) delete entry[k];
@@ -143,7 +193,7 @@ export function upsertMcpServer(paths: McpPaths, config: McpServerConfig): void 
 
 export function removeMcpServer(paths: McpPaths, name: string, source: 'user' | 'project'): void {
   const file = source === 'project' ? projectJson(paths) : claudeJson(paths);
-  const data = readJson<ClaudeConfig>(file, {});
+  const data = readConfigForWrite(file, source);
   if (data.mcpServers?.[name]) {
     delete data.mcpServers[name];
     writeJson(file, data);
@@ -152,7 +202,7 @@ export function removeMcpServer(paths: McpPaths, name: string, source: 'user' | 
 
 export function setMcpServerDisabled(paths: McpPaths, name: string, source: McpSource, disabled: boolean): void {
   if (source === 'claudeai') throw new Error('claude.ai connectors are managed on claude.ai');
-  const cfg = readJson<ClaudeConfig>(claudeJson(paths), {});
+  const cfg = readJsonForWrite<ClaudeConfig>(claudeJson(paths));
   const scopeDir = source === 'project' ? paths.projectPath : paths.home;
   if (!scopeDir) throw new Error('No project open');
   const key = source === 'project' ? PROJECT_DISABLE_KEY : 'disabledMcpServers';
