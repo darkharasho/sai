@@ -1,50 +1,93 @@
 /**
- * mcpRuntimeStatus.ts — in-memory record of the live MCP server connection
- * statuses and loaded plugins reported by the SDK's `system/init` message.
- * Latest report per server name wins across scopes. Read by the `mcp:runtimeStatus`
- * IPC handler so the MCP sidebar can show connected/failed badges (SDK backend only —
- * the CLI path never reports connection status).
+ * mcpRuntimeStatus.ts — per-scope record of live MCP server state for the MCP
+ * sidebar and the chat sign-in nudge. Seeded by the SDK's `system/init` frame
+ * (names + status only, merged) and replaced wholesale by `mcpServerStatus()`
+ * control calls (full entries). Also holds in-flight OAuth sign-in state.
+ * SDK backend only — the CLI path never reports connection state.
  */
+import type { McpAuthState, McpLiveServer, McpLiveStatus, McpRuntimePush } from '../../../src/types';
 
-export interface McpRuntimeServer {
-  status: string;
-  scopeKey: string;
-  at: number;
+const KNOWN: ReadonlySet<string> = new Set(['connected', 'failed', 'needs-auth', 'pending', 'disabled']);
+const servers = new Map<string, Map<string, McpLiveServer>>();
+const auth = new Map<string, Map<string, McpAuthState>>();
+
+export const normalizeScope = (scope?: string): string => scope ?? 'chat';
+const keyOf = (projectPath: string, scope?: string) => `${projectPath} ${normalizeScope(scope)}`;
+const normalizeStatus = (s: unknown): McpLiveStatus =>
+  typeof s === 'string' && KNOWN.has(s) ? (s as McpLiveStatus) : 'unknown';
+
+function bucket<T>(map: Map<string, Map<string, T>>, key: string): Map<string, T> {
+  let b = map.get(key);
+  if (!b) { b = new Map(); map.set(key, b); }
+  return b;
 }
 
-export interface McpRuntimePlugin {
-  name: string;
-  path: string;
+function toLive(raw: any): McpLiveServer | null {
+  if (!raw || typeof raw.name !== 'string' || !raw.name) return null;
+  const out: McpLiveServer = { name: raw.name, status: normalizeStatus(raw.status) };
+  if (typeof raw.error === 'string' && raw.error) out.error = raw.error;
+  if (typeof raw.scope === 'string') out.scope = raw.scope;
+  if (raw.serverInfo && typeof raw.serverInfo.name === 'string') {
+    out.serverInfo = { name: raw.serverInfo.name, version: String(raw.serverInfo.version ?? '') };
+  }
+  if (Array.isArray(raw.tools)) {
+    out.tools = raw.tools
+      .filter((t: any) => t && typeof t.name === 'string')
+      .map((t: any) => (typeof t.description === 'string' ? { name: t.name, description: t.description } : { name: t.name }));
+  }
+  if (raw.config && typeof raw.config === 'object') {
+    // Only type + url ever leave main — headers/env may hold secrets.
+    const c: { type?: string; url?: string } = {};
+    if (typeof raw.config.type === 'string') c.type = raw.config.type;
+    if (typeof raw.config.url === 'string') c.url = raw.config.url;
+    out.config = c;
+  }
+  return out;
 }
 
-const serverStatus = new Map<string, McpRuntimeServer>();
-let loadedPlugins: McpRuntimePlugin[] = [];
-
+/** Init-frame report: names + statuses only. Merges into the scope's entries;
+ *  a server whose status changed loses its stale tools/serverInfo/error. */
 export function recordMcpRuntimeStatus(
-  scopeKey: string,
-  servers: Array<{ name?: string; status?: string }>,
-  plugins?: Array<{ name?: string; path?: string }>,
+  projectPath: string,
+  scope: string | undefined,
+  reported: Array<{ name?: string; status?: string } | null>,
+  _plugins?: Array<{ name?: string; path?: string }>,
 ): void {
-  const at = Date.now();
-  for (const s of servers) {
+  const b = bucket(servers, keyOf(projectPath, scope));
+  for (const s of reported) {
     if (!s || typeof s.name !== 'string' || !s.name) continue;
-    serverStatus.set(s.name, { status: typeof s.status === 'string' ? s.status : 'unknown', scopeKey, at });
-  }
-  if (Array.isArray(plugins)) {
-    loadedPlugins = plugins
-      .filter((p): p is { name: string; path: string } => typeof p?.name === 'string' && typeof p?.path === 'string')
-      .map((p) => ({ name: p.name, path: p.path }));
+    const status = normalizeStatus(s.status);
+    const prev = b.get(s.name);
+    b.set(s.name, prev && prev.status === status ? { ...prev } : { name: s.name, status });
   }
 }
 
-export function getMcpRuntimeStatus(): {
-  servers: Record<string, McpRuntimeServer>;
-  plugins: McpRuntimePlugin[];
-} {
-  return { servers: Object.fromEntries(serverStatus), plugins: loadedPlugins };
+/** Authoritative full report from `mcpServerStatus()`. */
+export function replaceMcpRuntimeStatus(projectPath: string, scope: string | undefined, reported: unknown[]): void {
+  const b = new Map<string, McpLiveServer>();
+  for (const raw of reported) {
+    const live = toLive(raw);
+    if (live) b.set(live.name, live);
+  }
+  servers.set(keyOf(projectPath, scope), b);
+}
+
+export function setMcpAuthState(projectPath: string, scope: string | undefined, name: string, state: McpAuthState | null): void {
+  const b = bucket(auth, keyOf(projectPath, scope));
+  if (state) b.set(name, state); else b.delete(name);
+}
+
+export function getMcpRuntimeStatus(projectPath: string, scope?: string): McpRuntimePush {
+  const key = keyOf(projectPath, scope);
+  return {
+    projectPath,
+    scope: normalizeScope(scope),
+    servers: Object.fromEntries(servers.get(key) ?? []),
+    auth: Object.fromEntries(auth.get(key) ?? []),
+  };
 }
 
 export function __resetMcpRuntimeStatusForTests(): void {
-  serverStatus.clear();
-  loadedPlugins = [];
+  servers.clear();
+  auth.clear();
 }

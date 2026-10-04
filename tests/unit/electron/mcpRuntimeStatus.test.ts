@@ -2,42 +2,64 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
   recordMcpRuntimeStatus,
+  replaceMcpRuntimeStatus,
+  setMcpAuthState,
   getMcpRuntimeStatus,
   __resetMcpRuntimeStatusForTests,
 } from '@electron/services/claudeBackend/mcpRuntimeStatus';
 
-describe('mcpRuntimeStatus', () => {
+describe('mcpRuntimeStatus (per scope)', () => {
   beforeEach(() => __resetMcpRuntimeStatusForTests());
 
-  it('records servers and plugins from an init report', () => {
-    recordMcpRuntimeStatus('proj::chat', [
-      { name: 'github', status: 'connected' },
-      { name: 'db', status: 'failed' },
-    ], [{ name: 'my-plugin', path: '/p/my-plugin' }]);
-
-    const { servers, plugins } = getMcpRuntimeStatus();
-    expect(servers.github.status).toBe('connected');
-    expect(servers.db.status).toBe('failed');
-    expect(servers.github.scopeKey).toBe('proj::chat');
-    expect(plugins).toEqual([{ name: 'my-plugin', path: '/p/my-plugin' }]);
+  it('keeps scopes separate', () => {
+    recordMcpRuntimeStatus('/p', 'a', [{ name: 'github', status: 'failed' }]);
+    recordMcpRuntimeStatus('/p', 'b', [{ name: 'github', status: 'connected' }]);
+    expect(getMcpRuntimeStatus('/p', 'a').servers.github.status).toBe('failed');
+    expect(getMcpRuntimeStatus('/p', 'b').servers.github.status).toBe('connected');
   });
 
-  it('latest report wins per server name across scopes', () => {
-    recordMcpRuntimeStatus('a', [{ name: 'github', status: 'failed' }]);
-    recordMcpRuntimeStatus('b', [{ name: 'github', status: 'connected' }]);
-    expect(getMcpRuntimeStatus().servers.github).toMatchObject({ status: 'connected', scopeKey: 'b' });
+  it('undefined scope is "chat"', () => {
+    recordMcpRuntimeStatus('/p', undefined, [{ name: 'x', status: 'connected' }]);
+    expect(getMcpRuntimeStatus('/p', 'chat')).toMatchObject({ projectPath: '/p', scope: 'chat' });
+    expect(getMcpRuntimeStatus('/p', 'chat').servers.x.status).toBe('connected');
   });
 
-  it('ignores malformed entries and keeps plugins when omitted', () => {
-    recordMcpRuntimeStatus('a', [{ name: 'ok', status: 'connected' }], [{ name: 'p', path: '/p' }]);
-    recordMcpRuntimeStatus('a', [{ status: 'connected' }, null as any, { name: '' }]);
-    const { servers, plugins } = getMcpRuntimeStatus();
-    expect(Object.keys(servers)).toEqual(['ok']);
-    expect(plugins).toHaveLength(1);
+  it('record() merges: same status keeps tools/serverInfo, changed status drops them', () => {
+    replaceMcpRuntimeStatus('/p', 'a', [
+      { name: 'gh', status: 'connected', tools: [{ name: 't1' }], serverInfo: { name: 'GH', version: '1' } },
+    ]);
+    recordMcpRuntimeStatus('/p', 'a', [{ name: 'gh', status: 'connected' }]);
+    expect(getMcpRuntimeStatus('/p', 'a').servers.gh.tools).toEqual([{ name: 't1' }]);
+    recordMcpRuntimeStatus('/p', 'a', [{ name: 'gh', status: 'failed' }]);
+    expect(getMcpRuntimeStatus('/p', 'a').servers.gh.tools).toBeUndefined();
   });
 
-  it('missing status → "unknown"', () => {
-    recordMcpRuntimeStatus('a', [{ name: 'x' }]);
-    expect(getMcpRuntimeStatus().servers.x.status).toBe('unknown');
+  it('replace() is authoritative and normalizes unknown statuses', () => {
+    recordMcpRuntimeStatus('/p', 'a', [{ name: 'old', status: 'connected' }]);
+    replaceMcpRuntimeStatus('/p', 'a', [{ name: 'new', status: 'weird' }, null, { status: 'connected' }]);
+    const { servers } = getMcpRuntimeStatus('/p', 'a');
+    expect(Object.keys(servers)).toEqual(['new']);
+    expect(servers.new.status).toBe('unknown');
+  });
+
+  it('replace() keeps error, scope, config and strips tool fields to name/description', () => {
+    replaceMcpRuntimeStatus('/p', 'a', [{
+      name: 'cf', status: 'failed', error: 'boom', scope: 'claudeai',
+      config: { type: 'http', url: 'https://x', headers: { a: 'secret' } },
+      tools: [{ name: 't', description: 'd', annotations: { readOnly: true } }],
+    }]);
+    expect(getMcpRuntimeStatus('/p', 'a').servers.cf).toEqual({
+      name: 'cf', status: 'failed', error: 'boom', scope: 'claudeai',
+      config: { type: 'http', url: 'https://x' },
+      tools: [{ name: 't', description: 'd' }],
+    });
+  });
+
+  it('auth state set/clear per scope', () => {
+    setMcpAuthState('/p', 'a', 'cf', { phase: 'waiting', authUrl: 'https://auth' });
+    expect(getMcpRuntimeStatus('/p', 'a').auth.cf).toEqual({ phase: 'waiting', authUrl: 'https://auth' });
+    expect(getMcpRuntimeStatus('/p', 'b').auth).toEqual({});
+    setMcpAuthState('/p', 'a', 'cf', null);
+    expect(getMcpRuntimeStatus('/p', 'a').auth).toEqual({});
   });
 });

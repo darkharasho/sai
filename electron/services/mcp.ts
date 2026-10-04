@@ -222,7 +222,7 @@ export function registerMcpHandlers() {
   });
 
   // Live connection status reported by the SDK backend's init messages.
-  ipcMain.handle('mcp:runtimeStatus', async () => getMcpRuntimeStatus());
+  ipcMain.handle('mcp:runtimeStatus', async (_e, projectPath?: string, scope?: string) => getMcpRuntimeStatus(projectPath ?? '', scope));
 
   ipcMain.handle('mcp:registryList', async () => {
     try {

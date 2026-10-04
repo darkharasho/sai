@@ -317,6 +317,8 @@ export interface RegistryPlugin {
   installed: boolean;
 }
 
+export type McpSource = 'user' | 'project' | 'plugin' | 'claudeai';
+
 export interface McpServer {
   name: string;
   description?: string;
@@ -325,8 +327,9 @@ export interface McpServer {
   args?: string[];
   url?: string;
   env?: Record<string, string>;
+  headers?: Record<string, string>;
   enabled: boolean;
-  source?: 'user' | 'plugin';
+  source?: McpSource;
 }
 
 export interface McpServerConfig {
@@ -336,7 +339,59 @@ export interface McpServerConfig {
   args?: string[];
   url?: string;
   env?: Record<string, string>;
+  headers?: Record<string, string>;
+  /** Which file to write. Defaults to 'user' (~/.claude.json). */
+  source?: 'user' | 'project';
 }
+
+export type McpLiveStatus = 'connected' | 'failed' | 'needs-auth' | 'pending' | 'disabled' | 'unknown';
+
+export interface McpLiveServer {
+  name: string;
+  status: McpLiveStatus;
+  error?: string;
+  /** SDK config scope: user | project | local | claudeai | managed | dynamic … */
+  scope?: string;
+  serverInfo?: { name: string; version: string };
+  tools?: Array<{ name: string; description?: string }>;
+  config?: { type?: string; url?: string };
+}
+
+export interface McpAuthState {
+  phase: 'waiting' | 'timeout' | 'error';
+  authUrl?: string;
+  error?: string;
+}
+
+export interface McpCapabilities {
+  status: boolean;
+  reconnect: boolean;
+  toggle: boolean;
+  authenticate: boolean;
+  clearAuth: boolean;
+  submitCallbackUrl: boolean;
+}
+
+/** Pushed on `mcp:runtime-status` and returned by `mcp:runtimeStatus`. */
+export interface McpRuntimePush {
+  projectPath: string;
+  scope: string;
+  servers: Record<string, McpLiveServer>;
+  auth: Record<string, McpAuthState>;
+}
+
+/** Full snapshot returned by `mcp:status` (adds live-session facts). */
+export interface McpLiveSnapshot extends McpRuntimePush {
+  /** False when no live session could be obtained (CLI backend, spawn failure). */
+  available: boolean;
+  capabilities: McpCapabilities;
+}
+
+export type McpActionResult = { ok: true } | { ok: false; error: string };
+export type McpAuthResult =
+  | { ok: true; state: 'already-authorized' }
+  | { ok: true; state: 'awaiting-browser'; authUrl: string }
+  | { ok: false; error: string };
 
 export interface McpTool {
   name: string;

@@ -1428,11 +1428,12 @@ export class SdkBackend implements ClaudeBackend {
           // CLI never reports per-server connection state).
           if (m?.type === 'system' && m?.subtype === 'init' && Array.isArray(m?.mcp_servers)) {
             recordMcpRuntimeStatus(
-              scopeKey,
+              projectPath,
+              effectiveScope,
               m.mcp_servers as Array<{ name?: string; status?: string }>,
               Array.isArray(m?.plugins) ? (m.plugins as Array<{ name?: string; path?: string }>) : undefined,
             );
-            getMainWin()?.webContents.send('mcp:runtime-status', getMcpRuntimeStatus());
+            getMainWin()?.webContents.send('mcp:runtime-status', getMcpRuntimeStatus(projectPath, effectiveScope));
           }
           // Mid-session command-list changes (skills discovered dynamically):
           // REPLACE the cache — supportedCommands() never reflects these.
