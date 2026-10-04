@@ -427,12 +427,26 @@ contextBridge.exposeInMainWorld('sai', {
   pluginsUninstall: (name: string) => ipcRenderer.invoke('plugins:uninstall', name),
   pluginsRegistryList: () => ipcRenderer.invoke('plugins:registryList'),
   // MCP
-  mcpList: () => ipcRenderer.invoke('mcp:list'),
-  mcpAdd: (config: any) => ipcRenderer.invoke('mcp:add', config),
-  mcpRemove: (name: string) => ipcRenderer.invoke('mcp:remove', name),
-  mcpUpdate: (name: string, updates: any) => ipcRenderer.invoke('mcp:update', name, updates),
+  // `scope` on add/remove/update is the panel's chat scope, restarted (when
+  // idle) so the edit shows up live.
+  mcpList: (projectPath?: string) => ipcRenderer.invoke('mcp:list', projectPath),
+  mcpAdd: (config: any, projectPath?: string, scope?: string) => ipcRenderer.invoke('mcp:add', config, projectPath, scope),
+  mcpRemove: (name: string, source?: 'user' | 'project', projectPath?: string, scope?: string) =>
+    ipcRenderer.invoke('mcp:remove', name, source, projectPath, scope),
+  mcpUpdate: (name: string, updates: any, projectPath?: string, scope?: string) =>
+    ipcRenderer.invoke('mcp:update', name, updates, projectPath, scope),
   mcpRegistryList: () => ipcRenderer.invoke('mcp:registryList'),
-  mcpRuntimeStatus: () => ipcRenderer.invoke('mcp:runtimeStatus'),
+  mcpRuntimeStatus: (projectPath: string, scope?: string) => ipcRenderer.invoke('mcp:runtimeStatus', projectPath, scope),
+  mcpStatus: (projectPath: string, scope?: string) => ipcRenderer.invoke('mcp:status', projectPath, scope),
+  mcpReconnect: (projectPath: string, scope: string | undefined, name: string) => ipcRenderer.invoke('mcp:reconnect', projectPath, scope, name),
+  // `name` = config key (persisted), `controlName` = live session name (defaults to `name`).
+  mcpToggle: (projectPath: string, scope: string | undefined, name: string, enabled: boolean, source: string, controlName?: string) =>
+    ipcRenderer.invoke('mcp:toggle', projectPath, scope, name, enabled, source, controlName),
+  mcpAuthenticate: (projectPath: string, scope: string | undefined, name: string) => ipcRenderer.invoke('mcp:authenticate', projectPath, scope, name),
+  mcpAuthCancel: (projectPath: string, scope: string | undefined, name: string) => ipcRenderer.invoke('mcp:authCancel', projectPath, scope, name),
+  mcpSubmitCallbackUrl: (projectPath: string, scope: string | undefined, name: string, url: string) =>
+    ipcRenderer.invoke('mcp:submitCallbackUrl', projectPath, scope, name, url),
+  mcpSignOut: (projectPath: string, scope: string | undefined, name: string) => ipcRenderer.invoke('mcp:signOut', projectPath, scope, name),
   // Codex App Server has an isolated read-only MCP runtime channel. Never
   // route this through Claude's configuration or aggregate runtime status.
   codexMcpRuntimeStatus: (projectPath: string, scope?: string) =>

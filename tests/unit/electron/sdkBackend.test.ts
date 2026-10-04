@@ -79,6 +79,12 @@ vi.mock('../../../electron/services/notify', () => ({
 // Import after mocks are set up
 import { SdkBackend } from '../../../electron/services/claudeBackend/sdkBackend';
 import { BACKGROUND_WAIT_SETTLE_MS, BACKGROUND_WAIT_IDLE_MS } from '../../../electron/services/waitClassifier';
+import {
+  __resetMcpRuntimeStatusForTests,
+  getMcpRuntimeStatus,
+  setMcpAuthState,
+  setMcpInitFrameListener,
+} from '../../../electron/services/claudeBackend/mcpRuntimeStatus';
 
 // fs mock — mockReadFileSync is overridden per-test that needs it; others leave it as-is
 const { mockReadFileSync } = vi.hoisted(() => ({
@@ -2907,6 +2913,44 @@ describe('SdkBackend live MCP control', () => {
       backend.destroy();
     });
 
+    it('projectOnly flags only sessions of that project', () => {
+      const { backend } = setup();
+      backend.getLiveQuery('/p', 's1', { create: true });
+      backend.getLiveQuery('/other', 's1', { create: true });
+      backend.markMcpStale('/p', 'panel', { projectOnly: true });
+      expect((backend as any).sessions.get('/p s1').mcpStale).toBe(true);
+      expect((backend as any).sessions.get('/other s1').mcpStale).toBeFalsy();
+      backend.markMcpStale('/p', 'panel');
+      expect((backend as any).sessions.get('/other s1').mcpStale).toBe(true);
+      backend.destroy();
+    });
+
+    it('a send into an idle stale scope whose sign-in is waiting does not respawn it', async () => {
+      __resetMcpRuntimeStatusForTests();
+      const { backend, queryFn, queries } = setup();
+      backend.send({ projectPath: '/p', message: 'a', scope: 's1' } as any);
+      await tick();
+      const live = (backend as any).sessions.get('/p s1');
+      live.mapperState = { ...live.mapperState, streaming: false }; // turn ended — idle
+      setMcpAuthState('/p', 's1', 'gh', { phase: 'waiting', authUrl: 'https://auth/x' });
+      backend.markMcpStale('/p', 's1');
+      expect(queryFn).toHaveBeenCalledTimes(1); // idle restart skipped too
+
+      backend.send({ projectPath: '/p', message: 'b', scope: 's1' } as any);
+      await tick();
+      expect(queryFn).toHaveBeenCalledTimes(1);
+      expect(queries[0].closeSpy).not.toHaveBeenCalled();
+
+      // Sign-in settled (timeout is not a live listener) → the next idle send respawns.
+      setMcpAuthState('/p', 's1', 'gh', { phase: 'timeout' });
+      live.mapperState = { ...live.mapperState, streaming: false };
+      backend.send({ projectPath: '/p', message: 'c', scope: 's1' } as any);
+      await tick();
+      expect(queryFn).toHaveBeenCalledTimes(2);
+      __resetMcpRuntimeStatusForTests();
+      backend.destroy();
+    });
+
     it('a busy panel scope is not restarted mid-turn, only marked stale', async () => {
       const { backend, queryFn, queries } = setup();
       backend.send({ projectPath: '/p', message: 'a', scope: 's1' } as any);
@@ -2915,6 +2959,21 @@ describe('SdkBackend live MCP control', () => {
       expect(queryFn).toHaveBeenCalledTimes(1);
       expect(queries[0].closeSpy).not.toHaveBeenCalled();
       expect((backend as any).sessions.get('/p s1').mcpStale).toBe(true);
+      backend.destroy();
+    });
+  });
+  describe('init-frame hook', () => {
+    it('notifies the registered listener after recording each init-frame report', async () => {
+      __resetMcpRuntimeStatusForTests();
+      const seen: Array<[string, string, string | undefined]> = [];
+      setMcpInitFrameListener((p, sc) => seen.push([p, sc, getMcpRuntimeStatus(p, sc).servers.gh?.status]));
+      const init = { type: 'system', subtype: 'init', session_id: 'x', mcp_servers: [{ name: 'gh', status: 'pending' }] };
+      const backend = new SdkBackend({ queryFn: vi.fn(() => makeFakeQuery([init], { hang: true })) as any, emit: vi.fn(), resolveClaudePath: () => '/claude' });
+      backend.send({ projectPath: '/p', message: 'a', scope: 's1' } as any);
+      await tick();
+      expect(seen).toEqual([['/p', 's1', 'pending']]);
+      setMcpInitFrameListener(null);
+      __resetMcpRuntimeStatusForTests();
       backend.destroy();
     });
   });

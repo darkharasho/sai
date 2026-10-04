@@ -59,8 +59,9 @@ export interface ClaudeBackend {
   getLiveQuery?(projectPath: string, scope: string | undefined, opts: { create: boolean }): unknown | null;
   /** SDK only: MCP config changed on disk — sessions resume-respawn to load it
    *  (the given scope immediately when idle unless `restart: false`, the rest
-   *  on their next send that finds them idle). */
-  markMcpStale?(projectPath: string, scope?: string, opts?: { restart?: boolean }): void;
+   *  on their next send that finds them idle). `projectOnly` limits the flag
+   *  to `projectPath`'s sessions (a project .mcp.json edit). */
+  markMcpStale?(projectPath: string, scope?: string, opts?: { restart?: boolean; projectOnly?: boolean }): void;
   send(args: SendArgs): void;
   interrupt(projectPath: string, scope?: string): void;
   /** Re-assert backend truth for a scope the renderer believes is streaming.

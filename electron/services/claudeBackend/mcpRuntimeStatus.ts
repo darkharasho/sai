@@ -10,6 +10,7 @@ import type { McpAuthState, McpLiveServer, McpLiveStatus, McpRuntimePush } from 
 const KNOWN: ReadonlySet<string> = new Set(['connected', 'failed', 'needs-auth', 'pending', 'disabled']);
 const servers = new Map<string, Map<string, McpLiveServer>>();
 const auth = new Map<string, Map<string, McpAuthState>>();
+let initFrameListener: ((projectPath: string, scope: string) => void) | null = null;
 
 export const normalizeScope = (scope?: string): string => scope ?? 'chat';
 const keyOf = (projectPath: string, scope?: string) => `${projectPath} ${normalizeScope(scope)}`;
@@ -75,6 +76,24 @@ export function replaceMcpRuntimeStatus(projectPath: string, scope: string | und
 export function setMcpAuthState(projectPath: string, scope: string | undefined, name: string, state: McpAuthState | null): void {
   const b = bucket(auth, keyOf(projectPath, scope));
   if (state) b.set(name, state); else b.delete(name);
+}
+
+/** A browser sign-in is in flight for the scope: the CLI's OAuth callback
+ *  listener lives in that session, so it must not be torn down. */
+export function isMcpSignInWaiting(projectPath: string, scope?: string): boolean {
+  for (const s of auth.get(keyOf(projectPath, scope))?.values() ?? []) if (s.phase === 'waiting') return true;
+  return false;
+}
+
+/** mcp.ts registers this so each init-frame report starts the control's
+ *  pending watch — the SDK backend never imports mcpControl. */
+export function setMcpInitFrameListener(cb: ((projectPath: string, scope: string) => void) | null): void {
+  initFrameListener = cb;
+}
+
+/** Called by the SDK backend after recording an init-frame report. */
+export function notifyMcpInitFrame(projectPath: string, scope?: string): void {
+  try { initFrameListener?.(projectPath, normalizeScope(scope)); } catch { /* listener bugs never break the drain */ }
 }
 
 export function getMcpRuntimeStatus(projectPath: string, scope?: string): McpRuntimePush {

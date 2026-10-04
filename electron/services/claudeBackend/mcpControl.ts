@@ -33,8 +33,9 @@ export interface McpControlDeps {
   openExternal: (url: string) => void;
   push: (snapshot: McpLiveSnapshot) => void;
   /** Flag every live session's MCP config stale (SdkBackend.markMcpStale).
-   *  `restart: false` keeps the scope's idle session alive (sign-in running). */
-  markMcpStale?: (projectPath: string, scope: string | undefined, opts: { restart: boolean }) => void;
+   *  `restart: false` keeps the scope's idle session alive (sign-in running);
+   *  `projectOnly` flags just projectPath's sessions (project .mcp.json edit). */
+  markMcpStale?: (projectPath: string, scope: string | undefined, opts: { restart: boolean; projectOnly: boolean }) => void;
   pollMs?: number;
   timeoutMs?: number;
   now?: () => number;
@@ -185,10 +186,10 @@ export function createMcpControl(deps: McpControlDeps) {
      *  others on their next idle send), then the panel scope is re-read. A
      *  sign-in in progress pins the panel scope: the CLI's OAuth callback
      *  listener lives in that session, so it is left stale, not restarted. */
-    async applyConfig(projectPath: string, scope?: string): Promise<McpLiveSnapshot> {
+    async applyConfig(projectPath: string, scope?: string, opts: { projectOnly?: boolean } = {}): Promise<McpLiveSnapshot> {
       const prefix = `${scopeKey(projectPath, scope)} `;
       const signingIn = [...pollers.keys()].some((k) => k.startsWith(prefix));
-      deps.markMcpStale?.(projectPath, scope, { restart: !signingIn });
+      deps.markMcpStale?.(projectPath, scope, { restart: !signingIn, projectOnly: opts.projectOnly === true });
       const snap = await refresh(projectPath, scope, true);
       watchPending(projectPath, scope);
       return snap;

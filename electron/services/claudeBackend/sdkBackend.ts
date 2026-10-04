@@ -40,7 +40,7 @@ import { classifyTurnEnd, isSchedulingTool, isBackgroundLaunch, isAsyncLaunchRes
 import { clamp, type PermMode } from '../remote/clamp';
 import { parseUserMcpConfigPaths } from './userMcpConfig';
 import { loadExternalMcpForSdk } from './externalMcp';
-import { recordMcpRuntimeStatus, getMcpRuntimeStatus } from './mcpRuntimeStatus';
+import { recordMcpRuntimeStatus, getMcpRuntimeStatus, isMcpSignInWaiting, notifyMcpInitFrame } from './mcpRuntimeStatus';
 import { buildSdkOptions } from './sdkOptions';
 import { buildSudoPreToolUseHook, getSudoBroker } from '../sudo';
 import { buildOrchestratorSystemPrompt, resolveOrchestratorPromptContext, type OrchestratorPromptContext } from '../../../src/lib/orchestratorSystemPrompt';
@@ -456,13 +456,16 @@ export class SdkBackend implements ClaudeBackend {
   /** MCP config changed on disk (panel add/edit/remove/enable). The SDK can't
    *  hot-swap file-sourced servers — setMcpServers replaces ALL dynamic
    *  servers, SAI's in-process ones included — so every live session (every
-   *  kind loads the project .mcp.json via settingSources) is flagged and
+   *  kind loads the project .mcp.json via settingSources; only `projectPath`'s
+   *  with `projectOnly`, for a project .mcp.json edit) is flagged and
    *  resume-respawns on its next send that finds it idle. The panel's own
    *  scope restarts right away when idle, so the panel reflects the edit
    *  without waiting for a turn — unless `restart: false` (a sign-in is
    *  running in that session's OAuth listener); then it just stays stale. */
-  markMcpStale(projectPath: string, scope?: string, opts: { restart?: boolean } = {}): void {
-    for (const s of this.sessions.values()) s.mcpStale = true;
+  markMcpStale(projectPath: string, scope?: string, opts: { restart?: boolean; projectOnly?: boolean } = {}): void {
+    for (const s of this.sessions.values()) {
+      if (!opts.projectOnly || s._projectPath === projectPath) s.mcpStale = true;
+    }
     if (opts.restart === false) return;
     const scopeKey = toScopeKey(projectPath, scope);
     const session = this.sessions.get(scopeKey);
@@ -750,9 +753,10 @@ export class SdkBackend implements ClaudeBackend {
   }
 
   /** _isBusy plus an in-flight silent /compact (suppressForward — compact()
-   *  never sets streaming), which an MCP-staleness restart must not kill. */
+   *  never sets streaming) or a waiting MCP sign-in (the CLI's OAuth callback
+   *  listener lives in this query), which an MCP-staleness restart must not kill. */
   private _isBusyForMcpRestart(session: ScopeSession): boolean {
-    return this._isBusy(session) || session.suppressForward;
+    return this._isBusy(session) || session.suppressForward || isMcpSignInWaiting(session._projectPath, session._scopeName);
   }
 
   // ─── compact ───────────────────────────────────────────────────────────────
@@ -1508,6 +1512,7 @@ export class SdkBackend implements ClaudeBackend {
               Array.isArray(m?.plugins) ? (m.plugins as Array<{ name?: string; path?: string }>) : undefined,
             );
             getMainWin()?.webContents.send('mcp:runtime-status', getMcpRuntimeStatus(projectPath, effectiveScope));
+            notifyMcpInitFrame(projectPath, effectiveScope);
           }
           // Mid-session command-list changes (skills discovered dynamically):
           // REPLACE the cache — supportedCommands() never reflects these.

@@ -27,7 +27,7 @@ describe('mcpControl', () => {
   beforeEach(() => { __resetMcpRuntimeStatusForTests(); vi.useFakeTimers(); now = 0; });
   afterEach(() => vi.useRealTimers());
 
-  const make = (q: McpControlQuery | null, extra: { markMcpStale?: (p: string, s: string | undefined, o: { restart: boolean }) => void } = {}) => {
+  const make = (q: McpControlQuery | null, extra: { markMcpStale?: (p: string, s: string | undefined, o: { restart: boolean; projectOnly: boolean }) => void } = {}) => {
     const push = vi.fn();
     const openExternal = vi.fn();
     const getQuery = vi.fn(() => q);
@@ -303,7 +303,7 @@ describe('mcpControl', () => {
       const markMcpStale = vi.fn();
       const { ctl, getQuery, push } = make(q, { markMcpStale });
       const snap = await ctl.applyConfig('/p', 's1');
-      expect(markMcpStale).toHaveBeenCalledWith('/p', 's1', { restart: true });
+      expect(markMcpStale).toHaveBeenCalledWith('/p', 's1', { restart: true, projectOnly: false });
       expect(markMcpStale.mock.invocationCallOrder[0]).toBeLessThan((getQuery.mock.invocationCallOrder.at(-1))!);
       expect(getQuery).toHaveBeenCalledWith('/p', 's1', true);
       expect(snap.servers.cf.status).toBe('needs-auth');
@@ -316,9 +316,11 @@ describe('mcpControl', () => {
       const { ctl } = make(q, { markMcpStale });
       await ctl.authenticate('/p', 's1', 'cf');
       await ctl.applyConfig('/p', 's1');
-      expect(markMcpStale).toHaveBeenCalledWith('/p', 's1', { restart: false });
+      expect(markMcpStale).toHaveBeenCalledWith('/p', 's1', { restart: false, projectOnly: false });
       await ctl.applyConfig('/p', 's2'); // other scope — not pinned
-      expect(markMcpStale).toHaveBeenLastCalledWith('/p', 's2', { restart: true });
+      expect(markMcpStale).toHaveBeenLastCalledWith('/p', 's2', { restart: true, projectOnly: false });
+      await ctl.applyConfig('/p', 's2', { projectOnly: true });
+      expect(markMcpStale).toHaveBeenLastCalledWith('/p', 's2', { restart: true, projectOnly: true });
     });
 
     it('watches servers still pending after the respawn', async () => {
