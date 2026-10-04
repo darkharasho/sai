@@ -81,4 +81,68 @@ describe('mcpView', () => {
     expect(mcpDisplayName('plugin:cf:cloudflare-api')).toBe('cloudflare-api');
     expect(mcpDisplayName('claude.ai Gmail')).toBe('claude.ai Gmail');
   });
+
+  it('plugin config row claims its live plugin:<short>:<name> entry without a duplicate', () => {
+    const live = { 'plugin:cf:api': { name: 'plugin:cf:api', status: 'connected' as const, tools: [{ name: 't' }] } };
+    const rows = buildMcpRows([cfg({ name: 'plugin:cf:api', transport: 'streamable-http', source: 'plugin' })], live, {});
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ controlName: 'plugin:cf:api', dot: 'ok', subtitle: 'cf · 1 tools' });
+  });
+
+  it('plugin config row matched to a bare live name uses the live name as controlName', () => {
+    const live = { api: { name: 'api', status: 'connected' as const } };
+    const rows = buildMcpRows([cfg({ name: 'plugin:cf:api', transport: 'sse', source: 'plugin' })], live, {});
+    expect(rows).toHaveLength(1);
+    expect(rows[0].controlName).toBe('api');
+  });
+
+  it('live-only plugin and project rows get the right source and are read-only', () => {
+    const rows = buildMcpRows([], {
+      'plugin:x:y': { name: 'plugin:x:y', status: 'connected', scope: 'dynamic', config: { type: 'http' } },
+      proj: { name: 'proj', status: 'pending', scope: 'project', config: { type: 'stdio' } },
+    }, {});
+    const by = Object.fromEntries(rows.map((r) => [r.name, r]));
+    expect(by['plugin:x:y']).toMatchObject({ source: 'plugin', displayName: 'y', pluginShort: 'x', transport: 'streamable-http', editable: false, removable: false });
+    expect(by.proj).toMatchObject({ source: 'project', transport: 'stdio', editable: false, removable: false });
+  });
+
+  it('groups claudeai connectors and keeps the real plugin: name', () => {
+    const rows = buildMcpRows(
+      [cfg({ name: 'plugin:cf:api', transport: 'sse', source: 'plugin' })],
+      {
+        'plugin:cf:api': { name: 'plugin:cf:api', status: 'connected' },
+        'claude.ai Gmail': { name: 'claude.ai Gmail', status: 'connected', scope: 'claudeai' },
+      },
+      {},
+    );
+    const groups = groupMcpRows(rows);
+    expect(groups.map((g) => [g.id, g.rows.map((r) => r.name)])).toEqual([
+      ['plugin', ['plugin:cf:api']],
+      ['claudeai', ['claude.ai Gmail']],
+    ]);
+  });
+
+  it('auth state is looked up by controlName', () => {
+    const [row] = buildMcpRows(
+      [cfg({ name: 'plugin:cf:api', transport: 'sse', source: 'plugin' })],
+      { api: { name: 'api', status: 'needs-auth' } },
+      { api: { phase: 'waiting', authUrl: 'https://a' } },
+    );
+    expect(row.auth?.phase).toBe('waiting');
+    expect(row.subtitle).toBe('Waiting for browser sign-in…');
+  });
+
+  it('auth timeout/error puts a row in the attention group', () => {
+    for (const phase of ['timeout', 'error'] as const) {
+      const rows = buildMcpRows(
+        [cfg({ name: 'cf', transport: 'sse' })],
+        { cf: { name: 'cf', status: 'needs-auth' } },
+        { cf: { phase } },
+      );
+      expect(needsAttention(rows[0])).toBe(true);
+      expect(groupMcpRows(rows)[0].id).toBe('attention');
+    }
+    const rows = buildMcpRows([cfg({ name: 'ok' })], { ok: { name: 'ok', status: 'connected' } }, { ok: { phase: 'error' } });
+    expect(groupMcpRows(rows)[0].id).toBe('attention');
+  });
 });
