@@ -32,8 +32,9 @@ export interface McpControlDeps {
   getQuery: (projectPath: string, scope: string | undefined, create: boolean) => McpControlQuery | null;
   openExternal: (url: string) => void;
   push: (snapshot: McpLiveSnapshot) => void;
-  /** Flag every live session's MCP config stale (SdkBackend.markMcpStale). */
-  markMcpStale?: (projectPath: string, scope: string | undefined) => void;
+  /** Flag every live session's MCP config stale (SdkBackend.markMcpStale).
+   *  `restart: false` keeps the scope's idle session alive (sign-in running). */
+  markMcpStale?: (projectPath: string, scope: string | undefined, opts: { restart: boolean }) => void;
   pollMs?: number;
   timeoutMs?: number;
   now?: () => number;
@@ -45,7 +46,8 @@ const NO_SESSION = 'Live status unavailable — no Claude session';
 const NO_AUTH = 'This Claude runtime does not support in-app sign-in';
 /** How long watchPending() waits for `pending` servers to settle. */
 const PENDING_WATCH_MS = 30_000;
-const fn = (q: McpControlQuery | null, k: keyof McpControlQuery) => typeof q?.[k] === 'function';
+const fn = <K extends keyof McpControlQuery>(q: McpControlQuery | null, k: K): q is McpControlQuery & Required<Pick<McpControlQuery, K>> =>
+  typeof q?.[k] === 'function';
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e)) || 'Unknown error';
 /** Control responses may arrive raw or wrapped in `{ response }`. */
 const unwrap = (r: any) => (r && typeof r === 'object' && r.response && typeof r.response === 'object' ? r.response : r);
@@ -79,7 +81,7 @@ export function createMcpControl(deps: McpControlDeps) {
 
   async function refresh(projectPath: string, scope: string | undefined, create: boolean): Promise<McpLiveSnapshot> {
     const q = deps.getQuery(projectPath, scope, create);
-    if (q?.mcpServerStatus) {
+    if (fn(q, 'mcpServerStatus')) {
       try { replaceMcpRuntimeStatus(projectPath, scope, await q.mcpServerStatus()); } catch { /* query died — keep last known */ }
     }
     const snap = snapshotOf(projectPath, scope, q);
@@ -113,21 +115,31 @@ export function createMcpControl(deps: McpControlDeps) {
     stopPoll(projectPath, scope, name);
     const startedAt = now();
     const k = pollKey(projectPath, scope, name);
+    let inFlight = false;
+    const finish = () => {
+      stopPoll(projectPath, scope, name);
+      deps.push(snapshotOf(projectPath, scope, deps.getQuery(projectPath, scope, false)));
+    };
     const handle = setInterval(async () => {
-      const snap = await refresh(projectPath, scope, false);
+      if (pollers.get(k) !== handle) return;
+      // Checked before awaiting: a status call that never answers must not
+      // hold the sign-in in `waiting` past the cap.
+      if (now() - startedAt > timeoutMs) {
+        const prev = getMcpRuntimeStatus(projectPath, scope).auth[name];
+        setMcpAuthState(projectPath, scope, name, { phase: 'timeout', authUrl: prev?.authUrl });
+        finish();
+        return;
+      }
+      if (inFlight) return; // previous tick's status call still pending — never stack them
+      inFlight = true;
+      let snap: McpLiveSnapshot;
+      try { snap = await refresh(projectPath, scope, false); } finally { inFlight = false; }
       // Cancelled or replaced (a second authenticate()) while status was in
       // flight — this tick's window is stale and must not end the new poller.
       if (pollers.get(k) !== handle) return;
       const s = snap.servers[name];
-      let done = false;
-      if (s?.status === 'connected') { setMcpAuthState(projectPath, scope, name, null); done = true; }
-      else if (s?.status === 'failed') { setMcpAuthState(projectPath, scope, name, { phase: 'error', error: s.error ?? 'Sign-in failed' }); done = true; }
-      else if (now() - startedAt > timeoutMs) {
-        const prev = getMcpRuntimeStatus(projectPath, scope).auth[name];
-        setMcpAuthState(projectPath, scope, name, { phase: 'timeout', authUrl: prev?.authUrl });
-        done = true;
-      }
-      if (done) { stopPoll(projectPath, scope, name); deps.push(snapshotOf(projectPath, scope, deps.getQuery(projectPath, scope, false))); }
+      if (s?.status === 'connected') { setMcpAuthState(projectPath, scope, name, null); finish(); }
+      else if (s?.status === 'failed') { setMcpAuthState(projectPath, scope, name, { phase: 'error', error: s.error ?? 'Sign-in failed' }); finish(); }
     }, pollMs);
     pollers.set(k, handle);
   }
@@ -140,16 +152,21 @@ export function createMcpControl(deps: McpControlDeps) {
     if (pendingWatchers.has(k)) return;
     if (!anyPending(getMcpRuntimeStatus(projectPath, scope).servers)) return;
     const startedAt = now();
+    let inFlight = false;
     const stop = () => { clearInterval(handle); if (pendingWatchers.get(k) === handle) pendingWatchers.delete(k); };
     const handle = setInterval(async () => {
+      if (pendingWatchers.get(k) !== handle) return;
+      if (now() - startedAt > PENDING_WATCH_MS) { stop(); return; } // before awaiting — a hung status can't extend the cap
+      if (inFlight) return;
       const q = deps.getQuery(projectPath, scope, false);
-      if (!q?.mcpServerStatus) { stop(); return; }
+      if (!fn(q, 'mcpServerStatus')) { stop(); return; }
       const before = JSON.stringify(getMcpRuntimeStatus(projectPath, scope).servers);
-      try { replaceMcpRuntimeStatus(projectPath, scope, await q.mcpServerStatus()); } catch { /* query died — keep last known */ }
+      inFlight = true;
+      try { replaceMcpRuntimeStatus(projectPath, scope, await q.mcpServerStatus()); } catch { /* query died — keep last known */ } finally { inFlight = false; }
       if (pendingWatchers.get(k) !== handle) return; // disposed while awaiting
       const snap = snapshotOf(projectPath, scope, q);
       if (JSON.stringify(snap.servers) !== before) deps.push(snap);
-      if (!anyPending(snap.servers) || now() - startedAt > PENDING_WATCH_MS) stop();
+      if (!anyPending(snap.servers)) stop();
     }, pollMs);
     pendingWatchers.set(k, handle);
   }
@@ -165,9 +182,13 @@ export function createMcpControl(deps: McpControlDeps) {
 
     /** A server config was added/edited/removed/enabled: every session picks
      *  it up by resume-respawn (the panel's own scope right away when idle,
-     *  others on their next send), then the panel scope is re-read. */
+     *  others on their next idle send), then the panel scope is re-read. A
+     *  sign-in in progress pins the panel scope: the CLI's OAuth callback
+     *  listener lives in that session, so it is left stale, not restarted. */
     async applyConfig(projectPath: string, scope?: string): Promise<McpLiveSnapshot> {
-      deps.markMcpStale?.(projectPath, scope);
+      const prefix = `${scopeKey(projectPath, scope)} `;
+      const signingIn = [...pollers.keys()].some((k) => k.startsWith(prefix));
+      deps.markMcpStale?.(projectPath, scope, { restart: !signingIn });
       const snap = await refresh(projectPath, scope, true);
       watchPending(projectPath, scope);
       return snap;
@@ -197,7 +218,7 @@ export function createMcpControl(deps: McpControlDeps) {
     async authenticate(projectPath: string, scope: string | undefined, name: string): Promise<McpAuthResult> {
       const q = deps.getQuery(projectPath, scope, true);
       if (!q) return { ok: false, error: NO_SESSION };
-      if (!q.mcpAuthenticate) return { ok: false, error: NO_AUTH };
+      if (!fn(q, 'mcpAuthenticate')) return { ok: false, error: NO_AUTH };
       let res: any;
       try {
         res = unwrap(await q.mcpAuthenticate(name));
@@ -209,7 +230,7 @@ export function createMcpControl(deps: McpControlDeps) {
       }
       if (!res?.requiresUserAction) {
         setMcpAuthState(projectPath, scope, name, null);
-        if (q.reconnectMcpServer) { try { await q.reconnectMcpServer(name); } catch { /* status shows it */ } }
+        if (fn(q, 'reconnectMcpServer')) { try { await q.reconnectMcpServer(name); } catch { /* status shows it */ } }
         await refresh(projectPath, scope, false);
         return { ok: true, state: 'already-authorized' };
       }

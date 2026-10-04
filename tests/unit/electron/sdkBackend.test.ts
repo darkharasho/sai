@@ -2752,6 +2752,15 @@ describe('SdkBackend live MCP control', () => {
       backend.destroy();
     });
 
+    it('create:false returns an existing session query', () => {
+      const queryFn = vi.fn(() => makeFakeQuery([], { hang: true }));
+      const backend = new SdkBackend({ queryFn: queryFn as any, emit: vi.fn(), resolveClaudePath: () => '/claude' });
+      const q = backend.getLiveQuery('/p', 's1', { create: true });
+      expect(backend.getLiveQuery('/p', 's1', { create: false })).toBe(q);
+      expect(queryFn).toHaveBeenCalledTimes(1);
+      backend.destroy();
+    });
+
     it('create:false never spawns', () => {
       const queryFn = vi.fn(() => makeFakeQuery([], { hang: true }));
       const backend = new SdkBackend({ queryFn: queryFn as any, emit: vi.fn(), resolveClaudePath: () => '/claude' });
@@ -2786,11 +2795,13 @@ describe('SdkBackend live MCP control', () => {
       return { backend, queryFn, queries };
     }
 
-    it('a stale session (any scope, any project) resume-respawns on its next send', async () => {
+    it('a stale idle session (any scope, any project) resume-respawns on its next send', async () => {
       const { backend, queryFn, queries } = setup();
       backend.send({ projectPath: '/other', message: 'a', scope: 's1', model: 'm' } as any);
       await tick();
-      (backend as any).sessions.get('/other s1').sessionId = 'sess-a';
+      const live = (backend as any).sessions.get('/other s1');
+      live.sessionId = 'sess-a';
+      live.mapperState = { ...live.mapperState, streaming: false }; // turn ended
 
       backend.markMcpStale('/p', 'panel');
       expect(queryFn).toHaveBeenCalledTimes(1); // busy, other scope — left alone until it sends
@@ -2842,15 +2853,57 @@ describe('SdkBackend live MCP control', () => {
       backend.destroy();
     });
 
-    it('orchestrator sessions (no file-sourced MCP) are never marked stale', async () => {
-      const { backend, queryFn } = setup();
+    it('a streaming stale session takes a send into the live query — no close, no respawn, flag kept', async () => {
+      const pushed: any[] = [];
+      const queries: FakeQuery[] = [];
+      const queryFn = vi.fn((args: any) => {
+        (async () => { for await (const m of args.prompt) pushed.push(m); })();
+        const q = makeFakeQuery([], { hang: true }); queries.push(q); return q;
+      });
+      const backend = new SdkBackend({ queryFn: queryFn as any, emit: vi.fn(), resolveClaudePath: () => '/claude' });
+      backend.send({ projectPath: '/other', message: 'a', scope: 's1' } as any);
+      await tick();
+      backend.markMcpStale('/p', 'panel');
+      backend.send({ projectPath: '/other', message: 'follow-up', scope: 's1' } as any);
+      await tick();
+      expect(queryFn).toHaveBeenCalledTimes(1);
+      expect(queries[0].closeSpy).not.toHaveBeenCalled();
+      expect(pushed.map((m) => m.message.content)).toContain('follow-up');
+      expect((backend as any).sessions.get('/other s1').mcpStale).toBe(true);
+      backend.destroy();
+    });
+
+    it('a busy orchestrator is flagged stale but a send does not respawn it', async () => {
+      const { backend, queryFn, queries } = setup();
       backend.start({ projectPath: '/p', scope: 'orch', scopeCwd: '/p', kind: 'orchestrator' });
       backend.send({ projectPath: '/p', message: 'a', scope: 'orch' } as any);
       await tick();
       backend.markMcpStale('/p', 's1');
+      expect((backend as any).sessions.get('/p orch').mcpStale).toBe(true);
       backend.send({ projectPath: '/p', message: 'b', scope: 'orch' } as any);
       await tick();
       expect(queryFn).toHaveBeenCalledTimes(1);
+      expect(queries[0].closeSpy).not.toHaveBeenCalled();
+      backend.destroy();
+    });
+
+    it('an idle panel scope running a silent /compact is not restarted', () => {
+      const { backend, queryFn, queries } = setup();
+      backend.compact({ projectPath: '/p', scope: 's1' } as any);
+      backend.markMcpStale('/p', 's1');
+      expect(queryFn).toHaveBeenCalledTimes(1);
+      expect(queries[0].closeSpy).not.toHaveBeenCalled();
+      expect((backend as any).sessions.get('/p s1').mcpStale).toBe(true);
+      backend.destroy();
+    });
+
+    it('restart:false (sign-in running) leaves the idle panel scope alive and stale', () => {
+      const { backend, queryFn, queries } = setup();
+      backend.getLiveQuery('/p', 's1', { create: true });
+      backend.markMcpStale('/p', 's1', { restart: false });
+      expect(queryFn).toHaveBeenCalledTimes(1);
+      expect(queries[0].closeSpy).not.toHaveBeenCalled();
+      expect((backend as any).sessions.get('/p s1').mcpStale).toBe(true);
       backend.destroy();
     });
 

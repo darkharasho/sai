@@ -27,7 +27,7 @@ describe('mcpControl', () => {
   beforeEach(() => { __resetMcpRuntimeStatusForTests(); vi.useFakeTimers(); now = 0; });
   afterEach(() => vi.useRealTimers());
 
-  const make = (q: McpControlQuery | null, extra: { markMcpStale?: (p: string, s: string | undefined) => void } = {}) => {
+  const make = (q: McpControlQuery | null, extra: { markMcpStale?: (p: string, s: string | undefined, o: { restart: boolean }) => void } = {}) => {
     const push = vi.fn();
     const openExternal = vi.fn();
     const getQuery = vi.fn(() => q);
@@ -152,6 +152,51 @@ describe('mcpControl', () => {
     expect(getMcpRuntimeStatus('/p', 's1').auth.cf).toBeUndefined();
   });
 
+  it('a status call that never answers cannot hold the sign-in past the cap, and ticks never stack', async () => {
+    const q = fakeQuery();
+    const { ctl } = make(q);
+    await ctl.authenticate('/p', 's1', 'cf');
+    (q.mcpServerStatus as any).mockClear();
+    (q.mcpServerStatus as any).mockImplementation(() => new Promise(() => {}));
+    await vi.advanceTimersByTimeAsync(8000);
+    expect(q.mcpServerStatus).toHaveBeenCalledTimes(1);
+    expect(getMcpRuntimeStatus('/p', 's1').auth.cf).toMatchObject({ phase: 'waiting' });
+
+    now = 10_001;
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(getMcpRuntimeStatus('/p', 's1').auth.cf).toEqual({ phase: 'timeout', authUrl: 'https://auth/x' });
+    await vi.advanceTimersByTimeAsync(6000);
+    expect(q.mcpServerStatus).toHaveBeenCalledTimes(1);
+  });
+
+  it('cancelAuth() during an in-flight tick: the late status cannot set auth state', async () => {
+    const q = fakeQuery();
+    const { ctl } = make(q);
+    await ctl.authenticate('/p', 's1', 'cf');
+    let release!: (l: unknown[]) => void;
+    (q.mcpServerStatus as any).mockImplementationOnce(() => new Promise<unknown[]>((r) => { release = r; }));
+    await vi.advanceTimersByTimeAsync(2000);
+    ctl.cancelAuth('/p', 's1', 'cf');
+    release([{ name: 'cf', status: 'failed', error: 'late' }]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(getMcpRuntimeStatus('/p', 's1').auth.cf).toBeUndefined();
+    (q.mcpServerStatus as any).mockClear();
+    await vi.advanceTimersByTimeAsync(6000);
+    expect(q.mcpServerStatus).not.toHaveBeenCalled();
+  });
+
+  it('dispose() stops every auth poller and pending watcher', async () => {
+    recordMcpRuntimeStatus('/p', 's2', [{ name: 'cf', status: 'pending' }]);
+    const q = fakeQuery();
+    const { ctl } = make(q);
+    await ctl.authenticate('/p', 's1', 'cf');
+    ctl.watchPending('/p', 's2');
+    ctl.dispose();
+    (q.mcpServerStatus as any).mockClear();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(q.mcpServerStatus).not.toHaveBeenCalled();
+  });
+
   it('cancelAuth() stops polling and clears state', async () => {
     const q = fakeQuery();
     const { ctl } = make(q);
@@ -225,6 +270,21 @@ describe('mcpControl', () => {
       expect(getQuery).toHaveBeenCalledWith('/p', 's1', false);
     });
 
+    it('a hung status cannot extend the 30s cap, and ticks never stack', async () => {
+      recordMcpRuntimeStatus('/p', 's1', [{ name: 'cf', status: 'pending' }]);
+      const q = fakeQuery({ mcpServerStatus: vi.fn(() => new Promise<unknown[]>(() => {})) });
+      const { ctl, getQuery } = make(q);
+      ctl.watchPending('/p', 's1');
+      await vi.advanceTimersByTimeAsync(8000);
+      expect(q.mcpServerStatus).toHaveBeenCalledTimes(1);
+      now = 30_001;
+      await vi.advanceTimersByTimeAsync(2000);
+      getQuery.mockClear();
+      await vi.advanceTimersByTimeAsync(6000);
+      expect(getQuery).not.toHaveBeenCalled(); // stopped
+      expect(q.mcpServerStatus).toHaveBeenCalledTimes(1);
+    });
+
     it('a second call while watching does not start a second poller', async () => {
       recordMcpRuntimeStatus('/p', 's1', [{ name: 'cf', status: 'pending' }]);
       const q = fakeQuery();
@@ -243,11 +303,22 @@ describe('mcpControl', () => {
       const markMcpStale = vi.fn();
       const { ctl, getQuery, push } = make(q, { markMcpStale });
       const snap = await ctl.applyConfig('/p', 's1');
-      expect(markMcpStale).toHaveBeenCalledWith('/p', 's1');
+      expect(markMcpStale).toHaveBeenCalledWith('/p', 's1', { restart: true });
       expect(markMcpStale.mock.invocationCallOrder[0]).toBeLessThan((getQuery.mock.invocationCallOrder.at(-1))!);
       expect(getQuery).toHaveBeenCalledWith('/p', 's1', true);
       expect(snap.servers.cf.status).toBe('needs-auth');
       expect(push).toHaveBeenCalledWith(snap);
+    });
+
+    it('a sign-in in progress on the panel scope asks for no restart', async () => {
+      const q = fakeQuery();
+      const markMcpStale = vi.fn();
+      const { ctl } = make(q, { markMcpStale });
+      await ctl.authenticate('/p', 's1', 'cf');
+      await ctl.applyConfig('/p', 's1');
+      expect(markMcpStale).toHaveBeenCalledWith('/p', 's1', { restart: false });
+      await ctl.applyConfig('/p', 's2'); // other scope — not pinned
+      expect(markMcpStale).toHaveBeenLastCalledWith('/p', 's2', { restart: true });
     });
 
     it('watches servers still pending after the respawn', async () => {

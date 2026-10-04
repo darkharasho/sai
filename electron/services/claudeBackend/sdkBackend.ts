@@ -87,7 +87,8 @@ interface ScopeSession {
    *  its session id must not be stashed for resume when it is torn down. */
   warm?: boolean;
   /** MCP config changed on disk since this session spawned (markMcpStale) —
-   *  the next send resume-respawns it, exactly like a config change. */
+   *  the next send that finds the session idle resume-respawns it. A busy
+   *  session keeps the flag and its live turn. */
   mcpStale?: boolean;
   /** Normalized per-session config; a send with different values recreates the
    *  session (CLI ensureProcess parity) so model/effort/permMode/feature-setting
@@ -454,17 +455,18 @@ export class SdkBackend implements ClaudeBackend {
 
   /** MCP config changed on disk (panel add/edit/remove/enable). The SDK can't
    *  hot-swap file-sourced servers — setMcpServers replaces ALL dynamic
-   *  servers, SAI's in-process ones included — so every live session is
-   *  flagged and resume-respawns on its next send. The panel's own scope
-   *  restarts right away when idle, so the panel reflects the edit without
-   *  waiting for a turn; a busy one picks it up on its next send. */
-  markMcpStale(projectPath: string, scope?: string): void {
-    // Orchestrator sessions carry only the in-process swarm server — no
-    // file-sourced MCP to reload.
-    for (const s of this.sessions.values()) if (s.kind !== 'orchestrator') s.mcpStale = true;
+   *  servers, SAI's in-process ones included — so every live session (every
+   *  kind loads the project .mcp.json via settingSources) is flagged and
+   *  resume-respawns on its next send that finds it idle. The panel's own
+   *  scope restarts right away when idle, so the panel reflects the edit
+   *  without waiting for a turn — unless `restart: false` (a sign-in is
+   *  running in that session's OAuth listener); then it just stays stale. */
+  markMcpStale(projectPath: string, scope?: string, opts: { restart?: boolean } = {}): void {
+    for (const s of this.sessions.values()) s.mcpStale = true;
+    if (opts.restart === false) return;
     const scopeKey = toScopeKey(projectPath, scope);
     const session = this.sessions.get(scopeKey);
-    if (!session || this._isBusy(session)) return;
+    if (!session || this._isBusyForMcpRestart(session)) return;
     if (session.sessionId && !session.warm) this.pendingResume.set(scopeKey, session.sessionId);
     session.query.close();
     this.sessions.delete(scopeKey);
@@ -543,7 +545,13 @@ export class SdkBackend implements ClaudeBackend {
       // model switches and bypass toggles until the scope was idle-swept.
       let session = this.sessions.get(scopeKey);
       const wantConfig = normalizeConfig(effectivePermMode, effort, model);
-      if (session && (session.mcpStale || !configEquals(session.config, wantConfig))) {
+      // A stale MCP config only respawns an idle session: the flag is armed by
+      // an edit elsewhere, so it must never kill a live turn, a pending
+      // background resume or a silent /compact — the message goes into the
+      // live query and the flag waits for the next idle send.
+      const configChanged = !!session && !configEquals(session.config, wantConfig);
+      const mcpRespawn = !!session?.mcpStale && !this._isBusyForMcpRestart(session);
+      if (session && (configChanged || mcpRespawn)) {
         this._resolveGatesForScope(scopeKey, 'Session restarted with new settings');
         if (session.mapperState.streaming) {
           // End the in-flight turn in the UI — its result will never arrive.
@@ -739,6 +747,12 @@ export class SdkBackend implements ClaudeBackend {
       || session.awaitingInterruptResult
       || session.pendingBackgroundResume
       || (session.pendingWakeup && (session.wakeupDeadline == null || Date.now() < session.wakeupDeadline));
+  }
+
+  /** _isBusy plus an in-flight silent /compact (suppressForward — compact()
+   *  never sets streaming), which an MCP-staleness restart must not kill. */
+  private _isBusyForMcpRestart(session: ScopeSession): boolean {
+    return this._isBusy(session) || session.suppressForward;
   }
 
   // ─── compact ───────────────────────────────────────────────────────────────

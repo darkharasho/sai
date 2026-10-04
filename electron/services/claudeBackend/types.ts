@@ -58,8 +58,9 @@ export interface ClaudeBackend {
    *  toggle, OAuth). `create` spins up a session when none exists. */
   getLiveQuery?(projectPath: string, scope: string | undefined, opts: { create: boolean }): unknown | null;
   /** SDK only: MCP config changed on disk — sessions resume-respawn to load it
-   *  (the given scope immediately when idle, the rest on their next send). */
-  markMcpStale?(projectPath: string, scope?: string): void;
+   *  (the given scope immediately when idle unless `restart: false`, the rest
+   *  on their next send that finds them idle). */
+  markMcpStale?(projectPath: string, scope?: string, opts?: { restart?: boolean }): void;
   send(args: SendArgs): void;
   interrupt(projectPath: string, scope?: string): void;
   /** Re-assert backend truth for a scope the renderer believes is streaming.
