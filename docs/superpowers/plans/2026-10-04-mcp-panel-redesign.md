@@ -2977,3 +2977,15 @@ git commit -m "fix(mcp): verification follow-ups
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 (Skip if nothing changed.)
+
+## Spike findings
+
+Run 2026-10-04 against SDK 0.3.196 (`scripts/spikes/mcp-auth-spike.mjs`, not committed).
+
+1. **Auth works for SDK-supplied servers — GATE PASSED.** `q.mcpAuthenticate('colon:test:server')` on a server passed via `options.mcpServers` (`{type:'http', url:'https://mcp.cloudflare.com/mcp'}`) returned an auth URL. After browser approval, the **same live query** reported `connected` via `mcpServerStatus()` within one 2 s poll — no new session, no restart.
+2. **Result shape is raw (not wrapped):** `{ authUrl, requiresUserAction: true, callbackExpected: true, redirectScheme: 'localhost', state, callbackPort: 3118 }`. `authUrl`'s `redirect_uri` is `http://localhost:<callbackPort>/callback`. `unwrap()` in Task 4 still tolerates `{response:…}`.
+3. **Plugin server names are reported fully qualified:** `plugin:<short>:<name>` (e.g. `plugin:cloudflare:cloudflare-bindings`), all with `scope: 'dynamic'`. Plugin and `mcpServers` entries share the `dynamic` scope, so auth goes through the same path for both. claude.ai connectors are reported as `claude.ai <Name>` with `scope: 'claudeai'`.
+4. **Colon keys are accepted** in `options.mcpServers` (`colon:test:server` loaded and authenticated). Task 3 proceeds.
+5. **Unknown name → throws** `Error: Server not found: <name>` (seen for `plugin:cloudflare:cloudflare-api`, which wasn't loaded in the spike session). Task 4 maps thrown errors to `{ok:false, error}`.
+6. **Project-disable key:** the CLI binary contains `disabledMcpjsonServers` — Task 2 uses it as written.
+7. Initial status for most remote servers is `pending` right after spawn; UIs must treat `pending` as transient.
