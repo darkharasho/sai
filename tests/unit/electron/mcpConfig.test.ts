@@ -139,4 +139,23 @@ describe('mcpConfig', () => {
     removeMcpServer({ home, projectPath: proj }, 'a', 'project');
     expect(read(path.join(proj, '.mcp.json'))).toEqual({ mcpServers: { b: { command: 'y' } } });
   });
+  it('keys disables by real path through a symlinked project dir, and re-enable clears the raw key', () => {
+    const link = path.join(os.tmpdir(), `mcpcfg-link-${process.pid}-${Date.now()}`);
+    fs.symlinkSync(proj, link);
+    try {
+      const real = fs.realpathSync(proj);
+      write(path.join(proj, '.mcp.json'), { e2e: { command: 'x' } });
+      write(path.join(home, '.claude.json'), { projects: { [link]: { disabledMcpServers: ['e2e'] } } });
+      expect(listMcpServers({ home, projectPath: link }).find((s) => s.name === 'e2e')?.enabled).toBe(false);
+      setMcpServerDisabled({ home, projectPath: link }, 'e2e', 'project', false);
+      let cfg = read(path.join(home, '.claude.json'));
+      expect(cfg.projects[link].disabledMcpServers).toEqual([]);
+      expect(cfg.projects[real].disabledMcpServers).toEqual([]);
+      setMcpServerDisabled({ home, projectPath: link }, 'e2e', 'project', true);
+      cfg = read(path.join(home, '.claude.json'));
+      expect(cfg.projects[real].disabledMcpServers).toEqual(['e2e']);
+    } finally {
+      fs.unlinkSync(link);
+    }
+  });
 });

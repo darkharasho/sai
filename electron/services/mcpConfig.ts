@@ -40,6 +40,10 @@ function projectDir(p: McpPaths): string {
   return p.projectPath;
 }
 const projectJson = (p: McpPaths) => path.join(projectDir(p), '.mcp.json');
+/** The CLI keys projects[] by real path (/home is a symlink to /var/home here). */
+function projectsKey(dir: string): string {
+  try { return fs.realpathSync(dir); } catch { return dir; }
+}
 
 function readJson<T>(file: string, fallback: T): T {
   try {
@@ -119,9 +123,15 @@ export function detectTransport(entry: McpConfigEntry): McpServer['transport'] {
   return 'stdio';
 }
 
+/** Reads both the real-path key (the CLI's) and the raw key older SAI wrote. */
 function disabledSet(cfg: ClaudeConfig, scopeDir: string | undefined, key: 'disabledMcpServers' | typeof LEGACY_PROJECT_DISABLE_KEY): Set<string> {
-  const list = scopeDir ? cfg.projects?.[scopeDir]?.[key] : undefined;
-  return new Set(Array.isArray(list) ? list : []);
+  const out = new Set<string>();
+  if (!scopeDir) return out;
+  for (const k of new Set([scopeDir, projectsKey(scopeDir)])) {
+    const list = cfg.projects?.[k]?.[key];
+    if (Array.isArray(list)) list.forEach((n) => out.add(n));
+  }
+  return out;
 }
 
 function toServer(name: string, entry: McpConfigEntry, source: McpSource, enabled: boolean): McpServer {
@@ -213,17 +223,25 @@ export function removeMcpServer(paths: McpPaths, name: string, source: 'user' | 
 
 export function setMcpServerDisabled(paths: McpPaths, name: string, source: McpSource, disabled: boolean): void {
   if (source === 'claudeai') throw new Error('claude.ai connectors are managed on claude.ai');
-  const scopeDir = source === 'project' ? projectDir(paths) : paths.home;
+  const rawDir = source === 'project' ? projectDir(paths) : paths.home;
+  const scopeDir = projectsKey(rawDir);
   const cfg = readJsonForWrite<ClaudeConfig>(claudeJson(paths));
   cfg.projects ??= {};
   cfg.projects[scopeDir] ??= {};
   const entry = cfg.projects[scopeDir];
-  const set = disabledSet(cfg, scopeDir, 'disabledMcpServers');
+  const set = disabledSet(cfg, rawDir, 'disabledMcpServers');
   if (disabled) set.add(name); else set.delete(name);
   entry.disabledMcpServers = Array.from(set);
+  // Re-enabling clears the raw-path copy too, or SAI's own filter would keep it off.
+  const raw = rawDir !== scopeDir ? cfg.projects[rawDir] : undefined;
+  if (!disabled && raw && Array.isArray(raw.disabledMcpServers)) {
+    raw.disabledMcpServers = raw.disabledMcpServers.filter((n) => n !== name);
+  }
   // A legacy entry would come back as a settings rejection on the CLI's next start.
-  if (!disabled && source === 'project' && Array.isArray(entry[LEGACY_PROJECT_DISABLE_KEY])) {
-    entry[LEGACY_PROJECT_DISABLE_KEY] = entry[LEGACY_PROJECT_DISABLE_KEY]!.filter((n) => n !== name);
+  for (const e of [entry, raw]) {
+    if (!disabled && source === 'project' && e && Array.isArray(e[LEGACY_PROJECT_DISABLE_KEY])) {
+      e[LEGACY_PROJECT_DISABLE_KEY] = e[LEGACY_PROJECT_DISABLE_KEY]!.filter((n) => n !== name);
+    }
   }
   writeJson(claudeJson(paths), cfg);
 }

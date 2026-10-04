@@ -64,9 +64,16 @@ function normalizeServerEntry(entry: McpConfigEntry): Record<string, unknown> {
   return rest;
 }
 
+/** projects[] is keyed by real path (the CLI's), but older SAI wrote the raw $HOME key. */
 function disabledNames(config: ClaudeJsonConfig, disableScope: string): Set<string> {
-  const list = config.projects?.[disableScope]?.disabledMcpServers;
-  return new Set(Array.isArray(list) ? list : []);
+  let real = disableScope;
+  try { real = fs.realpathSync(disableScope); } catch { /* keep raw */ }
+  const out = new Set<string>();
+  for (const key of new Set([disableScope, real])) {
+    const list = config.projects?.[key]?.disabledMcpServers;
+    if (Array.isArray(list)) list.forEach((n) => out.add(n));
+  }
+  return out;
 }
 
 /** User servers from ~/.claude.json, minus the disabled list, SDK-normalized. */
