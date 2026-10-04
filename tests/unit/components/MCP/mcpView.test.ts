@@ -108,6 +108,11 @@ describe('mcpView', () => {
     expect(rows[0]).toMatchObject({ controlName: 'plugin:cf:api', dot: 'ok', subtitle: 'cf · 1 tools' });
   });
 
+  it('plugin subtitle says "plugin" when the plugin and server share a name', () => {
+    const rows = buildMcpRows([cfg({ name: 'plugin:playwright:playwright', source: 'plugin', enabled: false })], {}, {});
+    expect(rows[0]).toMatchObject({ displayName: 'playwright', subtitle: 'plugin · disabled' });
+  });
+
   it('plugin config row matched to a bare live name uses the live name as controlName', () => {
     const live = { api: { name: 'api', status: 'connected' as const } };
     const rows = buildMcpRows([cfg({ name: 'plugin:cf:api', transport: 'sse', source: 'plugin' })], live, {});

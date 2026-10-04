@@ -73,8 +73,9 @@ function sourceOfLive(l: McpLiveServer): McpSource {
 function finish(input: Omit<McpRow, 'subtitle' | 'dot' | 'fix'>): McpRow {
   // A connected server is signed in: a leftover auth entry is stale.
   const base = input.live?.status === 'connected' ? { ...input, auth: undefined } : input;
-  const { live, auth, enabled, transport, source, pluginShort } = base;
-  const prefix = source === 'plugin' && pluginShort ? pluginShort
+  const { live, auth, enabled, transport, source, pluginShort, displayName } = base;
+  // Repeating the title (`playwright` over `playwright · …`) says nothing.
+  const prefix = source === 'plugin' && pluginShort ? (pluginShort === displayName ? 'plugin' : pluginShort)
     : source === 'claudeai' ? 'connector'
     : TRANSPORT_LABEL[transport];
   const tools = live?.tools?.length;

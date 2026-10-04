@@ -39,6 +39,16 @@ describe('mcpConfig', () => {
     expect(list[0].headers).toEqual({ Authorization: 'x' });
   });
 
+  it('lists a plugin installed at user and project scope once', () => {
+    const pluginDir = path.join(home, 'plug');
+    write(path.join(pluginDir, '.mcp.json'), { playwright: { command: 'npx' } });
+    write(path.join(home, '.claude', 'plugins', 'installed_plugins.json'), {
+      plugins: { 'playwright@mk': [{ installPath: pluginDir }, { installPath: pluginDir }] },
+    });
+
+    expect(listMcpServers({ home }).map((s) => s.name)).toEqual(['plugin:playwright:playwright']);
+  });
+
   it('survives missing and malformed files', () => {
     fs.writeFileSync(path.join(home, '.claude.json'), '{not json');
     expect(listMcpServers({ home, projectPath: proj })).toEqual([]);

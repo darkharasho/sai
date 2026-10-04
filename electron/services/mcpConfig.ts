@@ -183,8 +183,12 @@ export function listMcpServers(paths: McpPaths): McpServer[] {
       items.push(toServer(name, entry, 'project', !off));
     }
   }
+  // A plugin installed at both user and project scope is one server to the CLI.
+  const seenPlugin = new Set<string>();
   for (const ps of listPluginServers(paths.home)) {
     const full = `plugin:${ps.pluginShort}:${ps.serverName}`;
+    if (seenPlugin.has(full)) continue;
+    seenPlugin.add(full);
     items.push(toServer(full, ps.entry, 'plugin', !homeDisabled.has(full)));
   }
   return items;
