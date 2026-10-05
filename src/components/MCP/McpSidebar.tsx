@@ -135,8 +135,18 @@ export default function McpSidebar({ provider = 'claude', projectPath, scope }: 
   const [busy, setBusy] = useState<Record<string, boolean>>({});
   const [actionError, setActionError] = useState<string | null>(null);
 
+  // Reconnecting a healthy server leaves its status unchanged, so the click
+  // needs its own feedback: a label while it runs, a short note when it lands.
+  const [reconnecting, setReconnecting] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  useEffect(() => {
+    if (!notice) return;
+    const t = setTimeout(() => setNotice(null), 4000);
+    return () => clearTimeout(t);
+  }, [notice]);
+
   // A stale banner must not follow the user into another view or tab.
-  useEffect(() => { setActionError(null); }, [view, tab]);
+  useEffect(() => { setActionError(null); setNotice(null); }, [view, tab]);
 
   // Failures (an {error} result or a rejection) go to actionError and leave the
   // form open so the user's input isn't lost. Never include config values here:
@@ -187,7 +197,19 @@ export default function McpSidebar({ provider = 'claude', projectPath, scope }: 
     }
     return res.ok ? { ok: true } : res;
   });
-  const handleRetry = (row: McpRow) => withBusy(row, () => live.reconnect(row.controlName));
+  const handleRetry = (row: McpRow) => {
+    setNotice(null);
+    setReconnecting(row.key);
+    return withBusy(row, async () => {
+      try {
+        const res = await live.reconnect(row.controlName);
+        if (res.ok) setNotice(`Reconnected ${row.displayName}`);
+        return res;
+      } finally {
+        setReconnecting(null);
+      }
+    });
+  };
   const handleToggle = (row: McpRow) => withBusy(row, async () => {
     try {
       return await live.toggle(row.name, !row.enabled, row.source, row.controlName);
@@ -318,6 +340,8 @@ export default function McpSidebar({ provider = 'claude', projectPath, scope }: 
             available={!!live.snapshot?.available}
             busy={!!busy[selectedRow.key]}
             error={actionError}
+            notice={notice}
+            reconnecting={reconnecting === selectedRow.key}
             onBack={() => { setView('list'); setSelectedKey(null); }}
             onReconnect={handleRetry}
             onToggle={handleToggle}

@@ -262,6 +262,20 @@ describe('McpSidebar', () => {
     expect((getByPlaceholderText('http://localhost:…/callback?code=…') as HTMLInputElement).value).toBe('http://localhost:1/cb?code=1');
   });
 
+  it('Reconnect on a connected server says it is reconnecting, then confirms — the status alone does not change', async () => {
+    mockSai.mcpList.mockResolvedValue([{ name: 'gh', transport: 'stdio', command: 'x', enabled: true, source: 'user' }]);
+    mockSai.mcpStatus.mockResolvedValue(liveSnap({ gh: { name: 'gh', status: 'connected' } }));
+    let resolve!: (v: any) => void;
+    mockSai.mcpReconnect.mockImplementation(() => new Promise((r) => { resolve = r; }));
+    const { findByText, getByText, findByRole } = render(<McpSidebar projectPath="/p" scope="s1" />);
+    fireEvent.click(await findByText('gh'));
+    fireEvent.click(getByText('Reconnect'));
+    expect(await findByText('Reconnecting…')).toBeTruthy();
+    resolve({ ok: true });
+    expect((await findByRole('status')).textContent).toMatch(/reconnected gh/i);
+    expect(getByText('Reconnect')).toBeTruthy();
+  });
+
   it('add form saves with the panel project and scope, then returns to the list', async () => {
     const { findByText, getByText, getByPlaceholderText } = render(<McpSidebar projectPath="/p" scope="s1" />);
     fireEvent.click(await findByText('Add'));

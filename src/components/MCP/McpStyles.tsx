@@ -49,6 +49,7 @@ export default function McpStyles() {
       .mcp-dhd .mcp-acts { margin-top: 10px; }
       .mcp-dhint { margin-top: 8px; white-space: normal; }
       .mcp-derr { margin-top: 8px; font-size: 11px; color: var(--red); overflow-wrap: anywhere; }
+      .mcp-dnote { margin-top: 8px; font-size: 11px; color: var(--green); overflow-wrap: anywhere; }
       .mcp-sec { padding: 10px 12px; border-bottom: 1px solid var(--border-hairline); }
       .mcp-sec h4 { margin: 0 0 6px; font-size: 10.5px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .08em; font-weight: 500; }
       .mcp-tool { font: 11.5px 'Geist Mono', monospace; padding: 3px 0; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

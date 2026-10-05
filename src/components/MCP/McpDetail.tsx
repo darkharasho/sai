@@ -10,6 +10,9 @@ interface McpDetailProps {
   available: boolean;
   busy: boolean;
   error: string | null;
+  /** Transient success note, e.g. after a reconnect. */
+  notice?: string | null;
+  reconnecting?: boolean;
   onBack(): void;
   onReconnect(row: McpRow): void;
   onToggle(row: McpRow): void;
@@ -89,7 +92,7 @@ export default function McpDetail(props: McpDetailProps) {
             title={connecting ? 'Still connecting — Reconnect is available once it finishes' : undefined}
             onClick={() => props.onReconnect(row)}
           >
-            <RotateCcw size={11} /> Reconnect
+            <RotateCcw size={11} /> {props.reconnecting ? 'Reconnecting…' : 'Reconnect'}
           </button>
           {row.source !== 'claudeai' && (
             <button className="mcp-btn" disabled={busy} onClick={() => props.onToggle(row)}>
@@ -104,6 +107,7 @@ export default function McpDetail(props: McpDetailProps) {
         </div>
         {!row.editable && <div className="mcp-ds mcp-dhint">{MCP_TERMINAL_HINT}</div>}
         {error && <div className="mcp-derr" role="alert">{error}</div>}
+        {!error && props.notice && <div className="mcp-dnote" role="status">{props.notice}</div>}
       </div>
 
       {row.auth && (
