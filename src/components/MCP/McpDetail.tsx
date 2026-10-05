@@ -54,6 +54,7 @@ export default function McpDetail(props: McpDetailProps) {
   const Icon = MCP_SOURCE_ICON[row.source];
   const remote = row.transport !== 'stdio';
   const live = available && !busy;
+  const connecting = row.live?.status === 'pending';
   const tools = row.live?.tools ?? [];
   const shownTools = showAllTools ? tools : tools.slice(0, TOOL_PREVIEW);
   const server = row.server;
@@ -80,7 +81,14 @@ export default function McpDetail(props: McpDetailProps) {
           {row.fix === 'sign-in' && !caps.authenticate && (
             <span className="mcp-hint" title="Run `claude` in a terminal, then /mcp">Sign in from a terminal: claude → /mcp</span>
           )}
-          <button className="mcp-btn" disabled={!live || !caps.reconnect} onClick={() => props.onReconnect(row)}>
+          {/* A reconnect of a pending server blocks until its first connect
+              settles (~50s for playwright) — nothing to reconnect yet. */}
+          <button
+            className="mcp-btn"
+            disabled={!live || !caps.reconnect || connecting}
+            title={connecting ? 'Still connecting — Reconnect is available once it finishes' : undefined}
+            onClick={() => props.onReconnect(row)}
+          >
             <RotateCcw size={11} /> Reconnect
           </button>
           {row.source !== 'claudeai' && (

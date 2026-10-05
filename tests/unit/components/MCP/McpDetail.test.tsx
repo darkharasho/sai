@@ -91,6 +91,14 @@ describe('McpDetail', () => {
     expect(getByText('Failed — spawn ENOENT')).toBeTruthy();
   });
 
+  it('connecting: Reconnect disabled — the SDK holds a reconnect of a pending server until its first connect settles', () => {
+    const row = rowOf({ name: 'pw', transport: 'stdio', command: 'x', enabled: true, source: 'user' }, { name: 'pw', status: 'pending' });
+    const { getByText } = render(<McpDetail row={row} capabilities={caps} available busy={false} error={null} {...h} />);
+    const btn = getByText('Reconnect').closest('button') as HTMLButtonElement;
+    expect(btn.disabled).toBe(true);
+    expect(btn.title).toMatch(/still connecting/i);
+  });
+
   it('unavailable: Sign in, Retry and Reconnect disabled, Edit still enabled', () => {
     const row = rowOf({ name: 'gh', transport: 'stdio', command: 'x', enabled: true, source: 'user' });
     const { getByText } = render(<McpDetail row={row} capabilities={caps} available={false} busy={false} error={null} {...h} />);
