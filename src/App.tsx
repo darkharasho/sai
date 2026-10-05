@@ -5947,7 +5947,7 @@ export default function App() {
               transition={{ duration: 0.15, ease: [0.2, 0.8, 0.2, 1] }}
               style={{ overflow: 'hidden' }}
             >
-              <PluginsSidebar />
+              <PluginsSidebar projectPath={projectPath} onOpenMcp={() => { setMcpPanelTarget(null); setSidebarOpen('mcp'); }} />
             </motion.div>
           )}
           {sidebarOpen === 'mcp' && (

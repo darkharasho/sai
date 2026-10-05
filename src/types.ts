@@ -295,25 +295,53 @@ export interface MetaWorkspaceRuntime {
   projects: MetaWorkspaceRuntimeProject[];
 }
 
-export interface Plugin {
+export type PluginScope = 'user' | 'project' | 'local' | 'managed';
+
+export interface PluginItem {
   name: string;
+  description?: string;
+}
+
+export interface PluginInventory {
+  skills: PluginItem[];
+  commands: PluginItem[];
+  agents: PluginItem[];
+  hooks: PluginItem[];
+  mcpServers: PluginItem[];
+  lspServers: PluginItem[];
+}
+
+/** An installed plugin, merged across the scopes that apply to the current project. */
+export interface Plugin {
+  /** `name@marketplace` — what the CLI takes. */
+  id: string;
+  name: string;
+  marketplace: string;
   description: string;
   version: string;
-  source: string;
   enabled: boolean;
-  skills: string[];
-  icon?: string;
+  scopes: PluginScope[];
+  /** Most specific applicable scope; its enabled flag is the effective one. */
+  activeScope: PluginScope;
+  installPath: string;
+  installedAt?: string;
+  lastUpdated?: string;
+  author?: string;
+  homepage?: string;
+  inventory: PluginInventory;
+  latestVersion?: string;
+  updateAvailable: boolean;
 }
 
 export interface RegistryPlugin {
+  id: string;
   name: string;
+  marketplace: string;
   description: string;
-  version: string;
-  source: string;
-  skills: string[];
-  commands: string[];
-  author: string;
-  repositoryUrl: string;
+  version?: string;
+  category?: string;
+  author?: string;
+  homepage?: string;
   installed: boolean;
 }
 

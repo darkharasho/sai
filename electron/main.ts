@@ -542,7 +542,7 @@ function createWindow() {
   registerKimiHandlers(mainWindow);
   registerGitHandlers();
   registerFsHandlers(mainWindow!);
-  registerPluginHandlers(readSettings);
+  registerPluginHandlers();
   registerSearchHandlers();
   registerMcpHandlers();
   registerSwarmHandlers();

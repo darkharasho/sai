@@ -30,5 +30,8 @@ describe('plugins service', () => {
     expect(channels).toContain('plugins:install');
     expect(channels).toContain('plugins:uninstall');
     expect(channels).toContain('plugins:registryList');
+    expect(channels).toContain('plugins:setEnabled');
+    expect(channels).toContain('plugins:update');
+    expect(channels).toContain('plugins:registryInventory');
   });
 });

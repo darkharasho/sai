@@ -1,398 +1,278 @@
-import { useState, useEffect, useMemo } from 'react';
-import { ChevronRight, Search } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Loader2, Search } from 'lucide-react';
 import PluginIcon from './PluginIcon';
-import PluginDetail from './PluginDetail';
+import PluginDetail, { type PluginAction } from './PluginDetail';
 import PluginRegistryDetail from './PluginRegistryDetail';
+import PluginStyles from './PluginStyles';
 import SaiLogo from '../SaiLogo';
-import { DOT_MASK_URL } from '../../lib/assets';
+import { groupByMarketplace, matchesQuery, pluginSubtitle, registryCategories } from './pluginView';
 import type { Plugin, RegistryPlugin } from '../../types';
 
 type Tab = 'installed' | 'browse';
-type View = 'list' | 'detail' | 'registry-detail';
+type View = { kind: 'list' } | { kind: 'detail'; id: string } | { kind: 'registry'; id: string };
 
-export default function PluginsSidebar() {
+interface PluginsSidebarProps {
+  /** Project-scoped installs count (and are changed) only for this project. */
+  projectPath?: string;
+  onOpenMcp?(): void;
+}
+
+type Result = { error?: string } | undefined;
+
+function errorOf(result: unknown): string | null {
+  return result && typeof result === 'object' && 'error' in result && (result as any).error ? String((result as any).error) : null;
+}
+
+function Empty({ searching, text }: { searching: boolean; text: string }) {
+  return (
+    <div className="plg-empty">
+      {searching
+        ? <SaiLogo mode="static" size={40} className="sai-fallen" ariaLabel="" />
+        : <SaiLogo mode="idle" size={40} ariaLabel="" />}
+      <span>{text}</span>
+    </div>
+  );
+}
+
+function Loading() {
+  return <div className="plg-empty"><SaiLogo mode="scanner" size={28} /><span>Loading…</span></div>;
+}
+
+function onRowKey(open: () => void) {
+  return (e: React.KeyboardEvent) => {
+    if (e.target !== e.currentTarget) return;
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); }
+  };
+}
+
+export default function PluginsSidebar({ projectPath, onOpenMcp }: PluginsSidebarProps) {
   const [tab, setTab] = useState<Tab>('installed');
   const [search, setSearch] = useState('');
-  const [installed, setInstalled] = useState<Plugin[]>([]);
-  const [registry, setRegistry] = useState<RegistryPlugin[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [view, setView] = useState<View>('list');
-  const [selectedPlugin, setSelectedPlugin] = useState<Plugin | null>(null);
-  const [selectedRegistryPlugin, setSelectedRegistryPlugin] = useState<RegistryPlugin | null>(null);
+  const [category, setCategory] = useState<string | null>(null);
+  const [view, setView] = useState<View>({ kind: 'list' });
 
-  const loadInstalled = async () => {
-    setLoading(true);
-    setError(null);
+  const [installed, setInstalled] = useState<Plugin[]>([]);
+  const [installedState, setInstalledState] = useState<{ loading: boolean; error: string | null }>({ loading: true, error: null });
+  const [registry, setRegistry] = useState<RegistryPlugin[] | null>(null);
+  const [registryState, setRegistryState] = useState<{ loading: boolean; error: string | null }>({ loading: false, error: null });
+
+  const [busy, setBusy] = useState<Record<string, PluginAction>>({});
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [changed, setChanged] = useState<Set<string>>(new Set());
+
+  const loadInstalled = useCallback(async (quiet = false) => {
+    if (!quiet) setInstalledState({ loading: true, error: null });
     try {
-      const result = await window.sai.pluginsList();
+      const result = await window.sai.pluginsList(projectPath);
       if (Array.isArray(result)) {
         setInstalled(result);
-      } else if (result?.error) {
-        setError(result.error);
+        setInstalledState({ loading: false, error: null });
       } else {
-        setInstalled([]);
+        setInstalledState({ loading: false, error: errorOf(result) ?? 'Failed to load plugins' });
       }
     } catch (err: any) {
-      setError(err.message || 'Failed to load plugins');
+      setInstalledState({ loading: false, error: err?.message || 'Failed to load plugins' });
     }
-    setLoading(false);
-  };
+  }, [projectPath]);
 
-  const loadRegistry = async () => {
-    setLoading(true);
-    setError(null);
+  const loadRegistry = useCallback(async () => {
+    setRegistryState({ loading: true, error: null });
     try {
       const result = await window.sai.pluginsRegistryList();
       if (Array.isArray(result)) {
         setRegistry(result);
-      } else if (result?.error) {
-        setError(result.error);
+        setRegistryState({ loading: false, error: null });
       } else {
-        setRegistry([]);
+        setRegistryState({ loading: false, error: errorOf(result) ?? 'Failed to read marketplaces' });
       }
     } catch (err: any) {
-      setError(err.message || 'Failed to load registry');
+      setRegistryState({ loading: false, error: err?.message || 'Failed to read marketplaces' });
     }
-    setLoading(false);
-  };
+  }, []);
 
-  useEffect(() => { loadInstalled(); }, []);
+  useEffect(() => { loadInstalled(); }, [loadInstalled]);
+  useEffect(() => { if (tab === 'browse' && registry === null && !registryState.loading) loadRegistry(); }, [tab, registry, registryState.loading, loadRegistry]);
 
-  useEffect(() => {
-    if (tab === 'browse' && registry.length === 0) {
-      loadRegistry();
+  /** Runs one CLI action for a plugin, tracking busy/error and refreshing the list after. */
+  const run = useCallback(async (id: string, action: PluginAction, call: () => Promise<Result>) => {
+    setBusy(b => ({ ...b, [id]: action }));
+    setErrors(({ [id]: _drop, ...rest }) => rest);
+    let failed: string | null;
+    try {
+      failed = errorOf(await call());
+    } catch (err: any) {
+      failed = err?.message || `Failed to ${action}`;
     }
-  }, [tab]);
+    if (failed) {
+      setErrors(e => ({ ...e, [id]: failed! }));
+    } else {
+      setChanged(c => new Set(c).add(id));
+      if (action === 'install' || action === 'uninstall') {
+        setRegistry(r => r?.map(p => (p.id === id ? { ...p, installed: action === 'install' } : p)) ?? r);
+      }
+      if (action === 'uninstall') setView({ kind: 'list' });
+    }
+    await loadInstalled(true);
+    setBusy(({ [id]: _drop, ...rest }) => rest);
+  }, [loadInstalled]);
 
-  const handleInstall = async (name: string) => {
-    await window.sai.pluginsInstall(name);
-    loadInstalled();
-    loadRegistry();
-  };
+  const install = (id: string) => run(id, 'install', () => window.sai.pluginsInstall(id));
+  const uninstall = (id: string) => run(id, 'uninstall', () => window.sai.pluginsUninstall(id, projectPath));
+  const toggle = (id: string, enabled: boolean) => run(id, 'toggle', () => window.sai.pluginsSetEnabled(id, enabled, projectPath));
+  const update = (id: string) => run(id, 'update', () => window.sai.pluginsUpdate(id, projectPath));
 
-  const handleUninstall = async (name: string) => {
-    await window.sai.pluginsUninstall(name);
-    setSelectedPlugin(null);
-    loadInstalled();
-  };
-
-  const handleToggleEnabled = async (_name: string, _enabled: boolean) => {
-    loadInstalled();
-  };
-
-  const query = search.toLowerCase();
-
-  const filteredInstalled = useMemo(
-    () => installed.filter(p =>
-      (p.name || '').toLowerCase().includes(query) || (p.description || '').toLowerCase().includes(query)
-    ),
-    [installed, query]
+  const installedGroups = useMemo(
+    () => groupByMarketplace(installed.filter(p => matchesQuery(p, search))),
+    [installed, search],
   );
-
-  const filteredRegistry = useMemo(
-    () => registry.filter(p =>
-      (p.name || '').toLowerCase().includes(query) || (p.description || '').toLowerCase().includes(query)
-    ),
-    [registry, query]
+  const categories = useMemo(() => registryCategories(registry ?? []), [registry]);
+  const registryGroups = useMemo(
+    () => groupByMarketplace((registry ?? []).filter(p => matchesQuery(p, search) && (!category || p.category === category))),
+    [registry, search, category],
   );
+  const updates = installed.filter(p => p.updateAvailable).length;
 
-  if (view === 'registry-detail' && selectedRegistryPlugin) {
-    return (
-      <PluginRegistryDetail
-        plugin={selectedRegistryPlugin}
-        onBack={() => { setView('list'); setSelectedRegistryPlugin(null); }}
-        onInstall={(name) => {
-          handleInstall(name);
-          setSelectedRegistryPlugin(null);
-          setView('list');
-        }}
-      />
-    );
+  if (view.kind === 'detail') {
+    const plugin = installed.find(p => p.id === view.id);
+    if (plugin) {
+      return (
+        <>
+          <PluginStyles />
+          <PluginDetail
+            plugin={plugin}
+            busy={busy[plugin.id]}
+            error={errors[plugin.id]}
+            changed={changed.has(plugin.id)}
+            onBack={() => setView({ kind: 'list' })}
+            onToggle={(enabled) => toggle(plugin.id, enabled)}
+            onUpdate={() => update(plugin.id)}
+            onUninstall={() => uninstall(plugin.id)}
+            onOpenMcp={onOpenMcp}
+          />
+        </>
+      );
+    }
   }
 
-  if (view === 'detail' && selectedPlugin) {
-    return (
-      <PluginDetail
-        plugin={selectedPlugin}
-        onBack={() => { setView('list'); setSelectedPlugin(null); }}
-        onUninstall={handleUninstall}
-        onToggleEnabled={handleToggleEnabled}
-      />
-    );
+  if (view.kind === 'registry') {
+    const plugin = registry?.find(p => p.id === view.id);
+    if (plugin) {
+      return (
+        <>
+          <PluginStyles />
+          <PluginRegistryDetail
+            plugin={plugin}
+            installing={busy[plugin.id] === 'install'}
+            error={errors[plugin.id]}
+            onBack={() => setView({ kind: 'list' })}
+            onInstall={() => install(plugin.id)}
+          />
+        </>
+      );
+    }
   }
+
+  const searching = search.trim() !== '';
 
   return (
     <div className="plugins-sidebar sidebar-mount">
-      <div className="sidebar-tabs">
-        <button
-          className={`sidebar-tab ${tab === 'installed' ? 'active' : ''}`}
-          onClick={() => setTab('installed')}
-        >
+      <PluginStyles />
+      <div className="plg-tabs" role="tablist">
+        <button role="tab" aria-selected={tab === 'installed'} className={`plg-tab ${tab === 'installed' ? 'active' : ''}`} onClick={() => setTab('installed')}>
           Installed
+          {installed.length > 0 && (
+            <span className={`plg-tab-badge ${updates ? 'upd' : ''}`} title={updates ? `${updates} update${updates === 1 ? '' : 's'} available` : undefined}>
+              {installed.length}
+            </span>
+          )}
         </button>
-        <button
-          className={`sidebar-tab ${tab === 'browse' ? 'active' : ''}`}
-          onClick={() => setTab('browse')}
-        >
+        <button role="tab" aria-selected={tab === 'browse'} className={`plg-tab ${tab === 'browse' ? 'active' : ''}`} onClick={() => setTab('browse')}>
           Browse
         </button>
       </div>
 
-      <div className="sidebar-search-wrap">
-        <Search size={12} className="sidebar-search-icon" />
+      <div className="plg-search-wrap">
+        <Search size={12} className="plg-search-icon" />
         <input
-          className="sidebar-search"
-          placeholder={tab === 'installed' ? 'Search installed...' : 'Search registry...'}
+          className="plg-search"
+          placeholder={tab === 'installed' ? 'Search installed…' : `Search ${registry?.length ?? ''} plugins…`.replace('  ', ' ')}
           value={search}
           onChange={e => setSearch(e.target.value)}
         />
       </div>
 
-      <div className="sidebar-list">
-        {loading && (
-          <div className="sidebar-empty" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
-            <SaiLogo mode="scanner" size={28} />
-            <span>Loading...</span>
-          </div>
-        )}
-        {error && (
-          <div className="sidebar-error">
-            <div>{error}</div>
-            <button className="retry-btn" onClick={tab === 'installed' ? loadInstalled : loadRegistry}>Retry</button>
-          </div>
-        )}
+      {tab === 'browse' && categories.length > 0 && (
+        <div className="plg-chips">
+          <button className={`plg-chip ${category === null ? 'active' : ''}`} onClick={() => setCategory(null)}>All</button>
+          {categories.map(c => (
+            <button key={c} className={`plg-chip ${category === c ? 'active' : ''}`} onClick={() => setCategory(category === c ? null : c)}>{c}</button>
+          ))}
+        </div>
+      )}
 
-        {!loading && !error && tab === 'installed' && filteredInstalled.map(plugin => (
-          <div
-            key={plugin.name}
-            className="sidebar-card"
-            onClick={() => { setSelectedPlugin(plugin); setView('detail'); }}
-          >
-            <div className="card-icon"><PluginIcon name={plugin.name} /></div>
-            <div className="card-info">
-              <div className="card-name">{plugin.name}</div>
-              <div className="card-desc">{plugin.description}</div>
-            </div>
-            <div className="card-right">
-              <span className={`status-dot ${plugin.enabled ? 'active' : 'inactive'}`} />
-              <ChevronRight size={12} className="card-chevron" />
-            </div>
+      <div className="plg-list">
+        {tab === 'installed' && (installedState.loading ? <Loading /> : installedState.error ? (
+          <div className="plg-error" role="alert">
+            {installedState.error}
+            <div><button className="mcp-btn" style={{ marginTop: 6 }} onClick={() => loadInstalled()}>Retry</button></div>
           </div>
-        ))}
-
-        {!loading && !error && tab === 'installed' && filteredInstalled.length === 0 && (
-          <div className="sidebar-empty sidebar-empty-stack">
-            {search
-              ? <SaiLogo mode="static" size={40} className="sai-fallen" ariaLabel="" />
-              : <SaiLogo mode="idle" size={40} ariaLabel="" />}
-            <span>{search ? 'No matching plugins' : 'No plugins installed'}</span>
+        ) : installedGroups.length === 0 ? (
+          <Empty searching={searching} text={searching ? 'No matching plugins' : 'No plugins installed'} />
+        ) : installedGroups.map(g => (
+          <div key={g.id}>
+            <div className="plg-grp"><span>{g.id}</span><span>{g.rows.length}</span></div>
+            {g.rows.map(p => {
+              const open = () => setView({ kind: 'detail', id: p.id });
+              const err = errors[p.id];
+              return (
+                <div key={p.id} className={`plg-row ${p.enabled ? '' : 'off'}`} role="button" tabIndex={0} onClick={open} onKeyDown={onRowKey(open)}>
+                  <div className="plg-ico"><PluginIcon name={p.name} size={13} /></div>
+                  <div className="plg-info">
+                    <div className="plg-nm">{p.name}</div>
+                    <div className={`plg-ds ${err ? 'err' : ''}`} title={err ?? p.description}>{err ?? pluginSubtitle(p)}</div>
+                  </div>
+                  {p.updateAvailable && !busy[p.id] && <span className="plg-upd" title={`${p.version} → ${p.latestVersion}`}>update</span>}
+                  {busy[p.id]
+                    ? <Loader2 size={12} className="plg-spin" aria-label="Working" />
+                    : <span className={`plg-dot ${p.enabled ? 'ok' : 'off'}`} role="img" aria-label={p.enabled ? 'Enabled' : 'Disabled'} />}
+                </div>
+              );
+            })}
           </div>
-        )}
+        )))}
 
-        {!loading && !error && tab === 'browse' && filteredRegistry.map(plugin => (
-          <div
-            key={plugin.name}
-            className="sidebar-card"
-            onClick={() => { setSelectedRegistryPlugin(plugin); setView('registry-detail'); }}
-          >
-            <div className="card-icon"><PluginIcon name={plugin.name} /></div>
-            <div className="card-info">
-              <div className="card-name">{plugin.name}</div>
-              <div className="card-desc">{plugin.description}</div>
-            </div>
-            <div className="card-right">
-              {plugin.installed ? (
-                <span className="card-installed">Installed</span>
-              ) : (
-                <button className="card-install-btn" onClick={(e) => {
-                  e.stopPropagation();
-                  handleInstall(plugin.name);
-                }}>Install</button>
-              )}
-              <ChevronRight size={12} className="card-chevron" />
-            </div>
+        {tab === 'browse' && (registryState.loading || registry === null ? (registryState.error ? null : <Loading />) : registryGroups.length === 0 ? (
+          <Empty searching={searching || !!category} text={searching || category ? 'No matching plugins' : 'No marketplaces added — run `claude plugins marketplace add`'} />
+        ) : registryGroups.map(g => (
+          <div key={g.id}>
+            <div className="plg-grp"><span>{g.id}</span><span>{g.rows.length}</span></div>
+            {g.rows.map(p => {
+              const open = () => setView({ kind: 'registry', id: p.id });
+              const err = errors[p.id];
+              const installing = busy[p.id] === 'install';
+              const stop = (e: React.MouseEvent) => { e.stopPropagation(); install(p.id); };
+              return (
+                <div key={p.id} className="plg-row" role="button" tabIndex={0} onClick={open} onKeyDown={onRowKey(open)}>
+                  <div className="plg-ico"><PluginIcon name={p.name} size={13} /></div>
+                  <div className="plg-info">
+                    <div className="plg-nm">{p.name}</div>
+                    <div className={`plg-ds ${err ? 'err' : ''}`} title={err ?? p.description}>{err ? `Install failed: ${err}` : p.description}</div>
+                  </div>
+                  {p.installed ? <span className="plg-muted">Installed</span>
+                    : installing ? <button className="mcp-btn sm" disabled><Loader2 size={10} className="plg-spin" /> Installing</button>
+                      : <button className="mcp-btn sm" aria-label={`${err ? 'Retry installing' : 'Install'} ${p.name}`} onClick={stop}>{err ? 'Retry' : 'Install'}</button>}
+                </div>
+              );
+            })}
           </div>
-        ))}
-
-        {!loading && !error && tab === 'browse' && filteredRegistry.length === 0 && (
-          <div className="sidebar-empty sidebar-empty-stack">
-            {search
-              ? <SaiLogo mode="static" size={40} className="sai-fallen" ariaLabel="" />
-              : <SaiLogo mode="idle" size={40} ariaLabel="" />}
-            <span>{search ? 'No matching plugins' : 'No plugins found'}</span>
+        )))}
+        {tab === 'browse' && registryState.error && (
+          <div className="plg-error" role="alert">
+            {registryState.error}
+            <div><button className="mcp-btn" style={{ marginTop: 6 }} onClick={loadRegistry}>Retry</button></div>
           </div>
         )}
       </div>
-
-      <style>{`
-        .plugins-sidebar {
-          width: var(--sidebar-width);
-          background: var(--surface-1);
-          border-right: 1px solid var(--border-subtle);
-          display: flex;
-          flex-direction: column;
-          overflow: hidden;
-          flex-shrink: 0;
-        }
-        .sidebar-tabs {
-          display: flex;
-          border-bottom: 1px solid var(--border-hairline);
-        }
-        .sidebar-tab {
-          flex: 1;
-          padding: 9px 12px;
-          text-align: center;
-          font-size: 11px;
-          background: none;
-          border: none;
-          color: var(--text-muted);
-          cursor: pointer;
-          position: relative;
-          transition: color var(--dur-fast) var(--ease-out-soft);
-        }
-        .sidebar-tab::after {
-          content: '';
-          position: absolute;
-          left: 8px;
-          right: 8px;
-          bottom: 0;
-          height: 2px;
-          background: var(--accent);
-          transform: scaleX(0);
-          transform-origin: center;
-          transition: transform var(--dur-base) var(--ease-out-soft);
-        }
-        .sidebar-tab.active {
-          color: var(--accent);
-          font-weight: 600;
-        }
-        .sidebar-tab.active::after { transform: scaleX(1); }
-        .sidebar-tab:hover { color: var(--text); }
-        .sidebar-search-wrap {
-          position: relative;
-          padding: 8px;
-        }
-        .sidebar-search-icon {
-          position: absolute;
-          left: 18px;
-          top: 50%;
-          transform: translateY(-50%);
-          color: var(--text-muted);
-        }
-        .sidebar-search {
-          width: 100%;
-          padding: 6px 10px 6px 28px;
-          background: var(--surface-2);
-          border: 1px solid var(--border-hairline);
-          border-radius: 6px;
-          color: var(--text);
-          font-size: 11px;
-          outline: none;
-          font-family: inherit;
-        }
-        .sidebar-search:focus { border-color: var(--accent); }
-        .sidebar-list {
-          flex: 1;
-          overflow-y: auto;
-          padding: 0 8px 8px;
-        }
-        .sidebar-card {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          padding: 10px;
-          background: var(--surface-2);
-          border-radius: 6px;
-          margin-bottom: 4px;
-          cursor: pointer;
-          transition: background 0.15s;
-        }
-        .sidebar-card:hover { background: var(--surface-4); }
-        .card-icon {
-          width: 28px;
-          height: 28px;
-          background: var(--surface-4);
-          border-radius: 6px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-size: 14px;
-          flex-shrink: 0;
-        }
-        .card-info { flex: 1; min-width: 0; }
-        .card-name {
-          font-weight: 600;
-          font-size: 12px;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
-        }
-        .card-desc {
-          font-size: 10px;
-          color: var(--text-muted);
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
-        }
-        .card-right {
-          display: flex;
-          align-items: center;
-          gap: 6px;
-          flex-shrink: 0;
-        }
-        .status-dot {
-          display: inline-block;
-          width: 8px;
-          height: 8px;
-          background: currentColor;
-          -webkit-mask: url("${DOT_MASK_URL}") center / contain no-repeat;
-          mask: url("${DOT_MASK_URL}") center / contain no-repeat;
-        }
-        .status-dot.active { color: var(--green); }
-        .status-dot.inactive { color: var(--red); }
-        .card-chevron { color: var(--text-muted); font-size: 10px; }
-        .card-install-btn {
-          padding: 2px 8px;
-          background: var(--surface-4);
-          border: none;
-          border-radius: 4px;
-          font-size: 10px;
-          color: var(--accent);
-          cursor: pointer;
-        }
-        .card-install-btn:hover { background: var(--border-subtle); }
-        .card-installed { font-size: 10px; color: var(--text-muted); }
-        .sidebar-empty {
-          text-align: center;
-          padding: 24px;
-          color: var(--text-muted);
-          font-size: 12px;
-        }
-        .sidebar-empty-stack {
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          gap: 12px;
-          padding: 32px 16px;
-        }
-        .sidebar-error {
-          text-align: center;
-          padding: 16px;
-          color: var(--red);
-          font-size: 11px;
-        }
-        .retry-btn {
-          margin-top: 8px;
-          padding: 4px 12px;
-          background: var(--surface-4);
-          border: none;
-          border-radius: 4px;
-          color: var(--accent);
-          cursor: pointer;
-          font-size: 11px;
-        }
-      `}</style>
     </div>
   );
 }

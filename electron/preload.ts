@@ -422,10 +422,14 @@ contextBridge.exposeInMainWorld('sai', {
     return () => ipcRenderer.removeListener('github:settingsApplied', listener);
   },
   // Plugins
-  pluginsList: () => ipcRenderer.invoke('plugins:list'),
-  pluginsInstall: (name: string) => ipcRenderer.invoke('plugins:install', name),
-  pluginsUninstall: (name: string) => ipcRenderer.invoke('plugins:uninstall', name),
+  // Project-scoped installs only count (and are only changed) for `projectPath`.
+  pluginsList: (projectPath?: string) => ipcRenderer.invoke('plugins:list', projectPath),
+  pluginsInstall: (id: string) => ipcRenderer.invoke('plugins:install', id),
+  pluginsUninstall: (id: string, projectPath?: string) => ipcRenderer.invoke('plugins:uninstall', id, projectPath),
+  pluginsSetEnabled: (id: string, enabled: boolean, projectPath?: string) => ipcRenderer.invoke('plugins:setEnabled', id, enabled, projectPath),
+  pluginsUpdate: (id: string, projectPath?: string) => ipcRenderer.invoke('plugins:update', id, projectPath),
   pluginsRegistryList: () => ipcRenderer.invoke('plugins:registryList'),
+  pluginsRegistryInventory: (marketplace: string, name: string) => ipcRenderer.invoke('plugins:registryInventory', marketplace, name),
   // MCP
   // `scope` on add/remove/update is the panel's chat scope, restarted (when
   // idle) so the edit shows up live.

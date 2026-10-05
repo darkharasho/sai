@@ -1,160 +1,95 @@
-import { ArrowLeft, Trash2 } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { ArrowLeft, ExternalLink, Loader2, RefreshCw, Trash2 } from 'lucide-react';
 import PluginIcon from './PluginIcon';
+import PluginInventorySections from './PluginInventorySections';
+import { formatDate, scopeLabel } from './pluginView';
 import type { Plugin } from '../../types';
-import { DOT_MASK_URL } from '../../lib/assets';
+
+export type PluginAction = 'install' | 'uninstall' | 'toggle' | 'update';
 
 interface PluginDetailProps {
   plugin: Plugin;
-  onBack: () => void;
-  onUninstall: (name: string) => void;
-  onToggleEnabled: (name: string, enabled: boolean) => void;
+  busy?: PluginAction;
+  error?: string;
+  /** Something about this plugin changed this session — open chats still run the old set. */
+  changed: boolean;
+  onBack(): void;
+  onToggle(enabled: boolean): void;
+  onUpdate(): void;
+  onUninstall(): void;
+  onOpenMcp?(): void;
 }
 
-export default function PluginDetail({ plugin, onBack, onUninstall, onToggleEnabled }: PluginDetailProps) {
+export default function PluginDetail({ plugin, busy, error, changed, onBack, onToggle, onUpdate, onUninstall, onOpenMcp }: PluginDetailProps) {
+  const [confirming, setConfirming] = useState(false);
+  useEffect(() => { setConfirming(false); }, [plugin.id]);
+  const managed = plugin.activeScope === 'managed';
+  const installed = formatDate(plugin.installedAt);
+  const updated = formatDate(plugin.lastUpdated);
+
   return (
-    <div className="plugin-detail">
-      <button className="detail-back" onClick={onBack}>
-        <ArrowLeft size={12} /> Back to plugins
-      </button>
+    <div className="plg-detail">
+      <button className="plg-back" onClick={onBack}><ArrowLeft size={12} /> Back to plugins</button>
 
-      <div className="detail-header">
-        <div className="detail-icon"><PluginIcon name={plugin.name} size={20} /></div>
-        <div>
-          <div className="detail-name">{plugin.name}</div>
-          <div className="detail-source">{plugin.source}</div>
-        </div>
-      </div>
-
-      <div className="detail-actions">
-        <button className="detail-btn danger" onClick={() => onUninstall(plugin.name)}>
-          <Trash2 size={12} /> Uninstall
-        </button>
-        <span className="detail-status-badge">
-          <span className={`status-dot ${plugin.enabled ? 'active' : 'inactive'}`} />
-          {plugin.enabled ? 'Enabled' : 'Disabled'}
-        </span>
-      </div>
-
-      <div className="detail-section">
-        <div className="detail-label">Description</div>
-        <div className="detail-text">{plugin.description}</div>
-      </div>
-
-      <div className="detail-section">
-        <div className="detail-label">Version</div>
-        <div className="detail-text">{plugin.version}</div>
-      </div>
-
-      {plugin.skills.length > 0 && (
-        <div className="detail-section">
-          <div className="detail-label">Skills ({plugin.skills.length})</div>
-          <div className="detail-skills">
-            {plugin.skills.map(skill => (
-              <span key={skill} className="skill-chip">{skill}</span>
-            ))}
+      <div className="plg-dhd">
+        <div className="plg-dht">
+          <div className="plg-ico lg"><PluginIcon name={plugin.name} size={16} /></div>
+          <div style={{ minWidth: 0 }}>
+            <div className="plg-dnm">{plugin.name}</div>
+            <div className="plg-sub">{plugin.marketplace}{plugin.version && ` · ${/^\d/.test(plugin.version) ? 'v' : ''}${plugin.version}`}</div>
           </div>
         </div>
-      )}
+        <span className="plg-pill">
+          <span className={`plg-dot ${plugin.enabled ? 'ok' : 'off'}`} />
+          {plugin.enabled ? 'Enabled' : 'Disabled'} · {scopeLabel(plugin)}
+        </span>
 
-      <style>{`
-        .plugin-detail {
-          width: var(--sidebar-width);
-          background: var(--surface-1);
-          border-right: 1px solid var(--border-subtle);
-          overflow-y: auto;
-          flex-shrink: 0;
-        }
-        .detail-back {
-          display: flex;
-          align-items: center;
-          gap: 6px;
-          padding: 8px 12px;
-          border: none;
-          border-bottom: 1px solid var(--border-hairline);
-          background: none;
-          color: var(--text-muted);
-          cursor: pointer;
-          font-size: 11px;
-          width: 100%;
-        }
-        .detail-back:hover { color: var(--text); }
-        .detail-header {
-          display: flex;
-          align-items: center;
-          gap: 10px;
-          padding: 12px;
-          border-bottom: 1px solid var(--border-hairline);
-        }
-        .detail-icon {
-          width: 36px;
-          height: 36px;
-          background: var(--surface-4);
-          border-radius: 8px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-size: 20px;
-        }
-        .detail-name { font-weight: 700; font-size: 14px; }
-        .detail-source { font-size: 10px; color: var(--text-muted); }
-        .detail-actions {
-          display: flex;
-          gap: 6px;
-          padding: 12px;
-          border-bottom: 1px solid var(--border-hairline);
-        }
-        .detail-btn {
-          display: flex;
-          align-items: center;
-          gap: 4px;
-          padding: 4px 10px;
-          border: none;
-          border-radius: 4px;
-          font-size: 10px;
-          cursor: pointer;
-          font-weight: 600;
-        }
-        .detail-btn.danger { background: var(--red); color: #fff; }
-        .detail-btn.danger:hover { opacity: 0.9; }
-        .detail-status-badge {
-          display: inline-flex;
-          align-items: center;
-          gap: 5px;
-          padding: 4px 10px;
-          font-size: 10px;
-          font-weight: 600;
-          color: var(--text-muted);
-          line-height: 1;
-        }
-        .status-dot {
-          display: inline-block;
-          width: 8px;
-          height: 8px;
-          background: currentColor;
-          -webkit-mask: url("${DOT_MASK_URL}") center / contain no-repeat;
-          mask: url("${DOT_MASK_URL}") center / contain no-repeat;
-        }
-        .status-dot.active { color: var(--green); }
-        .status-dot.inactive { color: var(--red); }
-        .detail-section { padding: 12px; }
-        .detail-label {
-          font-size: 9px;
-          color: var(--text-muted);
-          text-transform: uppercase;
-          letter-spacing: 1px;
-          margin-bottom: 4px;
-          font-weight: 600;
-        }
-        .detail-text { font-size: 11px; line-height: 1.5; color: var(--text-secondary); }
-        .detail-skills { display: flex; flex-wrap: wrap; gap: 4px; }
-        .skill-chip {
-          padding: 3px 8px;
-          background: var(--surface-2);
-          border-radius: 4px;
-          font-size: 11px;
-          color: var(--text-secondary);
-        }
-      `}</style>
+        <div className="plg-acts">
+          <button
+            className="plg-toggle" role="switch" aria-checked={plugin.enabled}
+            disabled={!!busy || managed} title={managed ? 'Managed by your organization' : undefined}
+            onClick={() => onToggle(!plugin.enabled)}
+          >
+            <span className="plg-switch" />{plugin.enabled ? 'Enabled' : 'Disabled'}
+          </button>
+          {busy && busy !== 'uninstall' && <Loader2 size={12} className="plg-spin" />}
+          {plugin.updateAvailable && (
+            <button className="mcp-btn" disabled={!!busy} onClick={onUpdate}>
+              <RefreshCw size={11} /> Update to {plugin.latestVersion}
+            </button>
+          )}
+          {!managed && (confirming ? (
+            <>
+              <button className="mcp-btn danger" disabled={!!busy} onClick={onUninstall}>
+                {busy === 'uninstall' ? <Loader2 size={11} className="plg-spin" /> : <Trash2 size={11} />} Confirm uninstall
+              </button>
+              <button className="mcp-btn ghost" disabled={!!busy} onClick={() => setConfirming(false)}>Cancel</button>
+            </>
+          ) : (
+            <button className="mcp-btn danger" disabled={!!busy} onClick={() => setConfirming(true)}>Uninstall</button>
+          ))}
+        </div>
+        {error && <div className="plg-derr" role="alert">{error}</div>}
+        {changed && !error && <div className="plg-note">Changes apply to new chats — chats already open keep their current plugins.</div>}
+      </div>
+
+      {plugin.description && <div className="plg-sec"><div className="plg-desc">{plugin.description}</div></div>}
+
+      <PluginInventorySections inventory={plugin.inventory} onOpenMcp={onOpenMcp} />
+
+      <div className="plg-sec">
+        <dl className="plg-meta" style={{ margin: 0 }}>
+          {plugin.author && <><dt>Author</dt><dd>{plugin.author}</dd></>}
+          {installed && <><dt>Installed</dt><dd>{installed}</dd></>}
+          {updated && <><dt>Updated</dt><dd>{updated}</dd></>}
+          <dt>Path</dt><dd className="plg-mono" title={plugin.installPath}>{plugin.installPath}</dd>
+        </dl>
+        {plugin.homepage && (
+          <button className="plg-link" onClick={() => window.open(plugin.homepage, '_blank')}>
+            <ExternalLink size={10} /> Homepage
+          </button>
+        )}
+      </div>
     </div>
   );
 }
