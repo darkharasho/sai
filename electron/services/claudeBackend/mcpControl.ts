@@ -11,8 +11,10 @@
  * does not open a browser — we do — and there is no completion event, so we
  * poll mcpServerStatus() until connected / failed / timeout.
  *
- * `pending` is a transient init-frame status the SDK never re-reports, so
- * watchPending() polls the existing query until it settles. Config edits apply
+ * `pending` is a transient status the SDK never re-reports, so every status
+ * read that leaves a server pending starts watchPending(), which polls the
+ * existing query until it settles. (A session nobody has sent to yet emits no
+ * init frame, so the panel's own status read is often the only trigger.) Config edits apply
  * by resume-respawn (applyConfig → markMcpStale), never setMcpServers — that
  * replaces ALL dynamic servers, including SAI's in-process ones.
  */
@@ -47,7 +49,7 @@ const NO_SESSION = 'Live status unavailable — no Claude session';
 const NO_AUTH = 'This Claude runtime does not support in-app sign-in';
 const SESSION_RESTARTED = 'Session restarted during sign-in — try again';
 /** How long watchPending() waits for `pending` servers to settle. */
-const PENDING_WATCH_MS = 30_000;
+const PENDING_WATCH_MS = 60_000;
 const fn = <K extends keyof McpControlQuery>(q: McpControlQuery | null, k: K): q is McpControlQuery & Required<Pick<McpControlQuery, K>> =>
   typeof q?.[k] === 'function';
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e)) || 'Unknown error';
@@ -88,6 +90,7 @@ export function createMcpControl(deps: McpControlDeps) {
     }
     const snap = snapshotOf(projectPath, scope, q);
     deps.push(snap);
+    watchPending(projectPath, scope);
     return snap;
   }
 
@@ -199,9 +202,7 @@ export function createMcpControl(deps: McpControlDeps) {
       const prefix = `${scopeKey(projectPath, scope)} `;
       const signingIn = [...pollers.keys()].some((k) => k.startsWith(prefix));
       deps.markMcpStale?.(projectPath, scope, { restart: !signingIn, projectOnly: opts.projectOnly === true });
-      const snap = await refresh(projectPath, scope, true);
-      watchPending(projectPath, scope);
-      return snap;
+      return refresh(projectPath, scope, true);
     },
 
     reconnect(projectPath: string, scope: string | undefined, name: string) {

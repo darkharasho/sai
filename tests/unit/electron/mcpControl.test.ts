@@ -261,18 +261,39 @@ describe('mcpControl', () => {
       expect(q.mcpServerStatus).not.toHaveBeenCalled();
     });
 
-    it('gives up after 30s', async () => {
+    it('gives up after 60s', async () => {
       recordMcpRuntimeStatus('/p', 's1', [{ name: 'cf', status: 'pending' }]);
       const q = fakeQuery();
       q.setList([{ name: 'cf', status: 'pending' }]);
       const { ctl } = make(q);
 
       ctl.watchPending('/p', 's1');
-      now = 30_001;
+      now = 60_001;
       await vi.advanceTimersByTimeAsync(2000);
       (q.mcpServerStatus as any).mockClear();
       await vi.advanceTimersByTimeAsync(6000);
       expect(q.mcpServerStatus).not.toHaveBeenCalled();
+    });
+
+    it('status() keeps watching servers it read as pending — a session nobody has sent to emits no init frame', async () => {
+      const q = fakeQuery();
+      q.setList([{ name: 'cf', status: 'pending' }]);
+      const { ctl, push } = make(q);
+      await ctl.status('/p', 's1');
+      q.setList([{ name: 'cf', status: 'connected' }]);
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(getMcpRuntimeStatus('/p', 's1').servers.cf.status).toBe('connected');
+      expect(push.mock.calls.at(-1)![0].servers.cf.status).toBe('connected');
+    });
+
+    it('reconnect() keeps watching a server it left pending', async () => {
+      const q = fakeQuery();
+      q.setList([{ name: 'cf', status: 'pending' }]);
+      const { ctl } = make(q);
+      await ctl.reconnect('/p', 's1', 'cf');
+      q.setList([{ name: 'cf', status: 'failed', error: 'boom' }]);
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(getMcpRuntimeStatus('/p', 's1').servers.cf.status).toBe('failed');
     });
 
     it('does nothing when no server is pending', async () => {
@@ -293,14 +314,14 @@ describe('mcpControl', () => {
       expect(getQuery).toHaveBeenCalledWith('/p', 's1', false);
     });
 
-    it('a hung status cannot extend the 30s cap, and ticks never stack', async () => {
+    it('a hung status cannot extend the 60s cap, and ticks never stack', async () => {
       recordMcpRuntimeStatus('/p', 's1', [{ name: 'cf', status: 'pending' }]);
       const q = fakeQuery({ mcpServerStatus: vi.fn(() => new Promise<unknown[]>(() => {})) });
       const { ctl, getQuery } = make(q);
       ctl.watchPending('/p', 's1');
       await vi.advanceTimersByTimeAsync(8000);
       expect(q.mcpServerStatus).toHaveBeenCalledTimes(1);
-      now = 30_001;
+      now = 60_001;
       await vi.advanceTimersByTimeAsync(2000);
       getQuery.mockClear();
       await vi.advanceTimersByTimeAsync(6000);
