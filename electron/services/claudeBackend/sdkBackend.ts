@@ -35,7 +35,7 @@ import { isImagePath, mimeForImagePath } from '../imageFiles';
 import { notifyCompletion, notifyApproval, notifyQuestion, notifyPlanReview } from '../notify';
 import { devlog } from '../devlog';
 import { classifyTurnEnd, isSchedulingTool, isBackgroundLaunch, isAsyncLaunchResult, countLiveBackgroundTasks,
-  isTerminalTaskStatus, WAKEUP_GRACE_MS, BACKGROUND_WAIT_SETTLE_MS, BACKGROUND_WAIT_IDLE_MS,
+  isTerminalTaskStatus, onlyShellTasksLive, WAKEUP_GRACE_MS, BACKGROUND_WAIT_SETTLE_MS, BACKGROUND_WAIT_IDLE_MS,
   type WaitMeta } from '../waitClassifier';
 import { clamp, type PermMode } from '../remote/clamp';
 import { parseUserMcpConfigPaths } from './userMcpConfig';
@@ -140,6 +140,10 @@ interface ScopeSession {
    *  the "in progress" UI it implies) pins forever when the resume never comes.
    *  Spans turns — background tasks outlive the turn that launched them. */
   liveTasks: Map<string, string>;
+  /** task_id → task_type from task_started ('local_bash', 'local_agent', …),
+   *  for live tasks only. A turn whose live work is all shells ends for the
+   *  user at once (see onlyShellTasksLive). */
+  liveTaskTypes: Map<string, string>;
   /** A tracked background task reached a terminal status during the CURRENT
    *  turn. Per-turn (cleared by _resetWaitTracking): a task finishing is what
    *  makes the runtime re-invoke the model, so a turn ending right after one
@@ -1250,6 +1254,7 @@ export class SdkBackend implements ClaudeBackend {
       pendingBackgroundResume: false,
       wakeupDeadline: null,
       liveTasks: new Map(),
+      liveTaskTypes: new Map(),
       sawTaskSettled: false,
       sawTaskFrames: false,
       lastTaskEventAt: Date.now(),
@@ -1342,6 +1347,7 @@ export class SdkBackend implements ClaudeBackend {
       switch (m.subtype) {
         case 'task_started':
           session.liveTasks.set(id, 'running');
+          if (typeof m.task_type === 'string') session.liveTaskTypes.set(id, m.task_type);
           break;
         case 'task_progress':
           if (!session.liveTasks.has(id)) session.liveTasks.set(id, 'running');
@@ -1350,6 +1356,7 @@ export class SdkBackend implements ClaudeBackend {
           const status = (m.patch as { status?: unknown } | undefined)?.status;
           if (isTerminalTaskStatus(status)) {
             session.liveTasks.delete(id);
+            session.liveTaskTypes.delete(id);
             session.sawTaskSettled = true;
           } else if (typeof status === 'string') session.liveTasks.set(id, status);
           break;
@@ -1357,6 +1364,7 @@ export class SdkBackend implements ClaudeBackend {
         case 'task_notification':
           // Always terminal ('completed' | 'failed' | 'stopped').
           session.liveTasks.delete(id);
+          session.liveTaskTypes.delete(id);
           session.sawTaskSettled = true;
           break;
       }
@@ -1368,6 +1376,7 @@ export class SdkBackend implements ClaudeBackend {
       scope: session._scopeName,
       subtype: typeof m.subtype === 'string' ? m.subtype : null,
       taskId: id,
+      taskType: typeof m.task_type === 'string' ? m.task_type : null,
       status: typeof m.status === 'string' ? m.status : (m.patch as { status?: unknown } | undefined)?.status ?? null,
       live: session.liveTasks.size,
       wasLive: before,
@@ -1597,14 +1606,22 @@ export class SdkBackend implements ClaudeBackend {
               taskCount: session.stopBackgroundTaskCount
                 ?? countLiveBackgroundTasks(m.background_tasks),
             });
+            // Only background shells still running (dev server, watcher): the
+            // turn is over for the user, so present it as a plain end — the
+            // notification fires now — while the pin below still keeps the
+            // query alive for a shell that finishes and resumes the turn.
+            const shellsOnly = wait.kind === 'background' && onlyShellTasksLive(
+              session.liveTasks.keys(), session.liveTaskTypes, wait.taskCount,
+            );
             session.pendingWakeup = wait.kind === 'scheduled';
             session.pendingBackgroundResume = wait.kind === 'background';
+            if (shellsOnly) wait = { kind: 'none', resumeInSeconds: null, taskCount: wait.taskCount };
             session.backgroundWaitOpen = wait.kind === 'background';
             session.backgroundSettleAt = null;
             session.wakeupDeadline = (wait.kind === 'scheduled' && typeof wait.resumeInSeconds === 'number')
               ? Date.now() + wait.resumeInSeconds * 1000 + WAKEUP_GRACE_MS
               : null;
-            if (wait.kind === 'background') {
+            if (session.pendingBackgroundResume) {
               // The wait opens now; the backstop clock runs from here even if
               // no task frame ever arrives.
               session.lastTaskEventAt = Date.now();

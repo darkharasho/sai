@@ -2376,7 +2376,7 @@ describe('SdkBackend', () => {
   async function runBackgroundWaitTurn(
     tasks: unknown,
     after: any[] = [],
-    opts: { scope?: string; kind?: 'chat' | 'task' | 'orchestrator' } = {},
+    opts: { scope?: string; kind?: 'chat' | 'task' | 'orchestrator'; before?: any[] } = {},
   ) {
     const scope = opts.scope ?? SCOPE;
     let capturedOptions: any = null;
@@ -2386,6 +2386,7 @@ describe('SdkBackend', () => {
     const frames = [
       { type: 'assistant', message: { content: [{ type: 'tool_use', id: 'tu-1', name: 'Agent', input: { description: 'reviewer', prompt: 'review' } }] } },
       { type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'tu-1', content: [{ type: 'text', text: 'Async agent launched successfully.' }] }] } },
+      ...(opts.before ?? []),
       { type: 'result', stop_reason: 'end_turn', terminal_reason: 'completed', num_turns: 1, duration_ms: 10 },
     ];
 
@@ -2611,6 +2612,70 @@ describe('SdkBackend', () => {
     const after = emits.slice(before).filter(e => e.type === 'done');
     expect(after).toHaveLength(1);
     expect(after[0].wait).toBeUndefined();
+    backend.destroy();
+  });
+
+  // Live devlog 2026-10-20 (dusk): a turn launched `gh run watch` in the
+  // background and ended. The live shell held the turn in a background wait,
+  // the completion notification was withheld, and it fired only at the
+  // 10-minute idle backstop. A dev server never finishes at all. A background
+  // SHELL is not work the model is waiting on — it handed control back — so
+  // the turn ends for the user right away. The session stays pinned, so if
+  // the shell does finish and the runtime resumes, that turn is still live.
+  const SHELL_START = (id: string) => ({ ...TASK_START(id), description: 'npm run dev', task_type: 'local_bash' });
+  const AGENT_START = (id: string) => ({ ...TASK_START(id), task_type: 'local_agent' });
+
+  it('(70) a turn ending with only background shells live notifies at turn end', async () => {
+    const { backend, notify } = await runBackgroundWaitTurn(
+      [{ id: 'sh-1', status: 'running' }],
+      [],
+      { before: [SHELL_START('sh-1')] },
+    );
+    const done = emits.find(e => e.type === 'done') as any;
+    expect(done.wait?.kind ?? 'none').toBe('none');
+    // The turn-end notification fires after its 500ms re-check delay.
+    await vi.waitFor(() => expect(notify.completion).toHaveBeenCalledTimes(1));
+    // Still pinned: a shell that finishes later resumes a live conversation.
+    expect(backend.isWorkspaceBusy(PROJECT)).toBe(true);
+    // And the backstop must not ping a second time.
+    backend._sweepOnce(Date.now() + BACKGROUND_WAIT_IDLE_MS + 1_000);
+    expect(notify.completion).toHaveBeenCalledTimes(1);
+    expect(emits.filter(e => e.type === 'done' && e.wait == null)).toHaveLength(0);
+    backend.destroy();
+  });
+
+  it('(71) a live agent alongside a shell still holds the background wait', async () => {
+    const { backend, notify } = await runBackgroundWaitTurn(
+      [{ id: 'sh-1', status: 'running' }, { id: 'ag-1', status: 'running' }],
+      [],
+      { before: [SHELL_START('sh-1'), AGENT_START('ag-1')] },
+    );
+    const done = emits.find(e => e.type === 'done') as any;
+    expect(done.wait?.kind).toBe('background');
+    expect(notify.completion).not.toHaveBeenCalled();
+    backend.destroy();
+  });
+
+  it('(72) live work the ledger never saw start still holds the wait', async () => {
+    // Stop hook reports two live tasks; only one shell was sighted.
+    const { backend, notify } = await runBackgroundWaitTurn(
+      [{ id: 'sh-1', status: 'running' }, { id: 'x-1', status: 'running' }],
+      [],
+      { before: [SHELL_START('sh-1')] },
+    );
+    const done = emits.find(e => e.type === 'done') as any;
+    expect(done.wait?.kind).toBe('background');
+    expect(notify.completion).not.toHaveBeenCalled();
+    backend.destroy();
+  });
+
+  it('(73) a shell finishing after the turn ended re-arms the live session', async () => {
+    const { backend } = await runBackgroundWaitTurn(
+      [{ id: 'sh-1', status: 'running' }],
+      [TASK_DONE('sh-1'), { type: 'assistant', message: { content: [{ type: 'text', text: 'CI passed' }] } }],
+      { before: [SHELL_START('sh-1')] },
+    );
+    expect(emits.some(e => e.type === 'streaming_start' && e.turnSeq === 2)).toBe(true);
     backend.destroy();
   });
 

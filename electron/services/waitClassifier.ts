@@ -82,6 +82,35 @@ export function countLiveBackgroundTasks(tasks: unknown): number | null {
   return tasks.filter((t) => !isTerminalTaskStatus((t as { status?: unknown } | null)?.status)).length;
 }
 
+/** task_type of a backgrounded Bash command (SDKTaskStartedMessage.task_type;
+ *  the runtime sets it from its own task kind — agents are 'local_agent',
+ *  workflows 'local_workflow'). */
+export const SHELL_TASK_TYPE = 'local_bash';
+
+/**
+ * True when every live background task is a shell, so the turn is over for the
+ * user even though work is still running. A background shell is not something
+ * the model is waiting on — a dev server never finishes, and a watcher that
+ * does finish resumes the turn on its own — so holding the turn-end
+ * notification for it held it until the idle backstop (live devlog 2026-10-20:
+ * `gh run watch` delayed "finished" by exactly 10 minutes). Agents and
+ * workflows are different: the model ended its turn to wait for them.
+ *
+ * `reportedLive` is the runtime's own in-flight count (Stop hook), when known.
+ * If it reports more live work than the ledger saw start, some of it is of
+ * unknown type, so this answers false and the wait stands.
+ */
+export function onlyShellTasksLive(
+  liveIds: Iterable<string>,
+  taskTypes: ReadonlyMap<string, string>,
+  reportedLive: number | null,
+): boolean {
+  const ids = [...liveIds];
+  if (ids.length === 0) return false;
+  if (reportedLive != null && reportedLive > ids.length) return false;
+  return ids.every((id) => taskTypes.get(id) === SHELL_TASK_TYPE);
+}
+
 const SCHEDULING_TOOLS = new Set(['ScheduleWakeup', 'CronCreate']);
 
 export function isSchedulingTool(toolName: string): boolean {
