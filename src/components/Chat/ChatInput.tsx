@@ -3,6 +3,7 @@ import type { PendingApproval, PendingSudoPrompt, TerminalTab, ChatMessage as Ch
 import TodoProgress from './TodoProgress';
 import MessageQueue from './MessageQueue';
 import { basename } from '../../utils/pathUtils';
+import { fileBadge, shortDir } from './userAttachments';
 import ApprovalPanel from './ApprovalPanel';
 import { SudoPromptCard } from './SudoPromptCard';
 import {
@@ -26,6 +27,8 @@ type ModelOption = { id: string; label: string; description: string; recommended
 export type OverlayMode = 'on' | 'off' | 'persist';
 
 interface ChatInputProps {
+  /** Workspace root — file tabs omit the folder hint for root-level files. */
+  projectPath?: string;
   onSend: (message: string, images?: string[]) => void;
   /** Focus-overlay mode cycler (icon button in the toolbar); present only
    *  while the overlay setting is enabled. */
@@ -119,6 +122,15 @@ export interface ContextItem {
   label: string;
   type: 'file' | 'url' | 'image' | 'terminal';
   data?: string; // base64 data for images, path for files, content for terminal
+}
+
+function FileTabBadge({ path }: { path: string }) {
+  const badge = fileBadge(path);
+  return (
+    <span className="context-chip-badge" style={{ color: badge.color, background: `color-mix(in srgb, ${badge.color} 16%, transparent)` }}>
+      {badge.label}
+    </span>
+  );
 }
 
 function getCommandIcon(name: string): React.ReactNode {
@@ -275,7 +287,7 @@ function getBarColor(pct: number, isOverage: boolean): string {
   return 'var(--accent)';
 }
 
-export default function ChatInput({ onSend, overlayControl, onBeforeSend, disabled, slashCommands = [], onSlashRefresh, isStreaming, waiting, awaitingQuestion, messages = [], onStop, onQueue, queueCount, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, availableModels, claudeOverrideState, contextUsage, sessionUsage, sessionCost, usageLimits = [], billingMode = 'subscription', activeFilePath, fileContextEnabled = true, onFileContextToggle, aiProvider = 'claude', pendingApproval, pendingSudoPrompt, onApprove, onDeny, onAlwaysAllow, onAmend, codexModel = 'o3', codexModels = [], onCodexModelChange, onCodexModelsRefresh, codexPermission = 'auto', onCodexPermissionChange, codexEffort = 'high', onCodexEffortChange, geminiModel = 'auto-gemini-3', geminiModels = [], onGeminiModelChange, geminiApprovalMode = 'default', onGeminiApprovalModeChange, geminiConversationMode = 'planning', onGeminiConversationModeChange, kimiModel = 'kimi-k3', kimiModels = [], onKimiModelChange, kimiApprovalMode = 'default', onKimiApprovalModeChange, terminalTabs = [], messageQueue = [], onQueueRemove, onQueuePromote, onQueueSendNow, initialDraft = '', onDraftChange, initialContextItems = [], onContextItemsChange, metaRuntime, mentionInsertRef }: ChatInputProps) {
+export default function ChatInput({ projectPath, onSend, overlayControl, onBeforeSend, disabled, slashCommands = [], onSlashRefresh, isStreaming, waiting, awaitingQuestion, messages = [], onStop, onQueue, queueCount, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, availableModels, claudeOverrideState, contextUsage, sessionUsage, sessionCost, usageLimits = [], billingMode = 'subscription', activeFilePath, fileContextEnabled = true, onFileContextToggle, aiProvider = 'claude', pendingApproval, pendingSudoPrompt, onApprove, onDeny, onAlwaysAllow, onAmend, codexModel = 'o3', codexModels = [], onCodexModelChange, onCodexModelsRefresh, codexPermission = 'auto', onCodexPermissionChange, codexEffort = 'high', onCodexEffortChange, geminiModel = 'auto-gemini-3', geminiModels = [], onGeminiModelChange, geminiApprovalMode = 'default', onGeminiApprovalModeChange, geminiConversationMode = 'planning', onGeminiConversationModeChange, kimiModel = 'kimi-k3', kimiModels = [], onKimiModelChange, kimiApprovalMode = 'default', onKimiApprovalModeChange, terminalTabs = [], messageQueue = [], onQueueRemove, onQueuePromote, onQueueSendNow, initialDraft = '', onDraftChange, initialContextItems = [], onContextItemsChange, metaRuntime, mentionInsertRef }: ChatInputProps) {
   const selectedCodexModel = codexModels.find(model => model.id === codexModel);
   const supportedCodexEfforts = effortsForCodexModel(selectedCodexModel);
   const effectiveCodexEffort = normalizeCodexEffort(codexEffort, selectedCodexModel);
@@ -947,17 +959,23 @@ export default function ChatInput({ onSend, overlayControl, onBeforeSend, disabl
       {contextItems.length > 0 && (
         <div className="context-row">
           {contextItems.map((ctx, i) => (
-            <span key={i} className="context-chip">
+            <span key={i} className="context-chip" title={ctx.type === 'file' ? ctx.data : undefined}>
               <span className="chip-ear-l" />
               <span className="chip-ear-r" />
               {ctx.type === 'image' && ctx.data ? (
                 <img src={ctx.data} alt={ctx.label} className="context-thumb" />
               ) : ctx.type === 'terminal' ? (
                 <TerminalIcon size={12} />
+              ) : ctx.type === 'file' && ctx.data ? (
+                <FileTabBadge path={ctx.data} />
               ) : (
                 <FileText size={12} />
               )}
-              {ctx.label}
+              <span className="context-chip-label">{ctx.label}</span>
+              {ctx.type === 'file' && ctx.data && (() => {
+                const dir = shortDir(ctx.data, projectPath);
+                return dir ? <span className="context-chip-dir">{dir}</span> : null;
+              })()}
               <button className="context-remove" onClick={() => removeContext(i)}>&times;</button>
             </span>
           ))}
@@ -1635,6 +1653,31 @@ export default function ChatInput({ onSend, overlayControl, onBeforeSend, disabl
         .context-chip svg {
           color: var(--accent);
           flex-shrink: 0;
+        }
+        .context-chip-badge {
+          flex-shrink: 0;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          min-width: 16px;
+          height: 16px;
+          padding: 0 3px;
+          border-radius: 4px;
+          font-family: 'Geist Mono', monospace;
+          font-size: 7.5px;
+          font-weight: 700;
+          letter-spacing: 0;
+        }
+        .context-chip-label {
+          max-width: 180px;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+        .context-chip-dir {
+          color: var(--text-muted);
+          font-size: 10px;
+          white-space: nowrap;
         }
         /* Inverse rounded ears at bottom corners */
         .chip-ear-l, .chip-ear-r {

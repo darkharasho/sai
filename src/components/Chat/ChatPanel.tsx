@@ -2695,6 +2695,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
             <McpAuthNudge projectPath={projectPath} scope={claudeScope} onOpenMcpPanel={onOpenMcpPanel} />
           )}
           <ChatInput
+            projectPath={projectPath}
             onSend={handleSend}
             overlayControl={overlayControl}
             onBeforeSend={(rect) => { pendingComposerRectRef.current = rect; }}

@@ -519,3 +519,22 @@ describe('ChatInput', () => {
     });
   });
 });
+
+describe('ChatInput file context tabs', () => {
+  beforeEach(() => {
+    installMockSai();
+    vi.clearAllMocks();
+  });
+
+  it('shows a type badge and folder hint, omitting the folder at the project root', () => {
+    const items = [
+      { label: 'Input.tsx', type: 'file' as const, data: '/var/home/me/proj/src/Chat/Input.tsx' },
+      { label: 'README.md', type: 'file' as const, data: '/var/home/me/proj/README.md' },
+    ];
+    const { container } = render(<ChatInput {...defaultProps} projectPath="/home/me/proj" initialContextItems={items} />);
+    const chips = Array.from(container.querySelectorAll('.context-row .context-chip'));
+    expect(chips.map(c => c.getAttribute('title'))).toEqual(items.map(i => i.data));
+    expect(chips.map(c => c.querySelector('.context-chip-badge')?.textContent)).toEqual(['TS', 'MD']);
+    expect(chips.map(c => c.querySelector('.context-chip-dir')?.textContent ?? null)).toEqual(['Chat/', null]);
+  });
+});

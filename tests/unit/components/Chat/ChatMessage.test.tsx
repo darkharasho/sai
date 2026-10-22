@@ -599,3 +599,23 @@ describe('ChatMessage', () => {
     });
   });
 });
+
+describe('ChatMessage user file attachments', () => {
+  it('renders attached files as chips and strips the @path line from the text', () => {
+    const onFileOpen = vi.fn();
+    render(
+      <ChatMessage
+        message={makeMessage({ role: 'user', content: '@/proj/src/Chat/Input.tsx @/proj/README.md\n\nwhy?' })}
+        projectPath="/proj"
+        onFileOpen={onFileOpen}
+      />,
+    );
+    expect(screen.getByTestId('markdown').textContent).toBe('why?');
+    const chip = screen.getByTitle('/proj/src/Chat/Input.tsx');
+    expect(chip.textContent).toBe('TSInput.tsxChat/');
+    // File at the project root gets no folder hint.
+    expect(screen.getByTitle('/proj/README.md').textContent).toBe('MDREADME.md');
+    fireEvent.click(chip);
+    expect(onFileOpen).toHaveBeenCalledWith('/proj/src/Chat/Input.tsx');
+  });
+});

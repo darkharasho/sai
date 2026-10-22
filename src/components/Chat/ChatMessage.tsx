@@ -25,6 +25,7 @@ import { rehypeEmojiIcons } from './rehypeEmojiIcons';
 import { rehypeStreamWords } from './rehypeStreamWords';
 import ReasoningBlock from './ReasoningBlock';
 import { renderEmojiSpan } from './emojiIcons';
+import { parseUserAttachments, fileBadge, shortDir } from './userAttachments';
 
 // Message IDs that have already played their entry animation. Prevents the
 // animation from replaying if a message remounts (e.g. workspace swap, list
@@ -284,6 +285,27 @@ function ImageModal({ src, onClose }: { src: string; onClose: () => void }) {
   );
 }
 
+const NO_ATTACHMENTS = { files: [] as string[], text: '' };
+
+function FileChip({ path, projectPath, onOpen }: { path: string; projectPath?: string; onOpen?: (path: string) => void }) {
+  const name = path.split(/[\\/]/).pop() || path;
+  const dir = shortDir(path, projectPath);
+  const badge = fileBadge(path);
+  return (
+    <button
+      type="button"
+      className="chat-msg-file-chip"
+      title={path}
+      onClick={onOpen ? () => onOpen(path) : undefined}
+      disabled={!onOpen}
+    >
+      <span className="chat-msg-file-badge" style={{ color: badge.color, background: `color-mix(in srgb, ${badge.color} 16%, transparent)` }}>{badge.label}</span>
+      <span className="chat-msg-file-name">{name}</span>
+      {dir && <span className="chat-msg-file-dir">{dir}</span>}
+    </button>
+  );
+}
+
 function ChatMessage({
   message,
   projectPath,
@@ -341,6 +363,9 @@ function ChatMessage({
     if (custom != null) return <>{custom}</>;
   }
   const dotColor = getDotColor(message.role);
+  const userAttachments = message.role === 'user'
+    ? parseUserAttachments(typeof message.content === 'string' ? message.content : String(message.content ?? ''))
+    : NO_ATTACHMENTS;
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const [errorDetailsOpen, setErrorDetailsOpen] = useState(false);
   const [errorDetailsCopied, setErrorDetailsCopied] = useState(false);
@@ -868,6 +893,13 @@ function ChatMessage({
             ? <SaiLogo mode="static" size={16} className="chat-msg-dot chat-msg-sai" />
             : <Circle size={8} fill={dotColor} stroke={dotColor} className="chat-msg-dot" />}
           <div className="chat-msg-body">
+            {userAttachments.files.length > 0 && (
+              <div className="chat-msg-file-chips">
+                {userAttachments.files.map((p, i) => (
+                  <FileChip key={i} path={p} projectPath={projectPath} onOpen={onFileOpen} />
+                ))}
+              </div>
+            )}
             {message.role === 'assistant' && typeof message.durationMs === 'number' && (
               <div className="chat-msg-duration" data-testid="msg-duration">
                 [{formatMs(message.durationMs)}]
@@ -879,7 +911,7 @@ function ChatMessage({
                 const raw = typeof message.content === 'string' ? message.content : String(message.content ?? '');
                 // Preserve user newlines as hard line breaks (trailing double-space)
                 // so Shift+Enter in the chat input renders visually.
-                if (message.role === 'user') return raw.replace(/\n/g, '  \n');
+                if (message.role === 'user') return userAttachments.text.replace(/\n/g, '  \n');
                 return raw;
               })()}</ReactMarkdown>
               </div>
@@ -1067,6 +1099,57 @@ function ChatMessage({
         }
         .chat-msg-body tr:hover td {
           background: var(--bg-secondary);
+        }
+        .chat-msg-file-chips {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 6px;
+          margin-bottom: 8px;
+        }
+        .chat-msg-file-chip {
+          display: inline-flex;
+          align-items: center;
+          gap: 7px;
+          height: 28px;
+          max-width: 260px;
+          padding: 0 10px 0 4px;
+          border-radius: 8px;
+          background: var(--bg-elevated);
+          border: 1px solid var(--border-subtle);
+          color: var(--text);
+          font: inherit;
+          font-size: 12.5px;
+          cursor: pointer;
+          transition: border-color 0.15s, background 0.15s;
+        }
+        .chat-msg-file-chip:hover:not(:disabled) {
+          border-color: var(--border-strong);
+          background: var(--bg-hover);
+        }
+        .chat-msg-file-chip:disabled { cursor: default; }
+        .chat-msg-file-badge {
+          width: 20px;
+          height: 20px;
+          border-radius: 5px;
+          display: grid;
+          place-items: center;
+          flex-shrink: 0;
+          font-family: 'Geist Mono', 'JetBrains Mono', monospace;
+          font-size: 8.5px;
+          font-weight: 700;
+          letter-spacing: -0.02em;
+        }
+        .chat-msg-file-name {
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          min-width: 0;
+        }
+        .chat-msg-file-dir {
+          color: var(--text-muted);
+          font-size: 11px;
+          white-space: nowrap;
+          flex-shrink: 0;
         }
         .chat-msg-attachments {
           display: flex;
