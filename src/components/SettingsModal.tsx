@@ -105,6 +105,8 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
   const [editorFontSize, setEditorFontSize] = useState(13);
   const [editorMinimap, setEditorMinimap] = useState(true);
   const [aiProvider, setAiProvider] = useState<AIProvider>('claude');
+  const [loadGuardEnabled, setLoadGuardEnabled] = useState(true);
+  const [loadGuardAutoKill, setLoadGuardAutoKill] = useState(true);
   const [claudeBackend, setClaudeBackend] = useState<'cli' | 'sdk'>('sdk');
   const [claudeShowReasoning, setClaudeShowReasoning] = useState(false);
   const [claudeAgentProgressSummaries, setClaudeAgentProgressSummaries] = useState(true);
@@ -285,6 +287,8 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
     window.sai.settingsGet('aiProvider', 'claude').then((v: string) => {
       if (isAIProvider(v)) setAiProvider(v);
     });
+    window.sai.settingsGet('loadGuardEnabled', true).then((v: boolean) => setLoadGuardEnabled(v !== false));
+    window.sai.settingsGet('loadGuardAutoKill', true).then((v: boolean) => setLoadGuardAutoKill(v !== false));
     window.sai.settingsGet('claudeBackend', 'sdk').then((v: string) => {
       if (v === 'cli' || v === 'sdk') setClaudeBackend(v);
     });
@@ -494,6 +498,16 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
       window.sai.settingsSet('commitMessageProvider', value);
       onSettingChange?.('commitMessageProvider', value);
     }
+  };
+
+  const handleLoadGuardEnabledChange = (value: boolean) => {
+    setLoadGuardEnabled(value);
+    window.sai.settingsSet('loadGuardEnabled', value);
+  };
+
+  const handleLoadGuardAutoKillChange = (value: boolean) => {
+    setLoadGuardAutoKill(value);
+    window.sai.settingsSet('loadGuardAutoKill', value);
   };
 
   const handleClaudeBackendChange = (value: 'cli' | 'sdk') => {
@@ -1054,6 +1068,42 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
             <span className="settings-toggle-thumb" />
           </button>
         </div>
+
+        {window.sai.platform === 'linux' && (
+          <>
+            <div className="settings-row">
+              <div className="settings-row-info">
+                <div className="settings-row-name">Protect my PC from overload</div>
+                <div className="settings-row-desc">Pause AI work when memory runs critically low, and tell the AI when the system is busy.</div>
+              </div>
+              <button
+                className={`settings-toggle${loadGuardEnabled ? ' on' : ''}`}
+                onClick={() => handleLoadGuardEnabledChange(!loadGuardEnabled)}
+                role="switch"
+                aria-checked={loadGuardEnabled}
+              >
+                <span className="settings-toggle-thumb" />
+              </button>
+            </div>
+
+            <div className="settings-row">
+              <div className="settings-row-info">
+                <div className="settings-row-name">Stop SAI's heavy processes when needed</div>
+                <div className="settings-row-desc">If SAI's own work is what's overloading your PC, stop the biggest offender.</div>
+              </div>
+              <button
+                className={`settings-toggle${loadGuardAutoKill ? ' on' : ''}`}
+                onClick={() => handleLoadGuardAutoKillChange(!loadGuardAutoKill)}
+                role="switch"
+                aria-checked={loadGuardAutoKill}
+                disabled={!loadGuardEnabled}
+                style={!loadGuardEnabled ? { opacity: 0.4, pointerEvents: 'none' } : undefined}
+              >
+                <span className="settings-toggle-thumb" />
+              </button>
+            </div>
+          </>
+        )}
       </section>
 
       {isAuthed && (
