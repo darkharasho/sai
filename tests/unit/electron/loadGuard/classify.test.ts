@@ -82,6 +82,48 @@ describe('classify', () => {
     expect(classify([proc(40, 1, { comm: 'gamescope' })], ctx()).game?.name).toBe('gamescope');
   });
 
+  it('keeps named games separate; path-less and Proton pids fold into the largest', () => {
+    const steam = (n: string) => `/h/.steam/steamapps/common/${n}/x.exe`;
+    const procs = [
+      proc(60, 1, { cmd: steam('Big Game'), rssKb: 5000 }),
+      proc(61, 1, { cmd: steam('Small Game'), rssKb: 1000 }),
+      proc(62, 1, { comm: 'gamescope', rssKb: 300 }),
+      proc(63, 1, { cmd: steam('Proton 9.0'), rssKb: 200 }),
+    ];
+    const r = classify(procs, ctx());
+    expect(r.game).toEqual({ name: 'Big Game', sizeKb: 5500 });
+    expect(r.top.filter(t => t.owner === 'game').map(t => [t.label, t.sizeKb])).toEqual([['Big Game', 5500], ['Small Game', 1000]]);
+  });
+
+  it('aggregates path-less games under the largest member name', () => {
+    const procs = [proc(69, 1, { comm: 'reaper', rssKb: 1 }), proc(70, 69, { comm: 'wine', rssKb: 100 }), proc(71, 1, { comm: 'gamescope', rssKb: 500 })];
+    expect(classify(procs, ctx()).game).toEqual({ name: 'gamescope', sizeKb: 600 });
+  });
+
+  it('does not make a tagged grandchild under an untagged shim a second root', () => {
+    const procs = [
+      proc(1, 0, { tag: tag(), rssKb: 100 }),
+      proc(2, 1, { rssKb: 10 }),
+      proc(3, 2, { tag: tag(), rssKb: 1000 }),
+    ];
+    const r = classify(procs, ctx());
+    expect(r.units.filter(u => u.kind === 'agent')).toHaveLength(1);
+    expect(r.units.map(u => u.rootPid).sort()).toEqual([1, 2]);
+    expect(r.saiAiKb).toBe(1110);
+  });
+
+  it('makes a tagged direct child a command/service unit, not a root', () => {
+    const procs = [proc(1, 0, { tag: tag() }), proc(2, 1, { tag: tag(), startTicks: started(10) })];
+    const r = classify(procs, ctx());
+    expect(r.units.map(u => [u.rootPid, u.kind]).sort()).toEqual([[1, 'agent'], [2, 'command']]);
+  });
+
+  it('yields exactly one agent unit for a childless agent', () => {
+    const r = classify([proc(1, 0, { tag: tag() })], ctx());
+    expect(r.units).toHaveLength(1);
+    expect(r.units[0].kind).toBe('agent');
+  });
+
   it('groups other processes by app cgroup label, falling back to comm', () => {
     const cg = '0::/user.slice/app.slice/app-flatpak-app.zen_browser.zen-41.scope';
     const procs = [proc(50, 1, { cgroup: cg, rssKb: 100 }), proc(51, 1, { cgroup: cg, rssKb: 200 }), proc(52, 1, { comm: 'foo', rssKb: 10 })];

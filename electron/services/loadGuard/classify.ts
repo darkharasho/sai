@@ -59,11 +59,10 @@ export function classify(procs: ProcInfo[], ctx: ClassifyCtx): Classified {
 
   // Single top-down walk carrying inherited flags (explicit stack, cycle-safe).
   const owner = new Map<number, Owner>();
-  const gameOf = new Map<number, boolean>();
   const agentRoots: number[] = [];
   const seen = new Set<number>();
   const stack: { pid: number; ai: boolean; term: boolean; reaper: boolean }[] =
-    roots.map(pid => ({ pid, ai: false, term: false, reaper: false, parentOwn: false }));
+    roots.map(pid => ({ pid, ai: false, term: false, reaper: false }));
   while (stack.length) {
     const f = stack.pop()!;
     if (seen.has(f.pid)) continue;
@@ -75,7 +74,6 @@ export function classify(procs: ProcInfo[], ctx: ClassifyCtx): Classified {
     const ai = f.ai || own;
     const term = f.term || ctx.terminalPids.has(p.pid);
     const isGame = f.reaper || p.comm === 'gamescope' || p.cmd.includes(STEAM_MARK);
-    gameOf.set(p.pid, isGame);
     owner.set(p.pid, ai ? 'sai-ai' : term ? 'sai-terminal' : ctx.appPids.has(p.pid) ? 'sai-app' : isGame ? 'game' : 'other');
     for (const c of children.get(p.pid) ?? []) {
       stack.push({ pid: c, ai, term, reaper: f.reaper || p.comm === 'reaper' });
@@ -136,14 +134,23 @@ export function classify(procs: ProcInfo[], ctx: ClassifyCtx): Classified {
       add(`${o}\0${label}`, { label, sizeKb: size, owner: o });
     }
   }
-  // Path-less pids (wine, gamescope) fold into the largest steam-path-named game when one exists.
-  const namedGames = new Set<string>();
-  for (const p of procs) if (owner.get(p.pid) === 'game') { const n = steamGameName(p.cmd); if (n) namedGames.add(n); }
-  if (namedGames.size > 0) {
-    const best = [...namedGames].sort((a, b) => gameSizes.get(b)!.sizeKb - gameSizes.get(a)!.sizeKb)[0];
-    let total = 0;
-    for (const [name, g] of gameSizes) { total += g.sizeKb; if (name !== best) gameSizes.delete(name); }
-    gameSizes.get(best)!.sizeKb = total;
+  // Path-less pids (wine, gamescope) and runtime groups (Proton, SteamLinuxRuntime) fold into the
+  // largest real named game; with none, they aggregate into one entry named after the largest member.
+  const isRuntime = (n: string) => /^(Proton|SteamLinuxRuntime)/.test(n);
+  const real = new Set<string>();
+  for (const p of procs) {
+    if (owner.get(p.pid) !== 'game') continue;
+    const n = steamGameName(p.cmd);
+    if (n && !isRuntime(n)) real.add(n);
+  }
+  const loose = [...gameSizes.keys()].filter(n => !real.has(n));
+  if (loose.length > 0) {
+    const target = real.size > 0
+      ? [...real].sort((a, b) => gameSizes.get(b)!.sizeKb - gameSizes.get(a)!.sizeKb)[0]
+      : [...loose].sort((a, b) => gameSizes.get(b)!.sizeKb - gameSizes.get(a)!.sizeKb)[0];
+    let extra = 0;
+    for (const n of loose) { if (n !== target) { extra += gameSizes.get(n)!.sizeKb; gameSizes.delete(n); } }
+    gameSizes.get(target)!.sizeKb += extra;
   }
   let game: { name: string; sizeKb: number } | null = null;
   for (const [name, g] of gameSizes) {
