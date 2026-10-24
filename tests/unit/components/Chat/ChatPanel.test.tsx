@@ -46,6 +46,7 @@ vi.mock('../../../../src/components/ThinkingAnimation', () => ({
   ),
 }));
 
+import { scopeMessageBuffer } from '../../../../src/lib/chatFrameGate';
 import ChatPanel from '../../../../src/components/Chat/ChatPanel';
 
 type ChatPanelProps = ComponentProps<typeof ChatPanel>;
@@ -2535,6 +2536,19 @@ describe('ChatPanel', () => {
       });
       expect(container.querySelectorAll('[data-testid="chat-message"]')).toHaveLength(2);
       expect(props.onTurnComplete).not.toHaveBeenCalled();
+    });
+
+    it('I5: drains a card App buffered before mount; the same id arriving live is not duplicated', async () => {
+      scopeMessageBuffer.set('s1', [{ id: 'lg-7', role: 'system', content: '', timestamp: 1, loadGuard: killedEv } as any]);
+      const { container } = render(<ChatPanel {...lgProps()} />);
+      await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+      await waitFor(() => expect(container.querySelectorAll('[data-load-guard="killed"]')).toHaveLength(1));
+      expect(scopeMessageBuffer.has('s1')).toBe(false);
+      const handler = mockSai.claudeOnMessage.mock.calls[0][0] as (msg: any) => void;
+      await act(async () => {
+        handler({ type: 'load_guard', id: 'lg-7', projectPath: '/project', scope: 's1', provider: 'claude', loadGuard: killedEv });
+      });
+      expect(container.querySelectorAll('[data-load-guard="killed"]')).toHaveLength(1);
     });
 
     it("note with '*' scope and project is appended to a matching-provider panel", async () => {

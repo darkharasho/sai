@@ -34,6 +34,42 @@ describe('deriveSwarmMirror', () => {
     expect(deriveSwarmMirror({ type: 'done', scope: 'other-sess' }, [makeTask()])).toBeNull();
   });
 
+  describe('load-guard kill (I6)', () => {
+    const killed = (unitKind: string, scope = 'sess-abc') => ({
+      type: 'load_guard', projectPath: '/repo', scope, provider: 'claude',
+      loadGuard: { kind: 'killed', unitKind, label: 'claude', sizeKb: 1, memUsedPct: 95, top: [], toldAi: 'x' },
+    });
+
+    it('a killed agent fails the streaming task with a reason; the synthetic done after it is ignored', () => {
+      const t = makeTask();
+      const r = deriveSwarmMirror(killed('agent'), [t], 50);
+      expect(r).toEqual({
+        taskId: 't1',
+        patch: { kind: 'status', status: 'failed', lastActivityAt: 50, reason: 'Stopped by SAI to keep the PC from freezing' },
+      });
+      const failed = applySwarmPatch(t, r!.patch);
+      expect(failed.status).toBe('failed');
+      expect(deriveSwarmMirror({ type: 'done', scope: 'sess-abc', turnSeq: null }, [failed], 60)).toBeNull();
+    });
+
+    it('also fails a task awaiting approval or queued', () => {
+      for (const status of ['awaiting_approval', 'queued'] as const) {
+        expect(deriveSwarmMirror(killed('agent'), [makeTask({ status })])?.patch).toMatchObject({ kind: 'status', status: 'failed' });
+      }
+    });
+
+    it('a killed command/service, a note, or a finished task is not a failure', () => {
+      expect(deriveSwarmMirror(killed('command'), [makeTask()], 1)?.patch.kind).toBe('heartbeat');
+      expect(deriveSwarmMirror(killed('service'), [makeTask()], 1)?.patch.kind).toBe('heartbeat');
+      expect(deriveSwarmMirror({ ...killed('agent'), loadGuard: { kind: 'note', text: 'x' } }, [makeTask()], 1)?.patch.kind).toBe('heartbeat');
+      expect(deriveSwarmMirror(killed('agent'), [makeTask({ status: 'done' })])).toBeNull();
+    });
+
+    it('a wildcard-scope kill never matches a task', () => {
+      expect(deriveSwarmMirror(killed('agent', '*'), [makeTask()])).toBeNull();
+    });
+  });
+
   it('emits done patch when streaming task sees done/result', () => {
     const t = makeTask();
     const r1 = deriveSwarmMirror({ type: 'done', scope: 'sess-abc' }, [t], 100);

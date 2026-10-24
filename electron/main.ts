@@ -137,6 +137,7 @@ if (process.platform === 'linux') {
 let mainWindow: BrowserWindow | null = null;
 /** System load guard; linux only, null elsewhere. */
 let loadGuard: LoadGuard | null = null;
+let loadGuardEventSeq = 0;
 let quitConfirmed = false;
 let overlayManager: OverlayManager | null = null;
 
@@ -561,8 +562,9 @@ function createWindow() {
       broadcastState: (state) => {
         if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('loadGuard:state', state);
       },
+      // The id lets the renderer dedupe a live panel's card against App's buffered copy.
       emitChat: (projectPath, scope, provider, ev) =>
-        emitChatMessage({ type: 'load_guard', projectPath, scope, provider, loadGuard: ev }),
+        emitChatMessage({ type: 'load_guard', id: `load-guard-${Date.now()}-${++loadGuardEventSeq}`, projectPath, scope, provider, loadGuard: ev }),
       onAgentKilled: makeOnAgentKilled(
         () => getClaudeBackend() as ReturnType<typeof getClaudeBackend> & ScopeSuspender,
         (event, data) => devlog('loadguard', event, data),

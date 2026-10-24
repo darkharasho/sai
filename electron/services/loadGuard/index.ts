@@ -390,14 +390,16 @@ export class LoadGuard {
     }
     const { instance: _instance, ...tag } = target.tag;
     const toldAi = killNote(target, memUsedPct);
+    // Before onAgentKilled: its synthetic done must reach the renderer after the kill, so
+    // the panel's error-quiet window is open and a swarm task reads failed, not done (I6).
+    d.emitChat(tag.projectPath, tag.scope, tag.provider, {
+      kind: 'killed', unitKind: target.kind, label: target.label, sizeKb: target.sizeKb, memUsedPct, top: c.top, toldAi,
+    });
     if (target.kind === 'agent') d.onAgentKilled(target.tag);
     const count = d.signaller.killTree(target, ticks);
     for (const pid of target.pids) this.frozenKeys.delete(`${pid}:${ticks.get(pid)}`);
     d.devlog('kill', { ...info, count });
     this.notes.postTo(tag, toldAi, now);
-    d.emitChat(tag.projectPath, tag.scope, tag.provider, {
-      kind: 'killed', unitKind: target.kind, label: target.label, sizeKb: target.sizeKb, memUsedPct, top: c.top, toldAi,
-    });
   }
 
   private thaw(reason: string, quietIfUnchanged = false): void {

@@ -8,9 +8,11 @@ import type { SwarmTask } from '../types';
 import { isTurnErrored } from './chatActivity';
 
 export type SwarmTaskPatch =
-  | { kind: 'status'; status: 'done' | 'failed'; costEstimate?: number; lastActivityAt: number }
+  | { kind: 'status'; status: 'done' | 'failed'; costEstimate?: number; lastActivityAt: number; reason?: string }
   | { kind: 'toolCount'; delta: number; lastActivityAt: number }
   | { kind: 'heartbeat'; lastActivityAt: number };
+
+export const LOAD_GUARD_KILL_REASON = 'Stopped by SAI to keep the PC from freezing';
 
 export interface MirrorResult {
   taskId: string;
@@ -44,6 +46,18 @@ export function deriveSwarmMirror(
       const patch: SwarmTaskPatch = { kind: 'status', status, lastActivityAt: now };
       if (typeof msg.total_cost_usd === 'number' && Number.isFinite(msg.total_cost_usd)) patch.costEstimate = msg.total_cost_usd;
       return { taskId: task.id, patch };
+    }
+    return null;
+  }
+
+  // The load guard killed the task's agent (it sends this before the synthetic done):
+  // the work is unfinished, so the task failed — the done that follows is then ignored.
+  if (msg.type === 'load_guard' && msg.loadGuard?.kind === 'killed' && msg.loadGuard.unitKind === 'agent') {
+    if (task.status === 'streaming' || task.status === 'awaiting_approval' || task.status === 'queued') {
+      return {
+        taskId: task.id,
+        patch: { kind: 'status', status: 'failed', lastActivityAt: now, reason: LOAD_GUARD_KILL_REASON },
+      };
     }
     return null;
   }

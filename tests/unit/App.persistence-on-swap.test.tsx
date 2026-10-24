@@ -678,6 +678,46 @@ describe('App: persistence on session swap', () => {
     );
   });
 
+  describe('I5: load-guard cards for a chat with no mounted panel', () => {
+    const agentKill = { kind: 'killed', unitKind: 'agent', label: 'claude', sizeKb: 1024, memUsedPct: 96, top: [], toldAi: 'SAI stopped you' };
+    const commandKill = { ...agentKill, unitKind: 'command', label: 'vitest run' };
+    const openChatB = async () => {
+      render(<App />);
+      const chatsBtn = await waitFor(() => screen.getByTitle('Chats'));
+      await act(async () => { fireEvent.click(chatsBtn); });
+      await waitFor(() => expect(screen.getByText('Chat B')).toBeInTheDocument());
+      await act(async () => { fireEvent.click(screen.getByText('Chat B')); });
+      await waitFor(() => expect(chatPanelPropsLog.at(-1)?.claudeScope).toBe('session-B'));
+      return mockSai.claudeOnMessage.mock.calls.at(-1)?.[0] as (msg: any) => void;
+    };
+
+    it('an agent kill is persisted to the chat by the background done flush', async () => {
+      const onMessage = await openChatB();
+      savedSessions.length = 0;
+      await act(async () => {
+        // the guard sends the kill before suspendScope's synthetic done
+        onMessage({ type: 'load_guard', id: 'lg-kill-1', projectPath: PROJECT_PATH, scope: 'session-A', provider: 'claude', loadGuard: agentKill });
+        onMessage({ type: 'done', projectPath: PROJECT_PATH, scope: 'session-A', turnSeq: null });
+      });
+      await waitFor(() => expect(savedSessions.some(
+        session => session.id === 'session-A' && session.messages.some(m => m.id === 'lg-kill-1' && m.loadGuard?.kind === 'killed'),
+      )).toBe(true));
+    });
+
+    it('a kill with no done after it shows once after selecting the chat', async () => {
+      const onMessage = await openChatB();
+      await act(async () => {
+        onMessage({ type: 'load_guard', id: 'lg-kill-2', projectPath: PROJECT_PATH, scope: 'session-A', provider: 'claude', loadGuard: commandKill });
+        onMessage({ type: 'load_guard', id: 'lg-kill-2', projectPath: PROJECT_PATH, scope: 'session-A', provider: 'claude', loadGuard: commandKill });
+      });
+      await act(async () => { fireEvent.click(screen.getByText('Chat A')); });
+      await waitFor(() => expect(chatPanelPropsLog.at(-1)?.claudeScope).toBe('session-A'));
+      const shown = (chatPanelPropsLog.at(-1)?.initialMessages ?? []) as ChatMessage[];
+      expect(shown.filter(m => m.id === 'lg-kill-2')).toHaveLength(1);
+      expect(shown.find(m => m.id === 'lg-kill-2')).toMatchObject({ role: 'system', loadGuard: commandKill });
+    });
+  });
+
   it('does not treat a scoped Claude session id as a Codex thread id', async () => {
     sessionA.aiProvider = 'claude';
     render(<App />);

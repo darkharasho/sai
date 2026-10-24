@@ -11,6 +11,7 @@ import { useSaiAnimationPref } from './useSaiAnimationPref';
 import { markRevealed } from './revealRegistry';
 import { parseToolResultBlocks } from '../../lib/toolResultContent';
 import { registerChatListener, unregisterChatListener, takeBufferedMessages, reconcileDrainedMessages } from '../../lib/chatFrameGate';
+import { loadGuardCard } from '../../lib/loadGuardBuffer';
 import { buildPendingQuestionAnswer } from '../../lib/pendingQuestionAnswer';
 import { normalizeSlashCommands, type SlashCommandInfo } from '../../lib/slashCommands';
 import WaitingIndicator from './WaitingIndicator';
@@ -876,16 +877,17 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
         if (msg.provider !== aiProvider) return;
         if (msg.projectPath !== '*' && msg.projectPath !== projectPath) return;
         if (msg.scope !== '*' && msg.scope !== expectedScope) return;
-        if (ev?.kind !== 'note' && ev?.kind !== 'killed') return;
+        const card = loadGuardCard(msg);
+        if (!card) return;
         flushStreamingText();
         // A killed agent's process dies mid-turn: its crash error is expected
         // noise. Swallow errors for a while and end the turn as a normal done.
         if (ev.kind === 'killed' && ev.unitKind === 'agent') {
           loadGuardKillRef.current = { until: Date.now() + LOAD_GUARD_ERROR_QUIET_MS, ended: false };
         }
-        const ts = Date.now();
-        setMessages(prev => [...prev, { id: `load-guard-${ts}-${prev.length}`, role: 'system', content: '', timestamp: ts, loadGuard: ev }]);
-        // The kill's own done may already have flushed; hand the card to the
+        // Deduped by id: App may have buffered this card in the mount gap.
+        setMessages(prev => (prev.some(m => m.id === card.id) ? prev : [...prev, card]));
+        // A command/service kill has no done of its own; hand the card to the
         // parent so the unmount/quit flushes persist it.
         flushMessagesToParent();
         return;
