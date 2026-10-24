@@ -2,6 +2,9 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { ChevronDown, CornerLeftUp } from 'lucide-react';
 import { motion, AnimatePresence, LayoutGroup } from 'motion/react';
 import { setFlipRect } from './flipRegistry';
+import { useLoadGuard } from '../../hooks/useLoadGuard';
+import LoadGuardPill from './LoadGuardPill';
+import LoadGuardBanner from './LoadGuardBanner';
 import ThinkingAnimation from '../ThinkingAnimation';
 import SaiLogo from '../SaiLogo';
 import { SPRING, DISTANCE, EASING, useReducedMotionTransition } from './motion';
@@ -2190,7 +2193,20 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
     }]);
   }, [setMessages]);
 
+  const loadGuard = useLoadGuard();
+  // Only an enabled, paused guard holds sends back; everything else is unchanged.
+  const loadPaused = loadGuard.enabled && loadGuard.paused;
+  const loadPausedRef = useRef(loadPaused);
+  loadPausedRef.current = loadPaused;
+  // Set by "send now" so an explicit user override isn't re-queued while paused.
+  const bypassPauseRef = useRef(false);
+
   const handleSend = async (text: string, images?: string[]) => {
+    if (loadPausedRef.current && !bypassPauseRef.current && sessionId && onQueueAdd) {
+      onQueueAdd(sessionId, text, text, images);
+      return;
+    }
+    bypassPauseRef.current = false;
     // Handle built-in commands locally
     if (import.meta.env.DEV && text.startsWith('/fake-error')) {
       handleFakeError(text);
@@ -2385,11 +2401,13 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
       else if (aiProvider === 'codex') window.sai.codexStop?.(projectPath, claudeScope);
       else window.sai.claudeStop?.(projectPath, claudeScope);
     }
+    bypassPauseRef.current = true;
     handleSend(item.fullText, item.images);
   };
 
   const prevStreamingRef = useRef(false);
   const prevQueueLenRef = useRef(messageQueue.length);
+  const prevLoadPausedRef = useRef(loadPaused);
   const suppressNextDrainRef = useRef(false);
   const drainPendingRef = useRef(false);
   const turnStartedAtRef = useRef<number | null>(null);
@@ -2408,6 +2426,8 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
     const prevQueueLen = prevQueueLenRef.current;
     prevStreamingRef.current = isStreaming;
     prevQueueLenRef.current = messageQueue.length;
+    const resumedWithQueue = prevLoadPausedRef.current && !loadPaused && messageQueue.length > 0;
+    prevLoadPausedRef.current = loadPaused;
 
     const turnJustEnded = wasStreaming && !isStreaming;
     // Item(s) appeared while we were already settled and idle.
@@ -2448,7 +2468,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
       }
     }
 
-    if (!isStreaming && (turnJustEnded || queueGrewWhileIdle)) {
+    if (!isStreaming && !loadPaused && (turnJustEnded || queueGrewWhileIdle || resumedWithQueue)) {
       // suppressNextDrainRef is set right before an interrupting stop (bypass /
       // send-now). It must only ever consume the turn-end edge it was set for —
       // not a queue-grew-while-idle wake — otherwise it could swallow an
@@ -2482,7 +2502,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
         }, 8000);
       }
     }
-  }, [isStreaming, messageQueue]);
+  }, [isStreaming, messageQueue, loadPaused]);
 
   // Unmount-only: a pending queue-drain send must not fire into an unmounted
   // panel. Not cleared on isStreaming changes — that would drop a message the
@@ -2494,6 +2514,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
 
   return (
     <div className="chat-panel">
+      <LoadGuardBanner state={loadGuard} />
       <motion.div
         className="pinned-prompt-bar"
         layoutId={pinnedUserMessage ? `pinned-${pinnedUserMessage.id}` : undefined}
@@ -2548,6 +2569,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
             </div>
           ) : (
             <div className="chat-conversation-header">
+              <LoadGuardPill state={loadGuard} />
               {conversationHeaderVisual ? (
                 conversationHeaderVisual
               ) : (
@@ -2703,6 +2725,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
             slashCommands={slashCommands}
             onSlashRefresh={refreshSlashCommands}
             onQueue={handleQueue}
+            sendsQueued={loadPaused}
             queueCount={messageQueue.length}
             pendingApproval={pendingApproval}
             pendingSudoPrompt={pendingSudoPrompt}
