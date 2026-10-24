@@ -31,7 +31,7 @@ export interface LoadGuardDeps {
   /** app.getAppMetrics() */
   appPids(): Set<number>;
   terminalPids(): Set<number>;
-  signaller: Pick<Signaller, 'freeze' | 'thawAll' | 'killTree' | 'frozenCount'>;
+  signaller: Pick<Signaller, 'freeze' | 'thawAll' | 'killTree' | 'frozenCount' | 'isFrozen'>;
   /** webContents.send('loadGuard:state') */
   broadcastState(s: LoadGuardPublicState): void;
   /** emitChatMessage({ type: 'load_guard', ... }) */
@@ -58,6 +58,8 @@ const GROWTH_LOOKBACK_MS = 60_000;
 const MAX_STALE_MS = 15_000;
 const SNAPSHOT_MS = 120_000;
 const CLK_TCK = 100;
+const RANK: Record<Level, number> = { normal: 0, warning: 1, critical: 2 };
+const EMPTY_CLASSIFIED: Classified = { units: [], saiAiKb: 0, saiAppKb: 0, top: [], game: null };
 
 let current: LoadGuard | null = null;
 
@@ -97,6 +99,9 @@ export class LoadGuard {
   private readonly notes = new NoteBox();
   private timer: ReturnType<typeof setInterval> | null = null;
   private ticking = false;
+  private stopped = false;
+  /** bumped by stop/disable so an in-flight tick knows its reads predate the final thaw */
+  private epoch = 0;
   private lastBroadcast: string;
 
   constructor(private readonly deps: LoadGuardDeps) {
@@ -106,6 +111,7 @@ export class LoadGuard {
 
   start(): void {
     if (this.timer) return;
+    this.stopped = false;
     current = this;
     const run = () => {
       if (this.ticking) return; // previous tick still running (slow /proc, wedged read)
@@ -119,6 +125,8 @@ export class LoadGuard {
   stop(): void {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
+    this.stopped = true;
+    this.epoch++;
     if (current === this) current = null;
     this.thaw('stop');
   }
@@ -130,6 +138,7 @@ export class LoadGuard {
     this.enabled = s.enabled;
     this.autoKill = s.autoKill;
     if (!s.enabled) {
+      this.epoch++;
       this.thaw('disabled');
       // A re-enable starts from a clean slate, not a stale episode.
       this.level = { level: 'normal', since: this.deps.now(), calmSince: null, calmPeak: null };
@@ -168,9 +177,11 @@ export class LoadGuard {
   }
 
   takeNote(provider: Provider, projectPath: string, scope: string): string | null {
-    const text = this.notes.take(provider, projectPath, scope, this.deps.now());
-    if (text) this.deps.emitChat(projectPath, scope, provider, { kind: 'note', text });
-    return text;
+    const { kill, load } = this.notes.takeParts(provider, projectPath, scope, this.deps.now());
+    // Kill notes already show as the killed card (toldAi); only the load note gets a chat callout (R12).
+    if (load) this.deps.emitChat(projectPath, scope, provider, { kind: 'note', text: load });
+    const out = load ? [...kill, load] : kill;
+    return out.length ? out.join('\n') : null;
   }
 
   /** One sample+decide pass. Never throws; on a read error the level and signals are left alone. */
@@ -185,47 +196,63 @@ export class LoadGuard {
   private async tickInner(): Promise<void> {
     const d = this.deps;
     const now = d.now();
+    if (this.stopped) return;
     if (!this.enabled) {
       this.retryThaw();
       return;
     }
     this.pollGpu(now);
+    const epoch = this.epoch;
+    // stop()/disable during an await already thawed: nothing after it may commit or signal.
+    const aborted = () => this.stopped || !this.enabled || epoch !== this.epoch;
 
-    // --- gather (anything thrown here leaves all state untouched) ---
+    // --- gather: nothing below mutates state until the commit ---
     const sys = await d.readSystem();
+    if (aborted()) return;
     const sample: SystemSample = { ...sys, ts: now, gpu: this.gpu };
     const swapUsedKb = sample.swapTotalKb - sample.swapFreeKb;
     const swapRef = this.history.swapUsedKbAt(now - SWAP_LOOKBACK_MS, MAX_STALE_MS);
     const raw = d.fake ?? rawLevel(sample, swapRef);
     const prev = this.level.level;
-    const next = stepLevel(this.level, raw, now);
-    const changed = next.level !== prev;
-    const scanDue = changed || next.level !== 'normal' || now - this.lastScanAt >= SCAN_MS_NORMAL - SLACK_MS;
+    let next = stepLevel(this.level, raw, now);
+    const scanDue = next.level !== prev || next.level !== 'normal' || now - this.lastScanAt >= SCAN_MS_NORMAL - SLACK_MS;
     let procs: ProcInfo[] | null = null;
     let c: Classified | null = null;
     if (scanDue) {
-      procs = await d.readProcs();
-      c = classify(procs, {
-        instance: d.instance,
-        appPids: d.appPids(),
-        terminalPids: d.terminalPids(),
-        clockTicksPerSec: d.clockTicksPerSec ?? CLK_TCK,
-        bootTimeSec: d.bootTimeSec,
-        nowSec: now / 1000,
-      });
+      try {
+        procs = await d.readProcs();
+      } catch (e) {
+        // Escalating, or acting at critical, needs this tick's scan; calming down never does.
+        if (RANK[next.level] > RANK[prev]) throw e;
+        d.devlog('scan_error', { error: String((e as Error)?.message ?? e) });
+      }
+      if (aborted()) return;
+      if (procs) {
+        c = classify(procs, {
+          instance: d.instance,
+          appPids: d.appPids(),
+          terminalPids: d.terminalPids(),
+          clockTicksPerSec: d.clockTicksPerSec ?? CLK_TCK,
+          bootTimeSec: d.bootTimeSec,
+          nowSec: now / 1000,
+        });
+      }
     }
-
-    // --- commit ---
-    this.sample = sample;
-    this.level = next;
+    const changed = next.level !== prev;
     const memUsedPct = pct(sample.memTotalKb - sample.memAvailableKb, sample.memTotalKb);
-    if (c) {
-      this.classified = c;
-      this.lastScanAt = now;
-      this.lastUnitSizes = c.units.map(u => ({ rootPid: u.rootPid, startTicks: u.startTicks, sizeKb: u.sizeKb }));
-      this.saiCaused = isSaiFault(sample, c, (rootPid, startTicks) =>
-        this.history.unitSizeAt(now - GROWTH_LOOKBACK_MS, rootPid, startTicks, MAX_STALE_MS));
+    const saiCaused = c
+      ? isSaiFault(sample, c, (rootPid, startTicks) =>
+        this.history.unitSizeAt(now - GROWTH_LOOKBACK_MS, rootPid, startTicks, MAX_STALE_MS))
+      : this.saiCaused;
+    let note: string | null = null;
+    if (changed && next.level === 'warning') {
+      note = warningNote(sample, c ?? this.classified ?? EMPTY_CLASSIFIED, swapRef !== null && swapUsedKb > swapRef);
+    } else if (changed && next.level === 'normal') {
+      note = normalNote();
     }
+    const unitSizes = c
+      ? c.units.map(u => ({ rootPid: u.rootPid, startTicks: u.startTicks, sizeKb: u.sizeKb }))
+      : this.lastUnitSizes;
     this.history.push({
       ts: now,
       memUsedPct,
@@ -234,25 +261,32 @@ export class LoadGuard {
       level: next.level,
       top: c ? c.top : null,
       // carried forward between scans so 60s-ago lookups land on a real size
-      unitSizes: this.lastUnitSizes,
+      unitSizes,
     });
 
+    // --- commit ---
+    this.sample = sample;
+    this.level = next;
+    this.saiCaused = saiCaused;
+    this.lastUnitSizes = unitSizes;
+    if (c) {
+      this.classified = c;
+      this.lastScanAt = now;
+    }
     let thawed = false;
+    if (changed && prev === 'critical') {
+      // First, so nothing after it can skip the thaw.
+      this.override = false;
+      this.recoveredAt = now;
+      this.thaw('recovered');
+      thawed = true;
+    }
     if (changed) {
       d.devlog('state', { from: prev, to: next.level, memUsedPct, psi: { some10: sample.psiMemSome10, full10: sample.psiMemFull10 } });
       if (next.level === 'critical') {
         d.devlog('critical_snapshot', { top: c?.top ?? [], history: this.history.summary(SNAPSHOT_MS) });
       }
-      if (next.level === 'warning' && c) {
-        this.notes.postAll(warningNote(sample, c, swapRef !== null && swapUsedKb > swapRef), now);
-      }
-      if (next.level === 'normal') this.notes.postAll(normalNote(), now);
-      if (prev === 'critical') {
-        this.override = false;
-        this.recoveredAt = now;
-        this.thaw('recovered');
-        thawed = true;
-      }
+      if (note) this.notes.postAll(note, now);
     }
 
     if (next.level === 'critical' && procs && c) {
@@ -293,14 +327,14 @@ export class LoadGuard {
         const st = ticks.get(pid);
         if (st === undefined || seen.has(pid)) continue;
         seen.add(pid);
-        const key = `${pid}:${st}`;
-        if (this.frozenKeys.has(key)) continue;
-        this.frozenKeys.add(key);
+        if (this.frozenKeys.has(`${pid}:${st}`)) continue;
         fresh.push({ pid, startTicks: st });
       }
     }
     if (fresh.length === 0) return;
     const count = this.deps.signaller.freeze(fresh);
+    // Only pids actually stopped; a refused SIGSTOP is retried next tick.
+    for (const p of fresh) if (this.deps.signaller.isFrozen(p.pid)) this.frozenKeys.add(`${p.pid}:${p.startTicks}`);
     this.deps.devlog('freeze', { requested: fresh.length, count, pids: fresh.map(p => p.pid) });
   }
 
@@ -331,17 +365,21 @@ export class LoadGuard {
     });
   }
 
-  private thaw(reason: string): void {
+  private thaw(reason: string, quietIfUnchanged = false): void {
+    const sig = this.deps.signaller;
+    const before = sig.frozenCount();
     this.frozenKeys.clear();
-    const count = this.deps.signaller.thawAll();
-    if (count > 0 || this.deps.signaller.frozenCount() > 0) {
-      this.deps.devlog('thaw', { reason, count, stillFrozen: this.deps.signaller.frozenCount() });
+    const count = sig.thawAll();
+    const after = sig.frozenCount();
+    if (quietIfUnchanged && after === before) return;
+    if (count > 0 || after > 0 || before > 0) {
+      this.deps.devlog('thaw', { reason, count, stillFrozen: after });
     }
   }
 
   /** SIGCONT can fail; the signaller keeps those pids, so keep retrying while calm. */
   private retryThaw(): void {
-    if (this.deps.signaller.frozenCount() > 0) this.thaw('retry');
+    if (this.deps.signaller.frozenCount() > 0) this.thaw('retry', true);
   }
 
   private maybeBroadcast(): void {

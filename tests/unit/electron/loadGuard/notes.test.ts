@@ -93,6 +93,15 @@ describe('NoteBox', () => {
     b.postTo({ provider: 'claude', projectPath: '/p', scope: '*' }, 'kill', 1);
     expect(b.take('claude', '/p', 'a', 2)).toBe('kill\nload');
   });
+  it('takeParts separates kill notes from the load note, once per scope', () => {
+    const b = new NoteBox();
+    b.postAll('load', 0);
+    b.postTo({ provider: 'claude', projectPath: '/p', scope: '*' }, 'kill', 1);
+    expect(b.takeParts('claude', '/p', 'a', 2)).toEqual({ kill: ['kill'], load: 'load' });
+    expect(b.takeParts('claude', '/p', 'a', 3)).toEqual({ kill: [], load: null });
+    b.postTo({ provider: 'claude', projectPath: '/p', scope: 'b' }, 'kill2', 4);
+    expect(b.takeParts('claude', '/p', 'b', 5)).toEqual({ kill: ['kill', 'kill2'], load: 'load' });
+  });
   it('drops notes older than 10 minutes', () => {
     const b = new NoteBox();
     b.postAll('x', 0);

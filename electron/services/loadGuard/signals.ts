@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import path from 'node:path';
 import type { AiUnit } from './types';
 
 export interface SignalDeps {
@@ -36,6 +37,50 @@ export function defaultSignalDeps(persistPath: string): SignalDeps {
     startTicksOf: pid => readStartTicks(pid),
     persistPath,
   };
+}
+
+const LEGACY_FROZEN_FILE = 'loadguard-frozen.json';
+const FROZEN_FILE_RE = /^loadguard-frozen-(\d+)-(\d+)\.json$/;
+
+/** Per-instance persist file, keyed by the owner's pid and start ticks so a second SAI never shares it. */
+export function frozenFileName(ownerPid: number, ownerStartTicks: number): string {
+  return `loadguard-frozen-${ownerPid}-${ownerStartTicks}.json`;
+}
+
+/**
+ * Boot-time recovery for every frozen-pid file whose owning SAI is gone (crashed, or the
+ * legacy shared name): SIGCONT what it lists, then delete it. A live instance's file is never
+ * touched. A file with a refused SIGCONT is kept so the next boot retries. Never throws.
+ */
+export function recoverOrphanedFrozenFiles(
+  dir: string,
+  deps: Pick<SignalDeps, 'kill' | 'startTicksOf'>,
+): { resumed: number; files: number } {
+  let names: string[];
+  try {
+    names = fs.readdirSync(dir);
+  } catch {
+    return { resumed: 0, files: 0 };
+  }
+  let resumed = 0;
+  let files = 0;
+  for (const name of names) {
+    const m = FROZEN_FILE_RE.exec(name);
+    if (!m && name !== LEGACY_FROZEN_FILE) continue;
+    if (m) {
+      let ownerTicks: number | null;
+      try { ownerTicks = deps.startTicksOf(Number(m[1])); } catch { ownerTicks = null; }
+      if (ownerTicks === Number(m[2])) continue; // owner still running
+    }
+    const file = path.join(dir, name);
+    const s = new Signaller({ ...deps, persistPath: file });
+    resumed += s.recoverFromCrash();
+    files++;
+    if (s.frozenCount() === 0) {
+      try { fs.unlinkSync(file); } catch { /* already gone */ }
+    }
+  }
+  return { resumed, files };
 }
 
 /** Freezes, thaws and kills SAI-owned processes. Never throws; every signal is pid-reuse checked. */
@@ -147,6 +192,10 @@ export class Signaller {
     }
     this.persist();
     return count;
+  }
+
+  isFrozen(pid: number): boolean {
+    return this.frozen.has(pid);
   }
 
   frozenCount(): number {

@@ -3,6 +3,7 @@ import { app, BrowserWindow, ipcMain } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
+import { getLoadGuard } from './loadGuard';
 
 /**
  * Locate the update electron-updater has already downloaded and verified into
@@ -211,6 +212,8 @@ export function registerUpdater(mainWindow: BrowserWindow) {
       void installAppImageUpdateAtomic()
         .then((target) => {
           if (target) {
+            // app.exit skips before-quit: never leave SAI's processes SIGSTOPped.
+            try { getLoadGuard()?.stop(); } catch { /* noop */ }
             app.relaunch({ execPath: target });
             app.exit(0);
           } else {

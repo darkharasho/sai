@@ -70,24 +70,30 @@ export class NoteBox {
     this.targeted.push({ text, at: now, target: tag, seen: new Set() });
   }
 
-  take(provider: Provider, projectPath: string, scope: string, now: number): string | null {
+  /** Pending notes for this scope, split so callers can tell a load note from kill notes. Marks them seen. */
+  takeParts(provider: Provider, projectPath: string, scope: string, now: number): { kill: string[]; load: string | null } {
     this.targeted = this.targeted.filter(n => now - n.at <= NOTE_TTL_MS);
     if (this.loadNote && now - this.loadNote.at > NOTE_TTL_MS) this.loadNote = null;
     const key = `${provider}|${normPath(projectPath)}|${scope}`;
-    const out: string[] = [];
-    const consider = (n: Note) => {
-      if (n.seen.has(key)) return;
+    const consider = (n: Note): boolean => {
+      if (n.seen.has(key)) return false;
       const t = n.target;
       if (t) {
-        if (t.provider !== provider) return;
-        if (t.projectPath !== '*' && normPath(t.projectPath) !== normPath(projectPath)) return;
-        if (t.scope !== '*' && t.scope !== scope) return;
+        if (t.provider !== provider) return false;
+        if (t.projectPath !== '*' && normPath(t.projectPath) !== normPath(projectPath)) return false;
+        if (t.scope !== '*' && t.scope !== scope) return false;
       }
       n.seen.add(key);
-      out.push(n.text);
+      return true;
     };
-    for (const n of this.targeted) consider(n);
-    if (this.loadNote) consider(this.loadNote);
+    const kill = this.targeted.filter(consider).map(n => n.text);
+    const load = this.loadNote && consider(this.loadNote) ? this.loadNote.text : null;
+    return { kill, load };
+  }
+
+  take(provider: Provider, projectPath: string, scope: string, now: number): string | null {
+    const { kill, load } = this.takeParts(provider, projectPath, scope, now);
+    const out = load ? [...kill, load] : kill;
     return out.length ? out.join('\n') : null;
   }
 }

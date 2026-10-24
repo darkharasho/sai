@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, it, expect } from 'vitest';
-import { Signaller, readStartTicks } from '../../../../electron/services/loadGuard/signals';
+import { Signaller, readStartTicks, recoverOrphanedFrozenFiles, frozenFileName } from '../../../../electron/services/loadGuard/signals';
 
 // SAFETY: only a fake kill and an in-memory fs are ever used here.
 function setup(live: Record<number, number>, initialFile?: string) {
@@ -181,5 +181,65 @@ describe('readStartTicks', () => {
   });
   it('returns null for a missing pid', () => {
     expect(readStartTicks(999999999)).toBeNull();
+  });
+});
+
+describe('recoverOrphanedFrozenFiles', () => {
+  // SAFETY: fake kill and fake start ticks; only a tmpdir is touched.
+  function dir() {
+    return fs.mkdtempSync(path.join(os.tmpdir(), 'lg-orphans-'));
+  }
+  const write = (d: string, name: string, list: unknown) => fs.writeFileSync(path.join(d, name), JSON.stringify(list));
+
+  it('names files per instance', () => {
+    expect(frozenFileName(4242, 777)).toBe('loadguard-frozen-4242-777.json');
+  });
+
+  it('leaves a live owner\'s file alone, recovers and deletes a dead owner\'s file and the legacy file', () => {
+    const d = dir();
+    try {
+      write(d, frozenFileName(10, 1000), [{ pid: 50, startTicks: 5 }]); // live owner
+      write(d, frozenFileName(20, 2000), [{ pid: 60, startTicks: 6 }, { pid: 61, startTicks: 99 }]); // dead owner
+      write(d, 'loadguard-frozen.json', [{ pid: 70, startTicks: 7 }]); // legacy: always orphaned
+      write(d, 'unrelated.json', [{ pid: 80, startTicks: 8 }]);
+      const live: Record<number, number> = { 10: 1000, 20: 2001 /* pid reused */, 50: 5, 60: 6, 61: 1, 70: 7, 80: 8 };
+      const calls: Array<[number, string]> = [];
+      const r = recoverOrphanedFrozenFiles(d, { kill: (pid, sig) => { calls.push([pid, sig]); }, startTicksOf: pid => live[pid] ?? null });
+      expect(calls.sort()).toEqual([[60, 'SIGCONT'], [70, 'SIGCONT']]);
+      expect(r).toEqual({ resumed: 2, files: 2 });
+      expect(fs.readdirSync(d).sort()).toEqual([frozenFileName(10, 1000), 'unrelated.json'].sort());
+      expect(JSON.parse(fs.readFileSync(path.join(d, frozenFileName(10, 1000)), 'utf8'))).toEqual([{ pid: 50, startTicks: 5 }]);
+    } finally {
+      fs.rmSync(d, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps an orphan file whose SIGCONT was refused, for the next boot', () => {
+    const d = dir();
+    try {
+      write(d, frozenFileName(20, 2000), [{ pid: 60, startTicks: 6 }]);
+      const r = recoverOrphanedFrozenFiles(d, {
+        kill: () => { throw Object.assign(new Error('EPERM'), { code: 'EPERM' }); },
+        startTicksOf: pid => (pid === 60 ? 6 : null),
+      });
+      expect(r.resumed).toBe(0);
+      expect(JSON.parse(fs.readFileSync(path.join(d, frozenFileName(20, 2000)), 'utf8'))).toEqual([{ pid: 60, startTicks: 6 }]);
+    } finally {
+      fs.rmSync(d, { recursive: true, force: true });
+    }
+  });
+
+  it('never throws on a missing dir', () => {
+    expect(recoverOrphanedFrozenFiles('/nonexistent-lg-dir', { kill: () => {}, startTicksOf: () => null })).toEqual({ resumed: 0, files: 0 });
+  });
+});
+
+describe('Signaller.isFrozen', () => {
+  it('reports only pids actually stopped', () => {
+    const { s, setKill } = setup({ 101: 10, 102: 20 });
+    setKill((pid) => { if (pid === 102) throw Object.assign(new Error('EPERM'), { code: 'EPERM' }); });
+    s.freeze([{ pid: 101, startTicks: 10 }, { pid: 102, startTicks: 20 }]);
+    expect(s.isFrozen(101)).toBe(true);
+    expect(s.isFrozen(102)).toBe(false);
   });
 });

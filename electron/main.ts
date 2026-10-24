@@ -85,7 +85,7 @@ import { destroyAll, startSuspendTimer, stopSuspendTimer, getAll, remove, suspen
 import { initFocusTracking, setActiveWorkspace } from './services/notify';
 import { devlog, devlogEnabled, devlogFor, devlogPath } from './services/devlog';
 import { LoadGuard, inactiveState } from './services/loadGuard';
-import { Signaller, defaultSignalDeps } from './services/loadGuard/signals';
+import { Signaller, defaultSignalDeps, frozenFileName, readStartTicks, recoverOrphanedFrozenFiles } from './services/loadGuard/signals';
 import { readBootTimeSec, readGpu, readProcesses, readSystemSample } from './services/loadGuard/procReader';
 import { OverlayManager } from './services/overlay';
 import { registerGithubAuthHandlers } from './services/github-auth';
@@ -534,11 +534,14 @@ function createWindow() {
 
   registerTerminalHandlers(mainWindow);
   if (process.platform === 'linux' && !loadGuard) {
-    const signaller = new Signaller(defaultSignalDeps(path.join(app.getPath('userData'), 'loadguard-frozen.json')));
-    // Resume whatever a crashed previous run left stopped. Once, before any freeze:
-    // it resets the frozen set.
-    const resumed = signaller.recoverFromCrash();
-    if (resumed > 0) devlog('loadguard', 'crash_recovered', { count: resumed });
+    const userData = app.getPath('userData');
+    // Resume whatever a crashed SAI (any instance, or the legacy shared file) left stopped.
+    // Live instances' files are skipped. Once, before this instance freezes anything.
+    const orphans = recoverOrphanedFrozenFiles(userData, defaultSignalDeps(''));
+    if (orphans.files > 0) devlog('loadguard', 'crash_recovered', orphans);
+    // Per-instance file, so a second SAI never resumes or overwrites our frozen set.
+    const selfTicks = readStartTicks(process.pid) ?? 0;
+    const signaller = new Signaller(defaultSignalDeps(path.join(userData, frozenFileName(process.pid, selfTicks))));
     const fake = process.env.SAI_LOAD_GUARD_FAKE;
     loadGuard = new LoadGuard({
       now: () => Date.now(),

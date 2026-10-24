@@ -43,6 +43,7 @@ function fakeSignaller() {
     thawAll: vi.fn(() => { const n = frozen.size; frozen.clear(); return n; }),
     killTree: vi.fn((_u: { pids: number[] }, _t: Map<number, number>) => 1),
     frozenCount: vi.fn(() => frozen.size),
+    isFrozen: vi.fn((pid: number) => frozen.has(pid)),
   };
 }
 
@@ -126,8 +127,10 @@ describe('LoadGuard', () => {
     await at(5000, CRITICAL(), big.filter(p => p.pid !== 101 && p.pid !== 102));
     expect(signaller.killTree).toHaveBeenCalledTimes(2);
     expect(signaller.killTree.mock.calls[1][0].pids).toEqual([103]);
-    // the AI is told about the kill on its next turn
+    // the AI is told about the kill on its next turn, but the chat already has the killed card (R12)
+    deps.emitChat.mockClear();
     expect(g.takeNote('claude', '/p', 's1')).toContain('SAI killed `vitest run`');
+    expect(deps.emitChat).not.toHaveBeenCalled();
   });
 
   it('calls onAgentKilled before killTree when the agent is the target', async () => {
@@ -338,5 +341,104 @@ describe('LoadGuard', () => {
     ]);
     expect(g.state()).toMatchObject({ saiAppHeavy: true, game: { name: 'Elden Ring', sizeKb: 9 * GiB }, memUsedPct: 50 });
     expect(g.topUsers()[0]).toMatchObject({ label: 'Elden Ring', owner: 'game' });
+  });
+
+  it('R12: takeNote returns kill notes plus the load note but emits only the load note', async () => {
+    const { g, deps, at } = setup();
+    await at(0, WARNING());
+    await at(2000, CRITICAL(), [proc(1, 0), proc(100, 1, { tag: tag() }), proc(101, 100, { cmd: 'vitest run', rssKb: 7 * GiB })]);
+    deps.emitChat.mockClear();
+    const text = g.takeNote('claude', '/p', 's1')!;
+    expect(text).toContain('SAI killed `vitest run`');
+    expect(text).toContain('[SAI system load: WARNING]');
+    expect(deps.emitChat).toHaveBeenCalledTimes(1);
+    expect(deps.emitChat.mock.calls[0][3]).toEqual({ kind: 'note', text: expect.stringMatching(/^\[SAI system load: WARNING\]/) });
+    expect(deps.emitChat.mock.calls[0][3].text).not.toContain('SAI killed');
+  });
+
+  const lastSignal = (s: ReturnType<typeof fakeSignaller>) => {
+    const order = [
+      ...s.freeze.mock.invocationCallOrder.map(o => ['freeze', o] as const),
+      ...s.thawAll.mock.invocationCallOrder.map(o => ['thawAll', o] as const),
+      ...s.killTree.mock.invocationCallOrder.map(o => ['killTree', o] as const),
+    ].sort((a, b) => a[1] - b[1]);
+    return order[order.length - 1]?.[0];
+  };
+
+  it('stop() during an in-flight scan: no freeze afterwards, thawAll is the last signal', async () => {
+    const { g, deps, signaller, env } = setup();
+    let release!: (p: ProcInfo[]) => void;
+    deps.readProcs.mockImplementationOnce(() => new Promise(r => { release = r; }));
+    env.sys = CRITICAL();
+    const pending = g.tick();
+    await vi.waitFor(() => expect(deps.readProcs).toHaveBeenCalled());
+    g.stop();
+    release(smallSai());
+    await pending;
+    expect(signaller.freeze).not.toHaveBeenCalled();
+    expect(lastSignal(signaller)).toBe('thawAll');
+    expect(g.state().level).toBe('normal');
+  });
+
+  it('disable during an in-flight scan: no freeze afterwards, thawAll is the last signal', async () => {
+    const { g, deps, signaller, env } = setup();
+    let release!: (p: ProcInfo[]) => void;
+    deps.readProcs.mockImplementationOnce(() => new Promise(r => { release = r; }));
+    env.sys = CRITICAL();
+    const pending = g.tick();
+    await vi.waitFor(() => expect(deps.readProcs).toHaveBeenCalled());
+    g.applySettings({ enabled: false, autoKill: true });
+    release(smallSai());
+    await pending;
+    expect(signaller.freeze).not.toHaveBeenCalled();
+    expect(signaller.killTree).not.toHaveBeenCalled();
+    expect(lastSignal(signaller)).toBe('thawAll');
+  });
+
+  it('M3: leaving critical does not need a successful scan', async () => {
+    const { g, deps, signaller, at } = setup();
+    await at(0, CRITICAL());
+    deps.readProcs.mockRejectedValue(new Error('EMFILE'));
+    for (let t = 2000; t <= 30_000; t += 2000) await at(t, NORMAL());
+    expect(g.state().level).toBe('critical');
+    await at(32_000);
+    expect(g.state().level).toBe('normal');
+    expect(signaller.thawAll).toHaveBeenCalled();
+  });
+
+  it('M2: a pid whose SIGSTOP failed is retried on the next critical tick', async () => {
+    const { signaller, at } = setup();
+    signaller.freeze.mockImplementationOnce((ps) => { signaller.frozen.set(ps[0].pid, ps[0].startTicks); return 1; });
+    await at(0, CRITICAL());
+    const stopped = [...signaller.frozen.keys()];
+    expect(stopped).toHaveLength(1);
+    await at(2000);
+    expect(signaller.freeze).toHaveBeenCalledTimes(2);
+    expect(signaller.freeze.mock.calls[0][0].map(p => p.pid).sort()).toEqual([100, 101]);
+    // only the pid that was actually stopped is skipped
+    expect(signaller.freeze.mock.calls[1][0].map(p => p.pid)).toEqual([100, 101].filter(pid => !stopped.includes(pid)));
+  });
+
+  it('M2: freeze throwing records nothing and the tick does not throw', async () => {
+    const { signaller, at, devlogEvents } = setup();
+    signaller.freeze.mockImplementationOnce(() => { throw new Error('boom'); });
+    await expect(at(0, CRITICAL())).resolves.toBeUndefined();
+    expect(devlogEvents()).toContain('tick_error');
+    await at(2000);
+    expect(signaller.freeze).toHaveBeenCalledTimes(2);
+    expect(frozenPids(signaller)).toEqual([100, 100, 101, 101]);
+  });
+
+  it('M4: a retry thaw that changes nothing is not logged', async () => {
+    const { signaller, at, deps } = setup();
+    await at(0, CRITICAL());
+    signaller.thawAll.mockImplementation(() => 0);
+    for (let t = 2000; t <= 32_000; t += 2000) await at(t, NORMAL());
+    const thawLogs = () => deps.devlog.mock.calls.filter(c => c[0] === 'thaw').length;
+    const before = thawLogs();
+    await at(34_000);
+    await at(36_000);
+    expect(signaller.thawAll).toHaveBeenCalledTimes(3);
+    expect(thawLogs()).toBe(before);
   });
 });
