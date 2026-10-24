@@ -66,12 +66,11 @@ async function readProc(procRoot: string, pid: number): Promise<ProcInfo | null>
     const startTicks = Number(rest[19]);
     if (!Number.isFinite(ppid) || !Number.isFinite(startTicks)) return null;
 
-    const [status, cmdline, cgroupText, environ] = await Promise.all([
-      readTextOrEmpty(`${dir}/status`),
-      readTextOrEmpty(`${dir}/cmdline`),
-      readTextOrEmpty(`${dir}/cgroup`),
-      readTextOrEmpty(`${dir}/environ`),
-    ]);
+    // Sequential on purpose: worker count == max reads in flight.
+    const status = await readTextOrEmpty(`${dir}/status`);
+    const cmdline = await readTextOrEmpty(`${dir}/cmdline`);
+    const cgroupText = await readTextOrEmpty(`${dir}/cgroup`);
+    const environ = await readTextOrEmpty(`${dir}/environ`);
 
     const cgroupLine = cgroupText.split('\n').find(l => l.startsWith('0::'));
     let tag: ProcInfo['tag'] = null;
@@ -118,7 +117,7 @@ export async function readProcesses(procRoot = '/proc'): Promise<ProcInfo[]> {
 
 function defaultExec(cmd: string, args: string[], timeoutMs: number): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile(cmd, args, { timeout: timeoutMs, encoding: 'utf8' }, (err, stdout) => {
+    execFile(cmd, args, { timeout: timeoutMs, killSignal: 'SIGKILL', encoding: 'utf8' }, (err, stdout) => {
       if (err) reject(err);
       else resolve(stdout);
     });
@@ -127,13 +126,21 @@ function defaultExec(cmd: string, args: string[], timeoutMs: number): Promise<st
 
 export async function readGpu(
   exec: (cmd: string, args: string[], timeoutMs: number) => Promise<string> = defaultExec,
+  timeoutMs = GPU_TIMEOUT_MS,
 ): Promise<SystemSample['gpu']> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    const out = await exec(
-      'nvidia-smi',
-      ['--query-gpu=utilization.gpu,memory.used,memory.total', '--format=csv,noheader,nounits'],
-      GPU_TIMEOUT_MS,
-    );
+    // Race a hard timer: a process in uninterruptible sleep may ignore execFile's timeout.
+    const out = await Promise.race([
+      exec(
+        'nvidia-smi',
+        ['--query-gpu=utilization.gpu,memory.used,memory.total', '--format=csv,noheader,nounits'],
+        timeoutMs,
+      ),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('nvidia-smi timeout')), timeoutMs);
+      }),
+    ]);
     const line = out.split('\n').find(l => l.trim());
     if (!line) return null;
     const [util, used, total] = line.split(',').map(s => Number(s.trim()));
@@ -141,5 +148,7 @@ export async function readGpu(
     return { utilPct: util, vramUsedMb: used, vramTotalMb: total };
   } catch {
     return null;
+  } finally {
+    clearTimeout(timer);
   }
 }

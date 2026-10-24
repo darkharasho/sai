@@ -100,4 +100,8 @@ describe('procReader', () => {
     expect(await readGpu(async () => { throw new Error('ENOENT'); })).toBeNull();
     expect(await readGpu(async () => '\n')).toBeNull();
   });
+
+  it('resolves null when exec never settles', async () => {
+    expect(await readGpu(() => new Promise<string>(() => {}), 20)).toBeNull();
+  });
 });
