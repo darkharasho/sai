@@ -244,8 +244,88 @@ describe('Signaller freeze/thaw tree order', () => {
     const { s, events, log, polls } = withState(0, [200]);
     expect(s.freeze(chain)).toBe(4);
     expect(events.filter(e => e.startsWith('SIG'))).toEqual(['SIGSTOP:300', 'SIGSTOP:200', 'SIGSTOP:201', 'SIGSTOP:202']);
-    expect(log).toEqual([['freeze_parent_unconfirmed', { pids: [200] }]]);
-    expect(polls()).toBe(50);
+    expect(log).toEqual([['freeze_parent_unconfirmed', { pids: [200, 201], budgetSpent: true }]]);
+    expect(polls()).toBe(60);
+  });
+
+  it('one confirm budget per call: three never-confirming levels stay within it, then freeze unpolled, one devlog', () => {
+    const deep = [500, 501, 502, 503].map((pid, i) => ({ pid, startTicks: pid, ppid: i === 0 ? 1 : pid - 1 }));
+    const log: Array<[string, unknown]> = [];
+    let polls = 0;
+    const { s, calls } = setup({ 500: 500, 501: 501, 502: 502, 503: 503 }, undefined, {
+      stateOf: () => 'S', sleepMs: () => { polls++; }, log: (e, d) => { log.push([e, d]); },
+    });
+    expect(s.freeze(deep)).toBe(4);
+    expect(calls.map(c => c[0])).toEqual([500, 501, 502, 503]);
+    expect(polls).toBe(60);
+    expect(log).toEqual([['freeze_parent_unconfirmed', { pids: [500, 501, 502], budgetSpent: true }]]);
+  });
+
+  it('a D-state parent is not waited on', () => {
+    const log: Array<[string, unknown]> = [];
+    let polls = 0;
+    const { s } = setup(live, undefined, {
+      stateOf: pid => (pid === 200 ? 'D' : 'T'), sleepMs: () => { polls++; }, log: (e, d) => { log.push([e, d]); },
+    });
+    expect(s.freeze(chain)).toBe(4);
+    expect(polls).toBe(0);
+    expect(log).toEqual([['freeze_parent_unconfirmed', { pids: [200], budgetSpent: false }]]);
+  });
+
+  it('a refused parent defers its descendants to the next call; refused twice in a row, they freeze anyway', () => {
+    const { s, calls, setKill } = withState(0);
+    setKill((pid, sig) => {
+      if (pid === 200 && sig === 'SIGSTOP') throw Object.assign(new Error('x'), { code: 'EPERM' });
+    });
+    expect(s.freeze(chain)).toBe(1);
+    expect(calls).toEqual([[300, 'SIGSTOP'], [200, 'SIGSTOP']]);
+    expect([200, 201, 202].map(p => s.isFrozen(p))).toEqual([false, false, false]);
+    calls.length = 0;
+    // next tick offers the unfrozen pids again; 200 is refused a second time in a row
+    expect(s.freeze(chain.filter(p => p.pid !== 300))).toBe(2);
+    expect(calls).toEqual([[200, 'SIGSTOP'], [201, 'SIGSTOP'], [202, 'SIGSTOP']]);
+    expect([201, 202].map(p => s.isFrozen(p))).toEqual([true, true]);
+  });
+
+  it('a refused parent on a non-consecutive call defers again', () => {
+    const { s, calls, setKill } = withState(0);
+    let refuse = true;
+    setKill((pid, sig) => {
+      if (refuse && pid === 200 && sig === 'SIGSTOP') throw Object.assign(new Error('x'), { code: 'EPERM' });
+    });
+    s.freeze(chain);
+    refuse = false;
+    s.freeze([{ pid: 300, startTicks: 30, ppid: 1 }]); // an unrelated call in between resets the streak
+    refuse = true;
+    calls.length = 0;
+    s.freeze(chain.filter(p => p.pid !== 300));
+    expect(calls).toEqual([[200, 'SIGSTOP']]);
+  });
+
+  it('a refused descendant SIGCONT holds back its ancestors, then the retry thaws them bottom-up', () => {
+    const { s, calls, setKill } = withState(0);
+    s.freeze(chain);
+    calls.length = 0;
+    setKill((pid, sig) => {
+      if (pid === 202 && sig === 'SIGCONT') throw Object.assign(new Error('x'), { code: 'EPERM' });
+    });
+    expect(s.thawAll()).toBe(1);
+    expect(calls).toEqual([[202, 'SIGCONT'], [300, 'SIGCONT']]);
+    expect([200, 201, 202, 300].map(p => s.isFrozen(p))).toEqual([true, true, true, false]);
+    calls.length = 0;
+    setKill(() => {});
+    expect(s.thawAll()).toBe(3);
+    expect(calls).toEqual([[202, 'SIGCONT'], [201, 'SIGCONT'], [200, 'SIGCONT']]);
+  });
+
+  it('thaws across ticks: a child frozen on a later tick resumes before its parent', () => {
+    const { s, calls } = withState(0);
+    s.freeze([{ pid: 200, startTicks: 20, ppid: 100 }, { pid: 300, startTicks: 30, ppid: 1 }]);
+    s.freeze([{ pid: 201, startTicks: 21, ppid: 200 }]);
+    s.freeze([{ pid: 202, startTicks: 22, ppid: 201 }]);
+    calls.length = 0;
+    s.thawAll();
+    expect(calls.map(c => c[0])).toEqual([202, 201, 300, 200]);
   });
 
   it('a parent that exits mid-freeze counts as settled', () => {
@@ -278,7 +358,10 @@ describe('readProcState', () => {
 });
 
 // SAFETY: real signals, but only to a tiny `bash -c 'sleep; echo'` this test spawns itself.
-describe.skipIf(process.platform !== 'linux')('Signaller on a real bash -c wrapper', () => {
+// End-to-end HEALTH SMOKE, not the regression guard: an in-process back-to-back SIGSTOP lands
+// on bash before it can reap, so the pre-fix order passes here too. The deterministic guard
+// for R18 is the fake-/proc ordering suite above.
+describe.skipIf(process.platform !== 'linux')('Signaller on a real bash -c wrapper (health smoke)', () => {
   const childOf = (ppid: number): number | null => {
     for (const d of fs.readdirSync('/proc')) {
       if (!/^\d+$/.test(d)) continue;
@@ -385,6 +468,23 @@ describe('recoverOrphanedFrozenFiles', () => {
       });
       expect(r.resumed).toBe(0);
       expect(JSON.parse(fs.readFileSync(path.join(d, frozenFileName(20, 2000)), 'utf8'))).toEqual([{ pid: 60, startTicks: 6 }]);
+    } finally {
+      fs.rmSync(d, { recursive: true, force: true });
+    }
+  });
+
+  it('orders recovery by live /proc ppids, so an old descendants-first file still resumes leaves first', () => {
+    const d = dir();
+    try {
+      // pre-fix builds persisted the input order: descendants first, no ppid
+      write(d, frozenFileName(20, 2000), [{ pid: 62, startTicks: 2 }, { pid: 61, startTicks: 1 }, { pid: 60, startTicks: 0 }]);
+      const live: Record<number, number> = { 60: 0, 61: 1, 62: 2 };
+      const ppid: Record<number, number> = { 60: 1, 61: 60, 62: 61 };
+      const calls: number[] = [];
+      recoverOrphanedFrozenFiles(d, {
+        kill: pid => { calls.push(pid); }, startTicksOf: pid => live[pid] ?? null, ppidOf: pid => ppid[pid] ?? null,
+      });
+      expect(calls).toEqual([62, 61, 60]);
     } finally {
       fs.rmSync(d, { recursive: true, force: true });
     }
