@@ -2198,15 +2198,17 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
   const loadPaused = loadGuard.enabled && loadGuard.paused;
   const loadPausedRef = useRef(loadPaused);
   loadPausedRef.current = loadPaused;
-  // Set by "send now" so an explicit user override isn't re-queued while paused.
-  const bypassPauseRef = useRef(false);
+  const messageQueueRef = useRef(messageQueue);
+  messageQueueRef.current = messageQueue;
+  // Paused: hold a provider-bound send in the queue instead of dispatching.
+  const queueWhilePaused = (text: string, images?: string[]): boolean => {
+    if (!loadPausedRef.current || !sessionId || !onQueueAdd) return false;
+    onQueueAdd(sessionId, text, text, images);
+    pendingComposerRectRef.current = null;
+    return true;
+  };
 
   const handleSend = async (text: string, images?: string[]) => {
-    if (loadPausedRef.current && !bypassPauseRef.current && sessionId && onQueueAdd) {
-      onQueueAdd(sessionId, text, text, images);
-      return;
-    }
-    bypassPauseRef.current = false;
     // Handle built-in commands locally
     if (import.meta.env.DEV && text.startsWith('/fake-error')) {
       handleFakeError(text);
@@ -2278,6 +2280,8 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
       return;
     }
     if (text === '/compact' && aiProvider === 'claude') {
+      // /compact needs the live agent, so it waits out a pause like any send.
+      if (queueWhilePaused(text)) return;
       window.sai.claudeCompact(projectPath, permissionMode, effortLevel, modelChoice, claudeScope);
       pendingComposerRectRef.current = null;
       return;
@@ -2298,6 +2302,9 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
       ]);
       return;
     }
+
+    // Everything below dispatches to a provider: hold it while the load guard is paused.
+    if (queueWhilePaused(text, images)) return;
 
     // Bypass-queue-on-enter: when streaming AND the queue has items, plain
     // Enter signals "send this now" — interrupt the current turn first, then
@@ -2391,6 +2398,8 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
   const handleQueueSendNow = (id: string) => {
     const item = messageQueue.find(m => m.id === id);
     if (!item || !sessionId) return;
+    // Paused: leave it queued and don't interrupt the running turn.
+    if (loadPausedRef.current) return;
     onQueueRemove?.(sessionId, id);
     // Same semantics as bypass-queue-on-enter: interrupt the current turn and
     // dispatch immediately; the rest of the queue resumes draining afterwards.
@@ -2401,7 +2410,6 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
       else if (aiProvider === 'codex') window.sai.codexStop?.(projectPath, claudeScope);
       else window.sai.claudeStop?.(projectPath, claudeScope);
     }
-    bypassPauseRef.current = true;
     handleSend(item.fullText, item.images);
   };
 
@@ -2484,9 +2492,19 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
         const next = messageQueue[0];
         drainPendingRef.current = true;
         setDrainInFlight(true);
-        onQueueShift(sessionId);
         autoSendTimerRef.current = setTimeout(() => {
           autoSendTimerRef.current = null;
+          // A pause (or the user removing/reordering the head) inside the 300ms
+          // window: leave the item queued, in place, and release the drain. The
+          // resume edge picks it up. The shift happens here, not earlier, so
+          // there's nothing to put back.
+          if (loadPausedRef.current || messageQueueRef.current[0]?.id !== next.id) {
+            drainPendingRef.current = false;
+            setDrainInFlight(false);
+            if (drainBackstopRef.current) { clearTimeout(drainBackstopRef.current); drainBackstopRef.current = null; }
+            return;
+          }
+          onQueueShift(sessionId);
           handleSend(next.fullText, next.images);
         }, 300);
         // Safety: if the follow-up never produces a streaming_start (e.g. a spawn

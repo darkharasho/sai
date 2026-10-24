@@ -138,6 +138,28 @@ describe('ChatInput', () => {
   });
 
   describe('message queueing', () => {
+    it('sendsQueued: Enter queues via onQueue, shows the queued placeholder, respects the cap', () => {
+      const onQueue = vi.fn();
+      const onSend = vi.fn();
+      const { rerender } = render(
+        <ChatInput {...defaultProps} onSend={onSend} sendsQueued onQueue={onQueue} queueCount={0} />
+      );
+      expect(screen.getByText('Message… (queued until resume)')).toBeTruthy();
+      const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+      fireEvent.change(textarea, { target: { value: 'hold me' } });
+      fireEvent.keyDown(textarea, { key: 'Enter' });
+      expect(onQueue).toHaveBeenCalledWith('hold me', 'hold me', undefined, undefined);
+      expect(onSend).not.toHaveBeenCalled();
+      expect(textarea.value).toBe('');
+      // Full queue: nothing sent, text kept.
+      rerender(<ChatInput {...defaultProps} onSend={onSend} sendsQueued onQueue={onQueue} queueCount={5} />);
+      fireEvent.change(textarea, { target: { value: 'too many' } });
+      fireEvent.keyDown(textarea, { key: 'Enter' });
+      expect(onQueue).toHaveBeenCalledTimes(1);
+      expect(onSend).not.toHaveBeenCalled();
+      expect(textarea.value).toBe('too many');
+    });
+
     it('calls onQueue on Ctrl+Enter when streaming and queue not full', () => {
       const onQueue = vi.fn();
       render(

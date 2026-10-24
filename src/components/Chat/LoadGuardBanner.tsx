@@ -14,7 +14,7 @@ export default function LoadGuardBanner({ state }: { state: LoadGuardPublicState
 
   const toggle = async () => {
     if (users) { setUsers(null); return; }
-    setUsers((await window.sai.loadGuardTopUsers?.()) ?? []);
+    setUsers(await Promise.resolve(window.sai.loadGuardTopUsers?.()).then((u) => u ?? [], () => []));
   };
 
   return (

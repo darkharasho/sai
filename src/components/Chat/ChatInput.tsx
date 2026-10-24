@@ -825,6 +825,7 @@ export default function ChatInput({ projectPath, onSend, overlayControl, onBefor
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       if (sendingRef.current) return;
+      if (sendsQueued && queueWhilePaused()) return;
       const sendValue = value;
       if (sendValue.trim()) {
         sendingRef.current = true;
@@ -845,6 +846,25 @@ export default function ChatInput({ projectPath, onSend, overlayControl, onBefor
         requestAnimationFrame(() => { sendingRef.current = false; });
       }
     }
+  };
+
+  // Paused: queue the composer like a busy send. Returns true when it handled
+  // the Enter/click (including a full queue, which keeps the text, as Ctrl+Enter does).
+  const queueWhilePaused = (): boolean => {
+    const trimmed = value.trim();
+    if (!trimmed || !onQueue) return false;
+    if ((queueCount ?? 0) >= 5) return true;
+    const queueImages = contextItems.filter(c => c.type === 'image' && c.data).map(c => c.data!);
+    const attachments = {
+      images: queueImages.length,
+      files: contextItems.filter(c => c.type === 'file').length,
+      terminal: contextItems.some(c => c.type === 'terminal'),
+    };
+    const hasAttachments = attachments.images > 0 || attachments.files > 0 || attachments.terminal;
+    onQueue(trimmed, buildMessage(trimmed), queueImages.length > 0 ? queueImages : undefined, hasAttachments ? attachments : undefined);
+    setValue('');
+    setContextItems([]);
+    return true;
   };
 
   const handlePaste = (e: React.ClipboardEvent) => {
@@ -1526,6 +1546,7 @@ export default function ChatInput({ projectPath, onSend, overlayControl, onBefor
               className="send-btn"
               onClick={() => {
                 if (sendingRef.current) return;
+                if (sendsQueued && queueWhilePaused()) return;
                 if (value.trim()) {
                   sendingRef.current = true;
                   setHistory(prev => {
