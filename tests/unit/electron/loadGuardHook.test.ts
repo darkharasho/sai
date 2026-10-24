@@ -4,7 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const guard = vi.hoisted(() => ({ current: null as null | { takeNote: ReturnType<typeof vi.fn> } }));
 vi.mock('../../../electron/services/loadGuard/index', () => ({ getLoadGuard: () => guard.current }));
 
-import { buildLoadGuardHook, withLoadNote } from '../../../electron/services/loadGuard/hook';
+import { buildLoadGuardHook, withLoadNote, makeOnAgentKilled } from '../../../electron/services/loadGuard/hook';
 
 /** A guard holding one pending note: the first take returns it, later takes nothing. */
 function oneNote(note: string) {
@@ -57,9 +57,44 @@ describe('withLoadNote', () => {
     expect(guard.current.takeNote).toHaveBeenCalledWith('codex', '/p', 'chat');
   });
 
+  it('leaves a slash command untouched and keeps the note pending', () => {
+    guard.current = oneNote('LOAD NOTE');
+    expect(withLoadNote('claude', '/p', 'chat', '  /compact now')).toBe('  /compact now');
+    expect(guard.current.takeNote).not.toHaveBeenCalled();
+    expect(withLoadNote('claude', '/p', 'chat', 'next')).toBe('LOAD NOTE\n\nnext');
+  });
+
   it('returns the prompt unchanged with no guard or on error', () => {
     expect(withLoadNote('gemini', '/p', 'chat', 'x')).toBe('x');
     guard.current = { takeNote: vi.fn(() => { throw new Error('boom'); }) };
     expect(withLoadNote('kimi', '/p', 'chat', 'x')).toBe('x');
+  });
+});
+
+describe('makeOnAgentKilled', () => {
+  const tag = (over: Record<string, unknown> = {}) => ({ instance: 1, provider: 'claude', projectPath: '/p', scope: 'chat', ...over }) as any;
+
+  it('suspends a claude real scope and devlogs', () => {
+    const suspendScope = vi.fn();
+    const devlog = vi.fn();
+    makeOnAgentKilled(() => ({ suspendScope }), devlog)(tag());
+    expect(suspendScope).toHaveBeenCalledWith('/p', 'chat');
+    expect(devlog).toHaveBeenCalledWith('agent_killed', expect.objectContaining({ provider: 'claude', scope: 'chat' }));
+  });
+
+  it("does nothing beyond the devlog for scope '*' or another provider", () => {
+    const suspendScope = vi.fn();
+    const devlog = vi.fn();
+    const onKilled = makeOnAgentKilled(() => ({ suspendScope }), devlog);
+    onKilled(tag({ scope: '*' }));
+    onKilled(tag({ provider: 'codex' }));
+    onKilled(tag({ provider: 'kimi', scope: '*' }));
+    expect(suspendScope).not.toHaveBeenCalled();
+    expect(devlog).toHaveBeenCalledTimes(3);
+  });
+
+  it('is a no-op on a backend without suspendScope and never throws', () => {
+    expect(() => makeOnAgentKilled(() => ({}), vi.fn())(tag())).not.toThrow();
+    expect(() => makeOnAgentKilled(() => { throw new Error('x'); }, vi.fn())(tag())).not.toThrow();
   });
 });

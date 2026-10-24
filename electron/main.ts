@@ -85,6 +85,7 @@ import { destroyAll, startSuspendTimer, stopSuspendTimer, getAll, remove, suspen
 import { initFocusTracking, setActiveWorkspace } from './services/notify';
 import { devlog, devlogEnabled, devlogFor, devlogPath } from './services/devlog';
 import { LoadGuard, inactiveState } from './services/loadGuard';
+import { makeOnAgentKilled, type ScopeSuspender } from './services/loadGuard/hook';
 import { Signaller, defaultSignalDeps, frozenFileName, readStartTicks, recoverOrphanedFrozenFiles } from './services/loadGuard/signals';
 import { readBootTimeSec, readGpu, readProcesses, readSystemSample } from './services/loadGuard/procReader';
 import { OverlayManager } from './services/overlay';
@@ -556,17 +557,10 @@ function createWindow() {
       },
       emitChat: (projectPath, scope, provider, ev) =>
         emitChatMessage({ type: 'load_guard', projectPath, scope, provider, loadGuard: ev }),
-      onAgentKilled: (tag) => {
-        devlog('loadguard', 'agent_killed', { ...tag });
-        // A killed claude SDK runtime leaves a dead query in SdkBackend: suspend the
-        // scope so the next send resume-respawns it. Other providers (and '*' hosts)
-        // just die and are restarted by their own next-send paths.
-        if (tag.provider !== 'claude' || tag.scope === '*') return;
-        try {
-          const backend = getClaudeBackend() as ReturnType<typeof getClaudeBackend> & { suspendScope?: (p: string, s?: string) => void };
-          backend.suspendScope?.(tag.projectPath, tag.scope);
-        } catch { /* never throw into the guard */ }
-      },
+      onAgentKilled: makeOnAgentKilled(
+        () => getClaudeBackend() as ReturnType<typeof getClaudeBackend> & ScopeSuspender,
+        (event, data) => devlog('loadguard', event, data),
+      ),
       devlog: devlogFor('loadguard'),
       fake: fake === 'warning' || fake === 'critical' ? fake : undefined,
       instance: process.pid,

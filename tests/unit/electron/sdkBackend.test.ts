@@ -1310,6 +1310,53 @@ describe('SdkBackend', () => {
     realClose();
   });
 
+  it('suspendScope: a drain that throws afterwards emits no extra error or done', async () => {
+    // Iterator that blocks, then rejects once the query is closed (the killed runtime).
+    let rejectNext: ((e: Error) => void) | null = null;
+    const closeSpy = vi.fn(() => rejectNext?.(new Error('Claude Code process terminated by signal SIGKILL')));
+    const throwingQuery: any = {
+      interrupt: vi.fn().mockResolvedValue(undefined),
+      close: closeSpy,
+      [Symbol.asyncIterator]() {
+        return { next: () => new Promise((_res, rej) => { rejectNext = rej; }) };
+      },
+    };
+    const backend = new SdkBackend({ queryFn: vi.fn(() => throwingQuery), emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.send({ projectPath: PROJECT, message: 'hi', scope: SCOPE, permMode: 'default' });
+    await new Promise<void>((r) => setTimeout(r, 10));
+    const session: any = (backend as any).sessions.get(`${PROJECT} ${SCOPE}`);
+    session.mapperState.streaming = true;
+
+    emits.length = 0;
+    backend.suspendScope(PROJECT, SCOPE);
+    expect(closeSpy).toHaveBeenCalled();
+    await new Promise<void>((r) => setTimeout(r, 10)); // let the drain's catch/finally run
+
+    expect(emits.filter((e) => e.type === 'error')).toEqual([]);
+    expect(emits.filter((e) => e.type === 'done')).toHaveLength(1); // suspendScope's own turn-end only
+  });
+
+  it('suspendScope drops an open background-wait pill (done turnSeq null) and its timer', async () => {
+    const fakeQuery = makeFakeQuery([], { hang: true });
+    const backend = new SdkBackend({ queryFn: vi.fn(() => fakeQuery), emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.send({ projectPath: PROJECT, message: 'hi', scope: SCOPE, permMode: 'default' });
+    await new Promise<void>((r) => setTimeout(r, 10));
+    const session: any = (backend as any).sessions.get(`${PROJECT} ${SCOPE}`);
+    session.mapperState.streaming = false;
+    session.backgroundWaitOpen = true;
+    session.pendingBackgroundResume = true;
+    const timer = setTimeout(() => { throw new Error('timer should be cleared'); }, 50);
+    session.backgroundWaitTimer = timer;
+
+    emits.length = 0;
+    backend.suspendScope(PROJECT, SCOPE);
+    expect(emits.filter((e) => e.type === 'done')).toEqual([{ type: 'done', projectPath: PROJECT, scope: SCOPE, turnSeq: null }]);
+    expect(session.backgroundWaitTimer).toBeNull();
+    await new Promise<void>((r) => setTimeout(r, 70)); // cleared timer never fires
+  });
+
   it('(23) chat scope merges user mcpConfigPath servers alongside sai', async () => {
     mockReadSaiSetting.mockReturnValue('/cfg/a.json');
     mockReadFileSync.mockReturnValue(JSON.stringify({ mcpServers: { foo: { type: 'stdio', command: 'foo' } } }) as any);

@@ -10,6 +10,7 @@ import {
 import path from 'node:path';
 import { enrichedEnv } from '../shellEnv';
 import { withScopeTag } from '../loadGuard/scopeTag';
+import { withLoadNote } from '../loadGuard/hook';
 import { getOrCreate as getOrCreateWorkspace } from '../workspace';
 import { mapCodexSdkEvent, type SaiEnvelope } from './sdkEventMap';
 import { buildCodexInput, buildCodexSdkOptions } from './sdkOptions';
@@ -218,7 +219,9 @@ export class SdkCodexBackend implements CodexBackend {
         runtime.configIdentity = configIdentity;
       }
 
-      const input = buildCodexInput(args.message, args.imagePaths);
+      // Load note rides the provider payload only, taken at dispatch so a send
+      // that failed earlier leaves it pending.
+      const input = buildCodexInput(withLoadNote('codex', args.projectPath, scope, args.message), args.imagePaths);
       void this.runTurn(key, runtime, active, runtime.thread, input);
     } catch (error) {
       this.emit({ type: 'error', text: errorText(error), projectPath: args.projectPath, scope, turnSeq: active.seq });

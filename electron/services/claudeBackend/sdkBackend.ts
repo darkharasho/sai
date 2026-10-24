@@ -1838,8 +1838,14 @@ export class SdkBackend implements ClaudeBackend {
         // a crash right after an interrupt/chained send would otherwise emit a
         // lagging seq the stale-turn guard drops, stranding the thinking
         // animation with the session gone (so Stop couldn't recover it either).
-        this._emit({ type: 'error', fatal: true, text: friendlyError(text), projectPath, scope: effectiveScope });
-        this._emit({ type: 'done', projectPath, scope: effectiveScope, turnSeq: session.turnSeq });
+        // Only while this session still owns the scope (same check as finally):
+        // after a suspend/kill/restart the teardown already ended the turn, and a
+        // replacement session restarts turnSeq — a stale done here could falsely
+        // end its turn 1.
+        if (this.sessions.get(scopeKey) === session) {
+          this._emit({ type: 'error', fatal: true, text: friendlyError(text), projectPath, scope: effectiveScope });
+          this._emit({ type: 'done', projectPath, scope: effectiveScope, turnSeq: session.turnSeq });
+        }
         session.mapperState = { ...session.mapperState, streaming: false };
       } finally {
         // Release any gates still held by this scope — a closed query can never
@@ -1953,6 +1959,15 @@ export class SdkBackend implements ClaudeBackend {
       this._resolveGatesForScope(scopeKey, 'Session ended');
       if (session.mapperState.streaming) {
         this._emit({ type: 'done', projectPath, scope: session._scopeName, turnSeq: session.turnSeq });
+      }
+      // A background wait can never resume on a closed query: drop the pill.
+      if (session.backgroundWaitTimer) {
+        clearTimeout(session.backgroundWaitTimer);
+        session.backgroundWaitTimer = null;
+      }
+      if (session.backgroundWaitOpen) {
+        session.backgroundWaitOpen = false;
+        this._emit({ type: 'done', projectPath, scope: session._scopeName, turnSeq: null });
       }
       try { session.query.close(); } catch { /* runtime already gone */ }
     } catch { /* never throws */ }
