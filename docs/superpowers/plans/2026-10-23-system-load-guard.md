@@ -400,7 +400,7 @@ expect(await readGpu(async () => { throw new Error('ENOENT'); })).toBeNull();
   ```
 - **Exact copy** (sizes in GB to 1 decimal place, percentages rounded):
   - Warning:
-    - Base: `[SAI system load: WARNING] RAM {pct}% used ({free} GB free of {total} GB), swap {swap} GB used{ and rising}, memory pressure {psiSome}%.`
+    - Base: `[SAI system load: WARNING] RAM {pct}% used ({free} GB free of {total} GB), swap {swap} GB used{ and rising}, memory pressure {psiSome}%, CPU pressure {psiCpu}%.`
     - Then, if a GPU sample exists: ` GPU {util}%, VRAM {used}/{total} GB.`
     - Then, if there are non-SAI top users: ` Also running: {up to 3 "label size GB" joined by ", "}.` A game is listed first as `game "{name}" {size} GB`.
     - Then: ` SAI's own processes: {saiAi} GB. Prefer lighter work for now (fewer parallel workers, avoid full builds or whole test suites, or wait), and tell the user if you're holding back.`
