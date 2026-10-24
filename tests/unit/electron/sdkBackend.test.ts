@@ -1357,6 +1357,26 @@ describe('SdkBackend', () => {
     await new Promise<void>((r) => setTimeout(r, 70)); // cleared timer never fires
   });
 
+  it('suspendWorkspace drops an open background-wait pill (done turnSeq null) and its timer', async () => {
+    const fakeQuery = makeFakeQuery([], { hang: true });
+    const backend = new SdkBackend({ queryFn: vi.fn(() => fakeQuery), emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.send({ projectPath: PROJECT, message: 'hi', scope: SCOPE, permMode: 'default' });
+    await new Promise<void>((r) => setTimeout(r, 10));
+    const session: any = (backend as any).sessions.get(`${PROJECT} ${SCOPE}`);
+    session.mapperState.streaming = false;
+    session.backgroundWaitOpen = true;
+    session.pendingBackgroundResume = true;
+    session.backgroundWaitTimer = setTimeout(() => { throw new Error('timer should be cleared'); }, 50);
+
+    emits.length = 0;
+    backend.suspendWorkspace(PROJECT);
+    await new Promise<void>((r) => setTimeout(r, 70)); // drain settles; cleared timer never fires
+    expect(emits.filter((e) => e.type === 'done')).toEqual([{ type: 'done', projectPath: PROJECT, scope: SCOPE, turnSeq: null }]);
+    expect(session.backgroundWaitTimer).toBeNull();
+    expect((backend as any).sessions.has(`${PROJECT} ${SCOPE}`)).toBe(false);
+  });
+
   it('(23) chat scope merges user mcpConfigPath servers alongside sai', async () => {
     mockReadSaiSetting.mockReturnValue('/cfg/a.json');
     mockReadFileSync.mockReturnValue(JSON.stringify({ mcpServers: { foo: { type: 'stdio', command: 'foo' } } }) as any);

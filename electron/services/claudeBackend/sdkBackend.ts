@@ -1886,6 +1886,7 @@ export class SdkBackend implements ClaudeBackend {
         // turnSeq, not activeTurnSeq: the lagging seq gets dropped as stale.
         this._emit({ type: 'done', projectPath, scope: session._scopeName, turnSeq: session.turnSeq });
       }
+      this._dropBackgroundWait(session);
       if (session.sessionId && !session.warm) this.pendingResume.set(scopeKey, session.sessionId);
       session.query.close();
       this.sessions.delete(scopeKey);
@@ -1960,17 +1961,22 @@ export class SdkBackend implements ClaudeBackend {
       if (session.mapperState.streaming) {
         this._emit({ type: 'done', projectPath, scope: session._scopeName, turnSeq: session.turnSeq });
       }
-      // A background wait can never resume on a closed query: drop the pill.
-      if (session.backgroundWaitTimer) {
-        clearTimeout(session.backgroundWaitTimer);
-        session.backgroundWaitTimer = null;
-      }
-      if (session.backgroundWaitOpen) {
-        session.backgroundWaitOpen = false;
-        this._emit({ type: 'done', projectPath, scope: session._scopeName, turnSeq: null });
-      }
+      this._dropBackgroundWait(session);
       try { session.query.close(); } catch { /* runtime already gone */ }
     } catch { /* never throws */ }
+  }
+
+  /** A background wait can never resume on a closed query: clear its timer and,
+   *  if the pill is up, take it down (turnSeq null — never stale-dropped). */
+  private _dropBackgroundWait(session: ScopeSession): void {
+    if (session.backgroundWaitTimer) {
+      clearTimeout(session.backgroundWaitTimer);
+      session.backgroundWaitTimer = null;
+    }
+    if (session.backgroundWaitOpen) {
+      session.backgroundWaitOpen = false;
+      this._emit({ type: 'done', projectPath: session._projectPath, scope: session._scopeName, turnSeq: null });
+    }
   }
 
   private _startIdleSweep(): void {
