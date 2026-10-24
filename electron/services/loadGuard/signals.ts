@@ -6,8 +6,10 @@ export interface SignalDeps {
   /** Reads field 22 of /proc/<pid>/stat; null when the process is gone. */
   startTicksOf: (pid: number) => number | null;
   persistPath: string;
-  fs?: Pick<typeof import('fs'), 'readFileSync' | 'writeFileSync'>;
+  fs?: Pick<typeof import('fs'), 'readFileSync' | 'writeFileSync' | 'renameSync'>;
 }
+
+type SendResult = 'sent' | 'gone' | 'failed';
 
 interface FrozenProc {
   pid: number;
@@ -46,22 +48,27 @@ export class Signaller {
     return this.deps.fs ?? fs;
   }
 
-  /** Signals pid only while it still has the expected start ticks. True when delivered. */
-  private send(pid: number, startTicks: number, sig: NodeJS.Signals): boolean {
+  /**
+   * Signals pid only while it still has the expected start ticks.
+   * 'gone' = exited or pid reused (nothing left to resume); 'failed' = signal refused (EPERM...), process may still be stopped.
+   */
+  private send(pid: number, startTicks: number, sig: NodeJS.Signals): SendResult {
+    if (!Number.isInteger(pid) || pid <= 1) return 'gone';
     try {
-      if (this.deps.startTicksOf(pid) !== startTicks) return false;
+      if (this.deps.startTicksOf(pid) !== startTicks) return 'gone';
       this.deps.kill(pid, sig);
-      return true;
-    } catch {
-      // ESRCH (already gone), EPERM, anything: not sent, keep going.
-      return false;
+      return 'sent';
+    } catch (e) {
+      return (e as NodeJS.ErrnoException)?.code === 'ESRCH' ? 'gone' : 'failed';
     }
   }
 
   private persist(): void {
     try {
       const list: FrozenProc[] = [...this.frozen].map(([pid, startTicks]) => ({ pid, startTicks }));
-      this.io.writeFileSync(this.deps.persistPath, JSON.stringify(list));
+      const tmp = `${this.deps.persistPath}.tmp`;
+      this.io.writeFileSync(tmp, JSON.stringify(list));
+      this.io.renameSync(tmp, this.deps.persistPath);
     } catch {
       // A guard must never throw.
     }
@@ -72,7 +79,7 @@ export class Signaller {
       const parsed = JSON.parse(this.io.readFileSync(this.deps.persistPath, 'utf8') as string);
       if (!Array.isArray(parsed)) return [];
       return parsed.filter(
-        p => p && Number.isInteger(p.pid) && typeof p.startTicks === 'number',
+        p => p && Number.isInteger(p.pid) && p.pid > 1 && typeof p.startTicks === 'number',
       );
     } catch {
       return [];
@@ -80,23 +87,38 @@ export class Signaller {
   }
 
   freeze(procs: Array<{ pid: number; startTicks: number }>): number {
+    // Persist intent before SIGSTOP so a crash mid-freeze still gets recovered.
+    const candidates = procs.filter(p => {
+      try {
+        return p.pid > 1 && this.deps.startTicksOf(p.pid) === p.startTicks;
+      } catch {
+        return false;
+      }
+    });
+    for (const p of candidates) this.frozen.set(p.pid, p.startTicks);
+    if (candidates.length) this.persist();
     let count = 0;
-    for (const p of procs) {
-      if (this.send(p.pid, p.startTicks, 'SIGSTOP')) {
-        this.frozen.set(p.pid, p.startTicks);
+    let changed = false;
+    for (const p of candidates) {
+      if (this.send(p.pid, p.startTicks, 'SIGSTOP') === 'sent') {
         count++;
+      } else {
+        // Gone, or the stop was refused: it is not stopped, so don't track it.
+        this.frozen.delete(p.pid);
+        changed = true;
       }
     }
-    this.persist();
+    if (changed) this.persist();
     return count;
   }
 
   thawAll(): number {
     let count = 0;
-    for (const [pid, startTicks] of this.frozen) {
-      if (this.send(pid, startTicks, 'SIGCONT')) count++;
+    for (const [pid, startTicks] of [...this.frozen]) {
+      const r = this.send(pid, startTicks, 'SIGCONT');
+      if (r === 'sent') count++;
+      if (r !== 'failed') this.frozen.delete(pid);
     }
-    this.frozen.clear();
     this.persist();
     return count;
   }
@@ -106,8 +128,10 @@ export class Signaller {
     let changed = false;
     for (const pid of unit.pids) {
       const t = ticks.get(pid);
-      if (t !== undefined && this.send(pid, t, 'SIGKILL')) count++;
-      if (this.frozen.delete(pid)) changed = true;
+      if (t === undefined) continue;
+      const r = this.send(pid, t, 'SIGKILL');
+      if (r === 'sent') count++;
+      if (r !== 'failed' && this.frozen.delete(pid)) changed = true;
     }
     if (changed) this.persist();
     return count;
@@ -116,9 +140,11 @@ export class Signaller {
   recoverFromCrash(): number {
     let count = 0;
     for (const p of this.readPersisted()) {
-      if (this.send(p.pid, p.startTicks, 'SIGCONT')) count++;
+      const r = this.send(p.pid, p.startTicks, 'SIGCONT');
+      if (r === 'sent') count++;
+      // Keep refused entries so the next thawAll retries them.
+      if (r === 'failed') this.frozen.set(p.pid, p.startTicks);
     }
-    this.frozen.clear();
     this.persist();
     return count;
   }
