@@ -542,7 +542,10 @@ function createWindow() {
     if (orphans.files > 0) devlog('loadguard', 'crash_recovered', orphans);
     // Per-instance file, so a second SAI never resumes or overwrites our frozen set.
     const selfTicks = readStartTicks(process.pid) ?? 0;
-    const signaller = new Signaller(defaultSignalDeps(path.join(userData, frozenFileName(process.pid, selfTicks))));
+    const signaller = new Signaller(defaultSignalDeps(
+      path.join(userData, frozenFileName(process.pid, selfTicks)),
+      devlogFor('loadguard'),
+    ));
     const fake = process.env.SAI_LOAD_GUARD_FAKE;
     loadGuard = new LoadGuard({
       now: () => Date.now(),

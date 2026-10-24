@@ -560,3 +560,25 @@ describe('ChatInput file context tabs', () => {
     expect(chips.map(c => c.querySelector('.context-chip-dir')?.textContent ?? null)).toEqual(['Chat/', null]);
   });
 });
+
+describe('ChatInput load guard pill', () => {
+  beforeEach(() => { installMockSai(); });
+  const lg = (level: 'normal' | 'warning') => ({
+    level, paused: false, override: false, saiCaused: false, saiAppHeavy: false,
+    memUsedPct: 85, swapUsedPct: 0, game: null, recoveredAt: null, enabled: true,
+  });
+
+  it('renders the pill in the always-visible composer toolbar', () => {
+    const { container } = render(<ChatInput {...defaultProps} loadGuard={lg('warning')} />);
+    const pill = screen.getByRole('status');
+    expect(pill.textContent).toBe('RAM 85%');
+    expect(container.querySelector('.input-toolbar .toolbar-left')!.contains(pill)).toBe(true);
+  });
+
+  it('renders nothing at normal load or without state', () => {
+    const { container, rerender } = render(<ChatInput {...defaultProps} loadGuard={lg('normal')} />);
+    expect(container.querySelector('.load-guard-pill')).toBeNull();
+    rerender(<ChatInput {...defaultProps} />);
+    expect(container.querySelector('.load-guard-pill')).toBeNull();
+  });
+});

@@ -94,7 +94,7 @@ describe('LoadGuard', () => {
     const { g, signaller, at, devlogEvents } = setup();
     await at(0, CRITICAL());
     expect(frozenPids(signaller)).toEqual([100, 101]);
-    expect(signaller.freeze.mock.calls[0][0]).toContainEqual({ pid: 101, startTicks: started(20) });
+    expect(signaller.freeze.mock.calls[0][0]).toContainEqual({ pid: 101, startTicks: started(20), ppid: 100 });
     expect(signaller.killTree).not.toHaveBeenCalled();
     expect(g.state()).toMatchObject({ level: 'critical', paused: true, saiCaused: false, enabled: true });
     expect(devlogEvents()).toEqual(expect.arrayContaining(['state', 'critical_snapshot', 'freeze']));

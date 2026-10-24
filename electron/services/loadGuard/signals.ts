@@ -7,8 +7,26 @@ export interface SignalDeps {
   /** Reads field 22 of /proc/<pid>/stat; null when the process is gone. */
   startTicksOf: (pid: number) => number | null;
   persistPath: string;
-  fs?: Pick<typeof import('fs'), 'readFileSync' | 'writeFileSync' | 'renameSync'>;
+  /** Field 3 of /proc/<pid>/stat ('S', 'T', ...); null when gone. Absent = freeze never waits. */
+  stateOf?: (pid: number) => string | null;
+  /** Blocking sleep for the bounded stop-confirm poll. */
+  sleepMs?: (ms: number) => void;
+  log?: (event: string, data?: Record<string, unknown>) => void;
+  fs?: Pick<typeof import('fs'), 'readFileSync' | 'writeFileSync' | 'renameSync' | 'unlinkSync'>;
 }
+
+export interface FreezeTarget {
+  pid: number;
+  startTicks: number;
+  /** from the same scan; orders the freeze ancestor-first */
+  ppid?: number;
+}
+
+/** Stop-confirm poll per tree level: STOP_POLLS x STOP_POLL_MS ≈ 100ms. */
+const STOP_POLLS = 50;
+const STOP_POLL_MS = 2;
+/** States a stopped-parent check treats as settled (stopped, traced, dead). */
+const SETTLED = new Set(['T', 't', 'Z', 'X', 'x']);
 
 type SendResult = 'sent' | 'gone' | 'failed';
 
@@ -30,11 +48,32 @@ export function readStartTicks(pid: number, procRoot = '/proc'): number | null {
   }
 }
 
+/** Reads the state letter (field 3) from /proc/<pid>/stat; null when gone or unparsable. */
+export function readProcState(pid: number, procRoot = '/proc'): string | null {
+  try {
+    const stat = fs.readFileSync(`${procRoot}/${pid}/stat`, 'utf8');
+    const close = stat.lastIndexOf(')');
+    if (close < 0) return null;
+    return stat.slice(close + 2).trim().split(/\s+/)[0] || null;
+  } catch {
+    return null;
+  }
+}
+
+const sleepCell = new Int32Array(new SharedArrayBuffer(4));
+
 /** Real deps; touches nothing until called, so tests never need these. */
-export function defaultSignalDeps(persistPath: string): SignalDeps {
+export function defaultSignalDeps(
+  persistPath: string,
+  log?: (event: string, data?: Record<string, unknown>) => void,
+): SignalDeps {
   return {
     kill: (pid, sig) => { process.kill(pid, sig); },
     startTicksOf: pid => readStartTicks(pid),
+    stateOf: pid => readProcState(pid),
+    // Sync and race-free with stop(); bounded to ~100ms per tree level.
+    sleepMs: ms => { Atomics.wait(sleepCell, 0, 0, ms); },
+    log,
     persistPath,
   };
 }
@@ -108,7 +147,12 @@ export class Signaller {
     }
   }
 
+  /** Writes the frozen set in freeze (ancestor-first) order; an empty set leaves no file behind. */
   private persist(): void {
+    if (this.frozen.size === 0) {
+      try { this.io.unlinkSync(this.deps.persistPath); } catch { /* already gone */ }
+      return;
+    }
     try {
       const list: FrozenProc[] = [...this.frozen].map(([pid, startTicks]) => ({ pid, startTicks }));
       const tmp = `${this.deps.persistPath}.tmp`;
@@ -131,7 +175,12 @@ export class Signaller {
     }
   }
 
-  freeze(procs: Array<{ pid: number; startTicks: number }>): number {
+  /**
+   * SIGSTOPs ancestors before descendants, confirming each tree level is stopped before
+   * signalling the next: a non-interactive `bash -c` waits with WUNTRACED, so seeing its
+   * child stop first makes it exit 147 and fail the command.
+   */
+  freeze(procs: FreezeTarget[]): number {
     // Persist intent before SIGSTOP so a crash mid-freeze still gets recovered.
     const candidates = procs.filter(p => {
       try {
@@ -140,26 +189,54 @@ export class Signaller {
         return false;
       }
     });
-    for (const p of candidates) this.frozen.set(p.pid, p.startTicks);
+    const levels = treeLevels(candidates);
+    for (const level of levels) for (const p of level) this.frozen.set(p.pid, p.startTicks);
     if (candidates.length) this.persist();
     let count = 0;
     let changed = false;
-    for (const p of candidates) {
-      if (this.send(p.pid, p.startTicks, 'SIGSTOP') === 'sent') {
-        count++;
-      } else {
-        // Gone, or the stop was refused: it is not stopped, so don't track it.
-        this.frozen.delete(p.pid);
-        changed = true;
+    const sent = new Set<number>();
+    for (const level of levels) {
+      const parents = [...new Set(level.flatMap(p => (p.ppid !== undefined && sent.has(p.ppid) ? [p.ppid] : [])))];
+      const unconfirmed = this.waitStopped(parents);
+      if (unconfirmed.length) this.deps.log?.('freeze_parent_unconfirmed', { pids: unconfirmed });
+      for (const p of level) {
+        if (this.send(p.pid, p.startTicks, 'SIGSTOP') === 'sent') {
+          count++;
+          sent.add(p.pid);
+        } else {
+          // Gone, or the stop was refused: it is not stopped, so don't track it.
+          this.frozen.delete(p.pid);
+          changed = true;
+        }
       }
     }
     if (changed) this.persist();
     return count;
   }
 
+  /** Bounded poll until every pid reads as stopped (or gone); returns the ones that never did. */
+  private waitStopped(pids: number[]): number[] {
+    const { stateOf, sleepMs } = this.deps;
+    if (!stateOf || pids.length === 0) return [];
+    let pending = pids;
+    for (let i = 0; ; i++) {
+      pending = pending.filter(pid => {
+        try {
+          const st = stateOf(pid);
+          return st !== null && !SETTLED.has(st);
+        } catch {
+          return false;
+        }
+      });
+      if (pending.length === 0 || i >= STOP_POLLS) return pending;
+      try { sleepMs?.(STOP_POLL_MS); } catch { /* keep polling */ }
+    }
+  }
+
+  /** SIGCONTs in reverse freeze order, descendants before ancestors, so a stopped parent never sees a child stop. */
   thawAll(): number {
     let count = 0;
-    for (const [pid, startTicks] of [...this.frozen]) {
+    for (const [pid, startTicks] of [...this.frozen].reverse()) {
       const r = this.send(pid, startTicks, 'SIGCONT');
       if (r === 'sent') count++;
       if (r !== 'failed') this.frozen.delete(pid);
@@ -184,12 +261,15 @@ export class Signaller {
 
   recoverFromCrash(): number {
     let count = 0;
-    for (const p of this.readPersisted()) {
+    const kept: FrozenProc[] = [];
+    // The file is in freeze order: resume descendants first.
+    for (const p of this.readPersisted().reverse()) {
       const r = this.send(p.pid, p.startTicks, 'SIGCONT');
       if (r === 'sent') count++;
       // Keep refused entries so the next thawAll retries them.
-      if (r === 'failed') this.frozen.set(p.pid, p.startTicks);
+      if (r === 'failed') kept.push(p);
     }
+    for (const p of kept.reverse()) this.frozen.set(p.pid, p.startTicks);
     this.persist();
     return count;
   }
@@ -201,4 +281,29 @@ export class Signaller {
   frozenCount(): number {
     return this.frozen.size;
   }
+}
+
+/**
+ * Groups targets by depth within the batch: level 0 has no parent in the batch, level n's
+ * parent is in level n-1. Order within a level is the input order.
+ */
+function treeLevels(procs: FreezeTarget[]): FreezeTarget[][] {
+  const byPid = new Map(procs.map(p => [p.pid, p] as const));
+  const depth = new Map<number, number>();
+  const depthOf = (p: FreezeTarget): number => {
+    const known = depth.get(p.pid);
+    if (known !== undefined) return known;
+    let d = 0;
+    // Bounded walk: a ppid cycle (pid reuse mid-scan) can't loop forever.
+    for (let cur = p; d < procs.length; d++) {
+      const parent = cur.ppid === undefined ? undefined : byPid.get(cur.ppid);
+      if (!parent || parent === p) break;
+      cur = parent;
+    }
+    depth.set(p.pid, d);
+    return d;
+  };
+  const levels: FreezeTarget[][] = [];
+  for (const p of procs) (levels[depthOf(p)] ??= []).push(p);
+  return levels.filter(Boolean);
 }

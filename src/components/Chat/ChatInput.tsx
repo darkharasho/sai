@@ -2,6 +2,8 @@ import { useState, useRef, KeyboardEvent, useEffect, useMemo } from 'react';
 import type { PendingApproval, PendingSudoPrompt, TerminalTab, ChatMessage as ChatMessageType, QueuedMessage, MetaWorkspaceRuntime, EffortLevel, CodexEffort, CodexModelOption, ModelChoice, AIProvider } from '../../types';
 import TodoProgress from './TodoProgress';
 import MessageQueue from './MessageQueue';
+import LoadGuardPill from './LoadGuardPill';
+import type { LoadGuardPublicState } from '../../../electron/services/loadGuard';
 import { basename } from '../../utils/pathUtils';
 import { fileBadge, shortDir } from './userAttachments';
 import ApprovalPanel from './ApprovalPanel';
@@ -50,6 +52,8 @@ interface ChatInputProps {
   onStop?: () => void;
   /** Sends are being queued even though idle (system load guard paused); placeholder only. */
   sendsQueued?: boolean;
+  /** System load guard state; drives the always-visible load pill in the toolbar. */
+  loadGuard?: LoadGuardPublicState;
   onQueue?: (text: string, fullText: string, images?: string[], attachments?: { images: number; files: number; terminal: boolean }) => void;
   queueCount?: number;
   permissionMode: 'default' | 'bypass';
@@ -289,7 +293,7 @@ function getBarColor(pct: number, isOverage: boolean): string {
   return 'var(--accent)';
 }
 
-export default function ChatInput({ projectPath, onSend, overlayControl, onBeforeSend, disabled, slashCommands = [], onSlashRefresh, isStreaming, waiting, awaitingQuestion, messages = [], onStop, onQueue, sendsQueued, queueCount, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, availableModels, claudeOverrideState, contextUsage, sessionUsage, sessionCost, usageLimits = [], billingMode = 'subscription', activeFilePath, fileContextEnabled = true, onFileContextToggle, aiProvider = 'claude', pendingApproval, pendingSudoPrompt, onApprove, onDeny, onAlwaysAllow, onAmend, codexModel = 'o3', codexModels = [], onCodexModelChange, onCodexModelsRefresh, codexPermission = 'auto', onCodexPermissionChange, codexEffort = 'high', onCodexEffortChange, geminiModel = 'auto-gemini-3', geminiModels = [], onGeminiModelChange, geminiApprovalMode = 'default', onGeminiApprovalModeChange, geminiConversationMode = 'planning', onGeminiConversationModeChange, kimiModel = 'kimi-k3', kimiModels = [], onKimiModelChange, kimiApprovalMode = 'default', onKimiApprovalModeChange, terminalTabs = [], messageQueue = [], onQueueRemove, onQueuePromote, onQueueSendNow, initialDraft = '', onDraftChange, initialContextItems = [], onContextItemsChange, metaRuntime, mentionInsertRef }: ChatInputProps) {
+export default function ChatInput({ projectPath, onSend, overlayControl, onBeforeSend, disabled, slashCommands = [], onSlashRefresh, isStreaming, waiting, awaitingQuestion, messages = [], onStop, onQueue, sendsQueued, loadGuard, queueCount, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, availableModels, claudeOverrideState, contextUsage, sessionUsage, sessionCost, usageLimits = [], billingMode = 'subscription', activeFilePath, fileContextEnabled = true, onFileContextToggle, aiProvider = 'claude', pendingApproval, pendingSudoPrompt, onApprove, onDeny, onAlwaysAllow, onAmend, codexModel = 'o3', codexModels = [], onCodexModelChange, onCodexModelsRefresh, codexPermission = 'auto', onCodexPermissionChange, codexEffort = 'high', onCodexEffortChange, geminiModel = 'auto-gemini-3', geminiModels = [], onGeminiModelChange, geminiApprovalMode = 'default', onGeminiApprovalModeChange, geminiConversationMode = 'planning', onGeminiConversationModeChange, kimiModel = 'kimi-k3', kimiModels = [], onKimiModelChange, kimiApprovalMode = 'default', onKimiApprovalModeChange, terminalTabs = [], messageQueue = [], onQueueRemove, onQueuePromote, onQueueSendNow, initialDraft = '', onDraftChange, initialContextItems = [], onContextItemsChange, metaRuntime, mentionInsertRef }: ChatInputProps) {
   const selectedCodexModel = codexModels.find(model => model.id === codexModel);
   const supportedCodexEfforts = effortsForCodexModel(selectedCodexModel);
   const effectiveCodexEffort = normalizeCodexEffort(codexEffort, selectedCodexModel);
@@ -1069,6 +1073,7 @@ export default function ChatInput({ projectPath, onSend, overlayControl, onBefor
             onPromote={onQueuePromote ?? (() => {})}
             onSendNow={onQueueSendNow}
           />
+          {loadGuard && <LoadGuardPill state={loadGuard} />}
           {activeFilePath && (
             <span
               className={`active-file-chip${!fileContextEnabled ? ' disabled' : ''}`}

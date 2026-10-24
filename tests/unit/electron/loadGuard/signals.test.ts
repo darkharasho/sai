@@ -2,11 +2,15 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { spawn } from 'node:child_process';
 import { describe, it, expect } from 'vitest';
-import { Signaller, readStartTicks, recoverOrphanedFrozenFiles, frozenFileName } from '../../../../electron/services/loadGuard/signals';
+import {
+  Signaller, defaultSignalDeps, readProcState, readStartTicks, recoverOrphanedFrozenFiles, frozenFileName,
+  type SignalDeps,
+} from '../../../../electron/services/loadGuard/signals';
 
 // SAFETY: only a fake kill and an in-memory fs are ever used here.
-function setup(live: Record<number, number>, initialFile?: string) {
+function setup(live: Record<number, number>, initialFile?: string, extra: Partial<SignalDeps> = {}) {
   const calls: Array<[number, string]> = [];
   const files = new Map<string, string>();
   if (initialFile !== undefined) files.set('/p.json', initialFile);
@@ -22,7 +26,11 @@ function setup(live: Record<number, number>, initialFile?: string) {
       }) as never,
       writeFileSync: ((f: string, d: string) => { files.set(f, d); }) as never,
       renameSync: ((a: string, b: string) => { files.set(b, files.get(a)!); files.delete(a); }) as never,
+      unlinkSync: ((f: string) => {
+        if (!files.delete(f)) throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+      }) as never,
     },
+    ...extra,
   });
   return { s, calls, files, setKill: (f: typeof killImpl) => { killImpl = f; } };
 }
@@ -38,14 +46,20 @@ describe('Signaller', () => {
     expect(s.frozenCount()).toBe(2);
   });
 
-  it('thawAll sends SIGCONT and clears the file', () => {
+  it('thawAll sends SIGCONT in reverse freeze order and removes the file', () => {
     const { s, calls, files } = setup({ 101: 10, 103: 30 });
     s.freeze([{ pid: 101, startTicks: 10 }, { pid: 103, startTicks: 30 }]);
     calls.length = 0;
     expect(s.thawAll()).toBe(2);
-    expect(calls).toEqual([[101, 'SIGCONT'], [103, 'SIGCONT']]);
-    expect(saved(files)).toEqual([]);
+    expect(calls).toEqual([[103, 'SIGCONT'], [101, 'SIGCONT']]);
+    expect(files.has('/p.json')).toBe(false);
     expect(s.frozenCount()).toBe(0);
+  });
+
+  it('thawAll with nothing ever frozen (clean stop) leaves no file', () => {
+    const { s, files } = setup({}, '[]');
+    s.thawAll();
+    expect(files.has('/p.json')).toBe(false);
   });
 
   it('killTree kills in order and drops pids from the frozen set', () => {
@@ -78,7 +92,14 @@ describe('Signaller', () => {
     const { s, calls, files } = setup({ 105: 50, 106: 61 }, file);
     expect(s.recoverFromCrash()).toBe(1);
     expect(calls).toEqual([[105, 'SIGCONT']]);
-    expect(saved(files)).toEqual([]);
+    expect(files.has('/p.json')).toBe(false);
+  });
+
+  it('recoverFromCrash resumes in reverse file order (descendants first)', () => {
+    const file = JSON.stringify([{ pid: 105, startTicks: 50 }, { pid: 106, startTicks: 60 }, { pid: 107, startTicks: 70 }]);
+    const { s, calls } = setup({ 105: 50, 106: 60, 107: 70 }, file);
+    s.recoverFromCrash();
+    expect(calls.map(c => c[0])).toEqual([107, 106, 105]);
   });
 
   it('missing or corrupt persist file reads as empty', () => {
@@ -158,6 +179,146 @@ describe('Signaller failure handling', () => {
     expect(atFirstKill).toHaveLength(2);
     expect(saved(files)).toEqual([{ pid: 101, startTicks: 10 }]);
   });
+});
+
+describe('Signaller freeze/thaw tree order', () => {
+  // parent 200 -> child 201 -> grandchild 202, plus an unrelated 300; passed descendants-first like AiUnit.pids
+  const chain = [
+    { pid: 202, startTicks: 22, ppid: 201 },
+    { pid: 201, startTicks: 21, ppid: 200 },
+    { pid: 300, startTicks: 30, ppid: 1 },
+    { pid: 200, startTicks: 20, ppid: 100 },
+  ];
+  const live = { 200: 20, 201: 21, 202: 22, 300: 30 };
+
+  /** fake /proc state: a pid reads 'T' once it has been SIGSTOPped `lag` polls ago */
+  function withState(lag: number, neverStops: number[] = []) {
+    const log: Array<[string, unknown]> = [];
+    const events: string[] = [];
+    const stoppedAt = new Map<number, number>();
+    let polls = 0;
+    const r = setup(live, undefined, {
+      stateOf: pid => {
+        events.push(`state:${pid}`);
+        const at = stoppedAt.get(pid);
+        return at !== undefined && polls - at >= lag && !neverStops.includes(pid) ? 'T' : 'S';
+      },
+      sleepMs: () => { polls++; },
+      log: (e, d) => { log.push([e, d]); },
+    });
+    r.setKill((pid, sig) => {
+      events.push(`${sig}:${pid}`);
+      if (sig === 'SIGSTOP') stoppedAt.set(pid, polls);
+    });
+    return { ...r, log, events, polls: () => polls };
+  }
+
+  it('freezes ancestor-first and waits for each parent to read T before signalling its children', () => {
+    const { s, events, log } = withState(3);
+    expect(s.freeze(chain)).toBe(4);
+    const sig = events.filter(e => e.startsWith('SIG'));
+    expect(sig).toEqual(['SIGSTOP:300', 'SIGSTOP:200', 'SIGSTOP:201', 'SIGSTOP:202']);
+    // 201 is only signalled after 200 was observed stopped, 202 after 201
+    const idx = (e: string) => events.indexOf(e);
+    const lastState = (pid: number, before: string) => events.slice(0, idx(before)).lastIndexOf(`state:${pid}`);
+    expect(lastState(200, 'SIGSTOP:201')).toBeGreaterThan(idx('SIGSTOP:200'));
+    expect(lastState(201, 'SIGSTOP:202')).toBeGreaterThan(idx('SIGSTOP:201'));
+    expect(log).toEqual([]);
+  });
+
+  it('thaws descendant-first, ancestors last', () => {
+    const { s, calls } = withState(0);
+    s.freeze(chain);
+    calls.length = 0;
+    expect(s.thawAll()).toBe(4);
+    expect(calls).toEqual([[202, 'SIGCONT'], [201, 'SIGCONT'], [200, 'SIGCONT'], [300, 'SIGCONT']]);
+  });
+
+  it('persists the frozen set ancestor-first so crash recovery resumes descendants first', () => {
+    const { s, files } = withState(0);
+    s.freeze(chain);
+    expect(saved(files).map((p: { pid: number }) => p.pid)).toEqual([300, 200, 201, 202]);
+  });
+
+  it('a parent that never reads T still gets its children frozen, bounded, with a devlog', () => {
+    const { s, events, log, polls } = withState(0, [200]);
+    expect(s.freeze(chain)).toBe(4);
+    expect(events.filter(e => e.startsWith('SIG'))).toEqual(['SIGSTOP:300', 'SIGSTOP:200', 'SIGSTOP:201', 'SIGSTOP:202']);
+    expect(log).toEqual([['freeze_parent_unconfirmed', { pids: [200] }]]);
+    expect(polls()).toBe(50);
+  });
+
+  it('a parent that exits mid-freeze counts as settled', () => {
+    const { s } = setup(live, undefined, {
+      stateOf: () => null,
+      sleepMs: () => { throw new Error('no sleep needed'); },
+      log: () => { throw new Error('no log expected'); },
+    });
+    expect(s.freeze(chain)).toBe(4);
+  });
+
+  it('a ppid cycle does not hang', () => {
+    const { s } = setup({ 400: 40, 401: 41 });
+    expect(s.freeze([{ pid: 400, startTicks: 40, ppid: 401 }, { pid: 401, startTicks: 41, ppid: 400 }])).toBe(2);
+  });
+});
+
+describe('readProcState', () => {
+  it('reads the state letter after the last paren', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'procstate-'));
+    try {
+      fs.mkdirSync(path.join(dir, '42'));
+      fs.writeFileSync(path.join(dir, '42', 'stat'), '42 (a) b) T 1 1 1\n');
+      expect(readProcState(42, dir)).toBe('T');
+      expect(readProcState(43, dir)).toBeNull();
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+// SAFETY: real signals, but only to a tiny `bash -c 'sleep; echo'` this test spawns itself.
+describe.skipIf(process.platform !== 'linux')('Signaller on a real bash -c wrapper', () => {
+  const childOf = (ppid: number): number | null => {
+    for (const d of fs.readdirSync('/proc')) {
+      if (!/^\d+$/.test(d)) continue;
+      try {
+        const st = fs.readFileSync(`/proc/${d}/stat`, 'utf8');
+        if (Number(st.slice(st.lastIndexOf(')') + 2).split(' ')[1]) === ppid) return Number(d);
+      } catch { /* exited */ }
+    }
+    return null;
+  };
+
+  it('freeze then thaw does not fail the wrapped command', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lg-real-'));
+    const sh = spawn('bash', ['-c', 'sleep 1; echo ok'], { stdio: ['ignore', 'pipe', 'ignore'] });
+    let out = '';
+    sh.stdout!.on('data', d => { out += d; });
+    const exited = new Promise<number | null>(res => sh.on('exit', code => res(code)));
+    let kid: number | null = null;
+    try {
+      for (let i = 0; i < 100 && kid === null; i++) {
+        await new Promise(r => setTimeout(r, 10));
+        kid = childOf(sh.pid!);
+      }
+      expect(kid).not.toBeNull();
+      const s = new Signaller(defaultSignalDeps(path.join(dir, 'f.json')));
+      const t = (pid: number) => readStartTicks(pid)!;
+      // descendants-first input, like AiUnit.pids
+      expect(s.freeze([{ pid: kid!, startTicks: t(kid!), ppid: sh.pid! }, { pid: sh.pid!, startTicks: t(sh.pid!), ppid: process.pid }])).toBe(2);
+      await new Promise(r => setTimeout(r, 300));
+      expect(s.thawAll()).toBe(2);
+      expect(await exited).toBe(0);
+      expect(out.trim()).toBe('ok');
+      expect(fs.existsSync(path.join(dir, 'f.json'))).toBe(false);
+    } finally {
+      for (const pid of [kid, sh.pid]) {
+        try { if (pid) { process.kill(pid, 'SIGCONT'); process.kill(pid, 'SIGKILL'); } } catch { /* exited */ }
+      }
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }, 10_000);
 });
 
 describe('readStartTicks', () => {

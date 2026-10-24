@@ -4,7 +4,7 @@ import { rawLevel, stepLevel, type LevelState } from './levels';
 import { FAULT, isSaiFault, pickKillTarget } from './killPlan';
 import { History } from './history';
 import { NoteBox, killNote, normalNote, warningNote } from './notes';
-import type { Signaller } from './signals';
+import type { FreezeTarget, Signaller } from './signals';
 
 export interface LoadGuardPublicState {
   level: Level;
@@ -292,7 +292,7 @@ export class LoadGuard {
     if (next.level === 'critical' && procs && c) {
       // Only act on this tick's scan (R11).
       const ticks = new Map(procs.map(p => [p.pid, p.startTicks] as const));
-      if (!this.override) this.freezeUnits(c.units, ticks);
+      if (!this.override) this.freezeUnits(c.units, ticks, new Map(procs.map(p => [p.pid, p.ppid] as const)));
       if (this.autoKill && this.saiCaused && now - this.lastKillAt >= FAULT.killCooldownMs) {
         this.killOne(c, ticks, memUsedPct, now);
       }
@@ -318,9 +318,9 @@ export class LoadGuard {
       .finally(() => { this.gpuInFlight = false; });
   }
 
-  /** Freezes own-instance sai-ai pids (the units' pids) with start ticks from this tick's scan. */
-  private freezeUnits(units: AiUnit[], ticks: Map<number, number>): void {
-    const fresh: Array<{ pid: number; startTicks: number }> = [];
+  /** Freezes own-instance sai-ai pids (the units' pids) with start ticks and ppids from this tick's scan. */
+  private freezeUnits(units: AiUnit[], ticks: Map<number, number>, ppids: Map<number, number>): void {
+    const fresh: FreezeTarget[] = [];
     const seen = new Set<number>();
     for (const u of units) {
       for (const pid of u.pids) {
@@ -328,7 +328,7 @@ export class LoadGuard {
         if (st === undefined || seen.has(pid)) continue;
         seen.add(pid);
         if (this.frozenKeys.has(`${pid}:${st}`)) continue;
-        fresh.push({ pid, startTicks: st });
+        fresh.push({ pid, startTicks: st, ppid: ppids.get(pid) });
       }
     }
     if (fresh.length === 0) return;

@@ -3,7 +3,6 @@ import { ChevronDown, CornerLeftUp } from 'lucide-react';
 import { motion, AnimatePresence, LayoutGroup } from 'motion/react';
 import { setFlipRect } from './flipRegistry';
 import { useLoadGuard } from '../../hooks/useLoadGuard';
-import LoadGuardPill from './LoadGuardPill';
 import LoadGuardBanner from './LoadGuardBanner';
 import ThinkingAnimation from '../ThinkingAnimation';
 import SaiLogo from '../SaiLogo';
@@ -2632,7 +2631,6 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
             </div>
           ) : (
             <div className="chat-conversation-header">
-              <LoadGuardPill state={loadGuard} />
               {conversationHeaderVisual ? (
                 conversationHeaderVisual
               ) : (
@@ -2789,6 +2787,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
             onSlashRefresh={refreshSlashCommands}
             onQueue={handleQueue}
             sendsQueued={loadPaused}
+            loadGuard={loadGuard}
             queueCount={messageQueue.length}
             pendingApproval={pendingApproval}
             pendingSudoPrompt={pendingSudoPrompt}

@@ -118,4 +118,13 @@ describe('ChatPanel load guard pause', () => {
     await waitFor(() => expect(mockSai.claudeSend).toHaveBeenCalledTimes(1));
     expect(props.onQueueAdd).not.toHaveBeenCalled();
   });
+
+  it('hands the load state to the composer toolbar, not the scrolling conversation header', async () => {
+    const props = { ...baseProps(), initialMessages: [{ id: 'm1', role: 'user', content: 'hi', timestamp: 1 }] } as Props;
+    const { container } = await mount(props);
+    await setPaused(true);
+    expect(inputProps.loadGuard).toMatchObject({ level: 'critical', paused: true });
+    expect(container.querySelector('.chat-conversation-header')).not.toBeNull();
+    expect(container.querySelector('.chat-conversation-header .load-guard-pill')).toBeNull();
+  });
 });
