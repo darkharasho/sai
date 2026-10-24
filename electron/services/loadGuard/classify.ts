@@ -102,8 +102,10 @@ export function classify(procs: ProcInfo[], ctx: ClassifyCtx): Classified {
     if (seen.has(f.pid)) continue;
     seen.add(f.pid);
     const p = byPid.get(f.pid)!;
-    // A foreign app and its subtree drop the tag: never frozen, killed or counted as SAI's.
-    const blocked = f.blocked || foreign(p);
+    // A foreign app inside the AI region and its subtree drop the tag: never frozen, killed
+    // or counted as SAI's. Outside it (SAI's own ancestors: tmux, a VS Code terminal) the
+    // check doesn't apply, or SAI's whole AI tree would be ignored.
+    const blocked = f.blocked || ((f.ai || ownTagged(p)) && foreign(p));
     const own = !blocked && ownTagged(p);
     // no sai-ai ancestor at all, so a tagged grandchild under an untagged shim isn't a second root
     if (own && !f.ai) agentRoots.push(p.pid);

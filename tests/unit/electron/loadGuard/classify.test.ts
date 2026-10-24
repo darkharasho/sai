@@ -218,6 +218,23 @@ describe('classify: foreign apps the AI cold-started (I2)', () => {
     },
   );
 
+  it.each([
+    ['a tmux: server ancestor', { comm: 'tmux: server' }],
+    ['a code ancestor', { comm: 'code' }],
+    ['an ancestor in another .service', { cgroup: '/user.slice/user-1000.slice/user@1000.service/app.slice/plasma-plasmashell.service' }],
+  ])('N1: SAI launched under %s still owns its tagged AI tree', (_name, over) => {
+    const FOREIGN_SELF = '/user.slice/user-1000.slice/user@1000.service/app.slice/app-org.kde.konsole-3.scope';
+    const procs = [
+      proc(5, 1, { comm: 'launcher', ...over }),
+      proc(9, 5, { comm: 'electron', cgroup: FOREIGN_SELF }),
+      proc(10, 9, { tag: tag(), cgroup: FOREIGN_SELF, rssKb: 100 }),
+      proc(11, 10, { tag: tag(), cgroup: FOREIGN_SELF, rssKb: 10, startTicks: started(5) }),
+    ];
+    const r = classify(procs, ctx({ appPids: new Set([9]), selfCgroup: FOREIGN_SELF }));
+    expect(r.units.map(u => [u.rootPid, u.kind]).sort()).toEqual([[10, 'agent'], [11, 'command']]);
+    expect(r.saiAiKb).toBe(110);
+  });
+
   it('extracts the owning systemd unit from a cgroup path', () => {
     expect(cgroupUnit(`${FOX}`)).toBe(FOX);
     expect(cgroupUnit(`${SELF}/sub/leaf`)).toBe(SELF);

@@ -385,6 +385,54 @@ describe('LoadGuard', () => {
     g.stop();
   });
 
+  it('N2: a slow tick >20s trips the watchdog; it acts as Resume anyway: unpaused, broadcast, no refreeze', async () => {
+    vi.useFakeTimers();
+    const { g, deps, signaller, env } = setup();
+    (deps as { now: () => number }).now = () => Date.now();
+    env.sys = CRITICAL();
+    g.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(g.state().paused).toBe(true);
+    expect(signaller.frozenCount()).toBeGreaterThan(0);
+    // the next scan takes 25s (heavy swap)
+    let release!: (p: ProcInfo[]) => void;
+    deps.readProcs.mockImplementationOnce(() => new Promise(r => { release = r; }));
+    await vi.advanceTimersByTimeAsync(2_000);
+    deps.broadcastState.mockClear();
+    await vi.advanceTimersByTimeAsync(21_000);
+    expect(deps.devlog.mock.calls.map(c => c[0])).toContain('watchdog_thaw');
+    expect(signaller.frozenCount()).toBe(0);
+    expect(g.state()).toMatchObject({ level: 'critical', paused: false, override: true });
+    expect(deps.broadcastState).toHaveBeenCalledWith(expect.objectContaining({ paused: false }));
+    const freezes = signaller.freeze.mock.calls.length;
+    release(smallSai());
+    await vi.advanceTimersByTimeAsync(6_000); // healthy critical ticks again
+    expect(signaller.freeze.mock.calls.length).toBe(freezes);
+    expect(g.state().paused).toBe(false);
+    g.stop();
+  });
+
+  it('N2: a watchdog trip outside critical does not set override for a later episode', async () => {
+    vi.useFakeTimers();
+    const { g, deps, signaller } = setup();
+    (deps as { now: () => number }).now = () => Date.now();
+    signaller.frozen.set(100, started(20));
+    deps.readSystem.mockImplementation(() => new Promise(() => {}));
+    g.start();
+    await vi.advanceTimersByTimeAsync(22_000);
+    expect(signaller.thawAll).toHaveBeenCalled();
+    expect(g.state().override).toBe(false);
+    g.stop();
+  });
+
+  it('N2: resumeOverride broadcasts the unpaused state at once', async () => {
+    const { g, deps, at } = setup();
+    await at(0, CRITICAL());
+    deps.broadcastState.mockClear();
+    g.resumeOverride();
+    expect(deps.broadcastState).toHaveBeenCalledWith(expect.objectContaining({ paused: false, override: true }));
+  });
+
   it('M1 watchdog: ticks that keep throwing while frozen also trip it', async () => {
     vi.useFakeTimers();
     const { g, deps, signaller } = setup();

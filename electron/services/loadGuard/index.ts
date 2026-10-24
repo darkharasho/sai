@@ -325,13 +325,16 @@ export class LoadGuard {
 
   /**
    * A tick wedged on a blocking /proc read (or failing every time) can't end the episode,
-   * so frozen pids would wait for a manual Resume. Thaw them; the epoch bump stops a
-   * wedged tick that later resumes from signalling on its stale reads.
+   * so frozen pids would wait for a manual Resume. Thaw them as an override; the epoch bump
+   * stops a wedged tick that later resumes from signalling on its stale reads.
    */
   private watchdog(): void {
     const stalledMs = this.deps.now() - this.lastTickOkAt;
     if (stalledMs <= WATCHDOG_MS || this.deps.signaller.frozenCount() === 0) return;
     this.epoch++;
+    // Acts as "Resume anyway" for the rest of the episode: unpaused (sends stop queueing),
+    // and a slow-but-progressing scan can't refreeze into a freeze/thaw loop.
+    if (this.level.level === 'critical' && this.enabled) this.override = true;
     this.deps.devlog('watchdog_thaw', { stalledMs, ticking: this.ticking });
     this.thaw('watchdog');
     this.maybeBroadcast();
