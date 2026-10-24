@@ -24,6 +24,7 @@ import { useSaiAnimationPref } from './useSaiAnimationPref';
 import { rehypeEmojiIcons } from './rehypeEmojiIcons';
 import { rehypeStreamWords } from './rehypeStreamWords';
 import ReasoningBlock from './ReasoningBlock';
+import LoadGuardEventCard from './LoadGuardEventCard';
 import { renderEmojiSpan } from './emojiIcons';
 import { parseUserAttachments, fileBadge, shortDir } from './userAttachments';
 
@@ -362,6 +363,9 @@ function ChatMessage({
     const custom = renderMessage(message);
     if (custom != null) return <>{custom}</>;
   }
+  // Load-guard events: a message's loadGuard never changes, so this early
+  // return keeps hook order stable per message (same as renderMessage above).
+  if (message.loadGuard) return <LoadGuardEventCard event={message.loadGuard} />;
   const dotColor = getDotColor(message.role);
   const userAttachments = message.role === 'user'
     ? parseUserAttachments(typeof message.content === 'string' ? message.content : String(message.content ?? ''))

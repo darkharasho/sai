@@ -42,7 +42,21 @@ export interface ChatMessage {
    * it to render purpose-built cards instead of plain text.
    */
   meta?: ChatMessageMeta;
+  /** Load-guard chat event (Stopped card / "System load:" note). role 'system',
+   *  empty content; never sent to the AI. */
+  loadGuard?: LoadGuardChatEvent;
 }
+
+/** Mirrors electron/services/loadGuard LoadGuardChatEvent; re-declared so types.ts stays electron-free. */
+export interface LoadGuardTopUser {
+  label: string;
+  sizeKb: number;
+  owner: 'sai-ai' | 'sai-app' | 'sai-terminal' | 'game' | 'other';
+}
+
+export type LoadGuardChatEvent =
+  | { kind: 'note'; text: string }
+  | { kind: 'killed'; unitKind: 'command' | 'service' | 'agent'; label: string; sizeKb: number; memUsedPct: number; top: LoadGuardTopUser[]; toldAi: string };
 
 export type ChatMessageMeta = ApprovalChatMeta;
 

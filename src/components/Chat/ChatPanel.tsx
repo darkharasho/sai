@@ -454,6 +454,8 @@ const THINKING_ROW_MOTION = {
   style: { overflow: 'hidden', flexShrink: 0 },
 } as const;
 const LOAD_MORE_CHUNK = 30; // messages to load when scrolling up
+/** After the load guard kills this chat's agent, its crash errors are swallowed this long. */
+const LOAD_GUARD_ERROR_QUIET_MS = 15_000;
 
 
 export default function ChatPanel({ projectPath, overlayControl, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, availableModels, claudeOverrideState, aiProvider, codexModel, onCodexModelChange, codexModels, onCodexModelsRefresh, codexPermission, onCodexPermissionChange, codexEffort, onCodexEffortChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, kimiModel, onKimiModelChange, kimiModels, kimiApprovalMode, onKimiApprovalModeChange, initialMessages, onMessagesChange, onTurnComplete, onClaudeSessionId, onGeminiSessionId, onKimiSessionId, onCodexSessionId, activeFilePath, onFileOpen, isActive, isStreaming = false, awaitingQuestion = false, initialDraft, onDraftChange, initialContextItems, onContextItemsChange, messageQueue = [], onQueueAdd, onQueueRemove, onQueueShift, onQueuePromote, sessionId, terminalTabs = [], onSlashCommandsUpdate, onInterceptSend, claudeScope = 'chat', onOpenMcpPanel, claudeKind = 'chat', claudeOrchestratorContext, initialPendingApproval = null, renderToolCall, renderMessage, activeMetaRuntime, emptyStateVisual, conversationHeaderVisual, mentionInsertRef: mentionInsertRefProp, waiting = null }: ChatPanelProps) {
@@ -635,6 +637,8 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
   const dockTransition = useReducedMotionTransition(SPRING.dock);
   const followBtnTransition = useReducedMotionTransition(SPRING.flick);
   const turnSeqRef = useRef(0); // tracks the active turn's sequence number
+  // Open after the load guard killed this panel's agent (see LOAD_GUARD_ERROR_QUIET_MS).
+  const loadGuardKillRef = useRef<{ scope: string; until: number; ended: boolean } | null>(null);
   useEffect(() => {
     // Incoming events are scoped by project/scope, not session. Retire the
     // old sequence so late child activity cannot revive a selected new chat.
@@ -864,13 +868,34 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
     const gateScope = (aiProvider === 'claude' || aiProvider === 'codex') && claudeKind === 'chat' && claudeScope !== 'chat'
       ? claudeScope : null;
     if (gateScope) registerChatListener(gateScope);
-    const cleanup = window.sai.claudeOnMessage((msg: any) => {
+    const onMessage = (msg: any) => {
+      const expectedScope = (aiProvider === 'gemini' || aiProvider === 'kimi') ? 'chat' : claudeScope;
+      // Load-guard events carry '*' wildcards for project and scope (Ruling R5),
+      // so they're matched before the generic filter. Provider must match.
+      if (msg.type === 'load_guard') {
+        const ev = msg.loadGuard;
+        if (msg.provider !== aiProvider) return;
+        if (msg.projectPath !== '*' && msg.projectPath !== projectPath) return;
+        if (msg.scope !== '*' && msg.scope !== expectedScope) return;
+        if (ev?.kind !== 'note' && ev?.kind !== 'killed') return;
+        flushStreamingText();
+        // A killed agent's process dies mid-turn: its crash error is expected
+        // noise. Swallow errors for a while and end the turn as a normal done.
+        if (ev.kind === 'killed' && ev.unitKind === 'agent') {
+          loadGuardKillRef.current = { scope: expectedScope, until: Date.now() + LOAD_GUARD_ERROR_QUIET_MS, ended: false };
+        }
+        const ts = Date.now();
+        setMessages(prev => [...prev, { id: `load-guard-${ts}-${prev.length}`, role: 'system', content: '', timestamp: ts, loadGuard: ev }]);
+        // The kill's own done may already have flushed; hand the card to the
+        // parent so the unmount/quit flushes persist it.
+        flushMessagesToParent();
+        return;
+      }
       // Only process messages for this workspace and chat scope.
       // Claude uses session UUIDs as scopes for multi-scope isolation.
       // Gemini uses a fixed chat scope. Claude and Codex preserve the panel's
       // scope so parallel sessions cannot consume each other's events.
       if (msg.projectPath && msg.projectPath !== projectPath) return;
-      const expectedScope = (aiProvider === 'gemini' || aiProvider === 'kimi') ? 'chat' : claudeScope;
       if (msg.scope && msg.scope !== expectedScope) return;
 
       // Flush any buffered streaming text before processing a non-delta event,
@@ -900,6 +925,8 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
       }
 
       if (msg.type === 'streaming_start') {
+        // A new turn's errors are its own, never the killed agent's.
+        loadGuardKillRef.current = null;
         if (msg.turnSeq != null) turnSeqRef.current = msg.turnSeq;
         // A new stream boundary supersedes any child state that did not get a
         // terminal lifecycle event (for example, an interrupted parent turn).
@@ -1002,6 +1029,17 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
       }
 
       if (msg.type === 'error') {
+        const kill = loadGuardKillRef.current;
+        if (kill && kill.scope === expectedScope && Date.now() < kill.until) {
+          // Deliberate load-guard stop, not a crash. End the turn once through
+          // the normal done path: turnSeq null is never stale-dropped, and the
+          // dead process can't send trailing child events.
+          if (!kill.ended) {
+            kill.ended = true;
+            onMessage({ type: 'done', projectPath: msg.projectPath, scope: msg.scope, turnSeq: null, subagentsAborted: true });
+          }
+          return;
+        }
         const error = parseAiError(msg.text || 'Unknown error');
         setMessages(prev => [...prev, {
           id: Date.now().toString(),
@@ -1629,7 +1667,8 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
           });
         }
       }
-    });
+    };
+    const cleanup = window.sai.claudeOnMessage(onMessage);
 
     // A sudo prompt that fired while this chat was unmounted would otherwise
     // be lost until its 5-minute timeout — re-seed it from the broker.
