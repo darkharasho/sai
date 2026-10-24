@@ -87,7 +87,7 @@ import { devlog, devlogEnabled, devlogFor, devlogPath } from './services/devlog'
 import { LoadGuard, inactiveState } from './services/loadGuard';
 import { makeOnAgentKilled, type ScopeSuspender } from './services/loadGuard/hook';
 import { Signaller, defaultSignalDeps, frozenFileName, readStartTicks, recoverOrphanedFrozenFiles } from './services/loadGuard/signals';
-import { readBootTimeSec, readGpu, readProcesses, readSystemSample } from './services/loadGuard/procReader';
+import { readBootTimeSec, readGpu, readProcesses, readSelfCgroup, readSystemSample } from './services/loadGuard/procReader';
 import { OverlayManager } from './services/overlay';
 import { registerGithubAuthHandlers } from './services/github-auth';
 import { initialSync, schedulePush } from './services/github-sync';
@@ -568,6 +568,7 @@ function createWindow() {
       fake: fake === 'warning' || fake === 'critical' ? fake : undefined,
       instance: process.pid,
       bootTimeSec: readBootTimeSec() ?? Math.floor(Date.now() / 1000 - os.uptime()),
+      selfCgroup: readSelfCgroup(),
     });
   }
   registerClaudeHandlers(mainWindow);

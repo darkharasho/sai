@@ -3,7 +3,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { readSystemSample, readProcesses, readGpu, readBootTimeSec } from '../../../../electron/services/loadGuard/procReader';
+import { readSystemSample, readProcesses, readGpu, readBootTimeSec, readSelfCgroup } from '../../../../electron/services/loadGuard/procReader';
 import { formatScopeTag } from '../../../../electron/services/loadGuard/scopeTag';
 
 let root: string;
@@ -111,5 +111,19 @@ describe('readBootTimeSec', () => {
     await put('stat', 'cpu  1 2 3 4\nintr 5\nbtime 1761200000\nprocesses 42\n');
     expect(readBootTimeSec(root)).toBe(1761200000);
     expect(readBootTimeSec(path.join(root, 'nope'))).toBeNull();
+  });
+});
+
+describe('readSelfCgroup', () => {
+  it('reads the 0:: line of <procRoot>/self/cgroup, empty when missing', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'procreader-self-'));
+    try {
+      await fs.mkdir(path.join(dir, 'self'));
+      await fs.writeFile(path.join(dir, 'self', 'cgroup'), '1:name=systemd:/x\n0::/user.slice/app.slice/app-sai-1.scope\n');
+      expect(readSelfCgroup(dir)).toBe('/user.slice/app.slice/app-sai-1.scope');
+      expect(readSelfCgroup(path.join(dir, 'nope'))).toBe('');
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
   });
 });

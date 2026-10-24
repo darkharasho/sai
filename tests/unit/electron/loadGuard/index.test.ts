@@ -59,7 +59,8 @@ function setup(over: Partial<LoadGuardDeps> = {}) {
     readSystem: vi.fn(async () => ({ ...env.sys, ts: env.now })),
     readProcs: vi.fn(async () => env.procs),
     readGpu: vi.fn(async () => null as SystemSample['gpu']),
-    appPids: () => new Set<number>(),
+    // pid 1 stands in for SAI main: fixture agents (ppid 1) are spawned by the app (I1).
+    appPids: () => new Set<number>([1]),
     terminalPids: () => new Set<number>(),
     signaller,
     broadcastState: vi.fn(),
@@ -143,6 +144,35 @@ describe('LoadGuard', () => {
     const chat = deps.emitChat.mock.calls.find(c => c[3].kind === 'killed')!;
     expect(chat.slice(0, 3)).toEqual(['/p', '*', 'claude']);
     expect(chat[3].unitKind).toBe('agent');
+  });
+
+  it('I1: killing an orphaned tagged root never calls onAgentKilled and reports it as a service', async () => {
+    const { deps, signaller, at } = setup();
+    await at(0, CRITICAL(), [
+      proc(1, 0),
+      proc(100, 1, { cmd: 'claude', rssKb: 300 * 1024, tag: tag() }),
+      proc(4242, 0, { comm: 'systemd' }),
+      proc(600, 4242, { cmd: 'npm run dev', rssKb: 6 * GiB, tag: tag(), startTicks: started(900) }),
+    ]);
+    expect(signaller.killTree).toHaveBeenCalledTimes(1);
+    expect(signaller.killTree.mock.calls[0][0].pids).toEqual([600]);
+    expect(deps.onAgentKilled).not.toHaveBeenCalled();
+    const chat = deps.emitChat.mock.calls.find(c => c[3].kind === 'killed')!;
+    expect(chat[3]).toMatchObject({ unitKind: 'service', label: 'npm run dev' });
+  });
+
+  it('I2: a tagged app in a foreign app scope is never frozen, killed or counted as SAI fault', async () => {
+    const SELF = '/user.slice/user@1000.service/app.slice/app-sai-1.scope';
+    const { g, deps, signaller, at } = setup({ selfCgroup: SELF });
+    await at(0, CRITICAL(), [
+      proc(1, 0),
+      proc(100, 1, { cmd: 'claude', rssKb: 300 * 1024, tag: tag(), cgroup: SELF }),
+      proc(700, 0, { comm: 'firefox-bin', rssKb: 12 * GiB, tag: tag(), cgroup: '/user.slice/user@1000.service/app.slice/app-firefox-2.scope' }),
+    ]);
+    expect(frozenPids(signaller)).toEqual([100]);
+    expect(signaller.killTree).not.toHaveBeenCalled();
+    expect(deps.onAgentKilled).not.toHaveBeenCalled();
+    expect(g.state().saiCaused).toBe(false);
   });
 
   it('resumeOverride thaws and the next critical tick does not freeze', async () => {

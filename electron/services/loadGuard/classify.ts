@@ -1,4 +1,4 @@
-import type { AiUnit, Owner, ProcInfo, TopUser } from './types';
+import type { AiUnit, Owner, ProcInfo, TopUser, UnitKind } from './types';
 
 export interface ClassifyCtx {
   instance: number;
@@ -7,6 +7,8 @@ export interface ClassifyCtx {
   clockTicksPerSec: number;
   bootTimeSec: number;
   nowSec: number;
+  /** SAI main's own cgroup path (/proc/self/cgroup, read once at boot); '' when unknown */
+  selfCgroup?: string;
 }
 
 export interface Classified {
@@ -21,6 +23,31 @@ export interface Classified {
 const SERVICE_MIN_AGE_SEC = 300;
 const TOP_N = 10;
 const STEAM_MARK = '/steamapps/common/';
+/** Long-lived user apps an AI may cold-start: they inherit the tag but are never SAI's to touch. */
+const FOREIGN_COMMS: ReadonlySet<string> = new Set(['firefox', 'chrome', 'chromium', 'code', 'tmux: server', 'gpg-agent', 'ssh-agent']);
+const UNIT_SEG = /^app-.+\.scope$|\.service$/;
+const USER_MANAGER_SEG = /^user@\d+\.service$/;
+
+/**
+ * The systemd unit a cgroup path belongs to: the path through its deepest `app-*.scope` or
+ * `*.service` segment (the per-user manager `user@N.service` doesn't count); null when none.
+ */
+export function cgroupUnit(cgroup: string): string | null {
+  const segs = cgroup.replace(/^0::/, '').split('/');
+  for (let i = segs.length - 1; i >= 0; i--) {
+    if (UNIT_SEG.test(segs[i]) && !USER_MANAGER_SEG.test(segs[i])) return segs.slice(0, i + 1).join('/');
+  }
+  return null;
+}
+
+/** Masks secret-looking argv values so a label is safe for the devlog, chat card and remote bus. */
+export function maskSecrets(cmd: string): string {
+  return cmd
+    .replace(/(\bBearer\s+)\S+/gi, '$1***')
+    .replace(/(\bAuthorization:\s*)(?:(Bearer|Basic|Token)\s+)?\S+/gi, (_m, pre: string, scheme?: string) => `${pre}${scheme ? `${scheme} ` : ''}***`)
+    .replace(/(--(?:token|password|api-key)(?:=|\s+))\S+/gi, '$1***')
+    .replace(/\b(\w*_(?:TOKEN|KEY|SECRET))=\S+/gi, '$1=***');
+}
 
 /** `…/app-flatpak-app.zen_browser.zen-41.scope` → `app.zen_browser.zen`; null when no app scope/service. */
 export function appLabelFromCgroup(cgroup: string): string | null {
@@ -56,56 +83,75 @@ export function classify(procs: ProcInfo[], ctx: ClassifyCtx): Classified {
     }
   }
   const ownTagged = (p: ProcInfo) => p.tag !== null && p.tag.instance === ctx.instance;
+  const selfUnit = cgroupUnit(ctx.selfCgroup ?? '');
+  // A desktop launcher (xdg-open, KIO) gives the app its own unit while keeping the caller's env.
+  const foreign = (p: ProcInfo) => {
+    if (FOREIGN_COMMS.has(p.comm)) return true;
+    const unit = cgroupUnit(p.cgroup);
+    return unit !== null && unit !== selfUnit;
+  };
 
   // Single top-down walk carrying inherited flags (explicit stack, cycle-safe).
   const owner = new Map<number, Owner>();
   const agentRoots: number[] = [];
   const seen = new Set<number>();
-  const stack: { pid: number; ai: boolean; term: boolean; reaper: boolean }[] =
-    roots.map(pid => ({ pid, ai: false, term: false, reaper: false }));
+  const stack: { pid: number; ai: boolean; term: boolean; reaper: boolean; blocked: boolean }[] =
+    roots.map(pid => ({ pid, ai: false, term: false, reaper: false, blocked: false }));
   while (stack.length) {
     const f = stack.pop()!;
     if (seen.has(f.pid)) continue;
     seen.add(f.pid);
     const p = byPid.get(f.pid)!;
-    const own = ownTagged(p);
+    // A foreign app and its subtree drop the tag: never frozen, killed or counted as SAI's.
+    const blocked = f.blocked || foreign(p);
+    const own = !blocked && ownTagged(p);
     // no sai-ai ancestor at all, so a tagged grandchild under an untagged shim isn't a second root
     if (own && !f.ai) agentRoots.push(p.pid);
-    const ai = f.ai || own;
+    const ai = !blocked && (f.ai || own);
     const term = f.term || ctx.terminalPids.has(p.pid);
     const isGame = f.reaper || p.comm === 'gamescope' || p.cmd.includes(STEAM_MARK);
     owner.set(p.pid, ai ? 'sai-ai' : term ? 'sai-terminal' : ctx.appPids.has(p.pid) ? 'sai-app' : isGame ? 'game' : 'other');
     for (const c of children.get(p.pid) ?? []) {
-      stack.push({ pid: c, ai, term, reaper: f.reaper || p.comm === 'reaper' });
+      stack.push({ pid: c, ai, term, reaper: f.reaper || p.comm === 'reaper', blocked });
     }
   }
 
-  // descendants-first order for the subtree rooted at `root`
+  const isAi = (pid: number) => owner.get(pid) === 'sai-ai';
+  // descendants-first order for the sai-ai part of the subtree rooted at `root`
   const subtree = (root: number): number[] => {
     const pre: number[] = [];
     const st = [root];
     while (st.length) {
       const pid = st.pop()!;
       pre.push(pid);
-      for (const c of children.get(pid) ?? []) st.push(c);
+      for (const c of children.get(pid) ?? []) if (isAi(c)) st.push(c);
     }
     return pre.reverse();
   };
   const sum = (pids: number[]) => pids.reduce((a, pid) => a + sizeOf(byPid.get(pid)!), 0);
+  const kindByAge = (p: ProcInfo): UnitKind =>
+    ctx.nowSec - (ctx.bootTimeSec + p.startTicks / ctx.clockTicksPerSec) >= SERVICE_MIN_AGE_SEC ? 'service' : 'command';
 
   const units: AiUnit[] = [];
   for (const rootPid of agentRoots) {
     const root = byPid.get(rootPid)!;
     const tag = root.tag!;
     const all = subtree(rootPid);
-    units.push({ rootPid, kind: 'agent', tag, sizeKb: sizeOf(root), pids: all, label: root.cmd, startTicks: root.startTicks });
+    // Provider CLIs are spawned straight by SAI's own processes. A tagged root with any other
+    // parent was orphaned (a backgrounded dev server reparented to systemd): it is one
+    // command/service unit, never the chat's agent.
+    if (!ctx.appPids.has(root.ppid)) {
+      units.push({ rootPid, kind: kindByAge(root), tag, sizeKb: sum(all), pids: all, label: maskSecrets(root.cmd), startTicks: root.startTicks });
+      continue;
+    }
+    units.push({ rootPid, kind: 'agent', tag, sizeKb: sizeOf(root), pids: all, label: maskSecrets(root.cmd), startTicks: root.startTicks });
     for (const c of children.get(rootPid) ?? []) {
+      if (!isAi(c)) continue;
       const child = byPid.get(c)!;
       const pids = subtree(c);
-      const age = ctx.nowSec - (ctx.bootTimeSec + child.startTicks / ctx.clockTicksPerSec);
       units.push({
-        rootPid: c, kind: age >= SERVICE_MIN_AGE_SEC ? 'service' : 'command', tag,
-        sizeKb: sum(pids), pids, label: child.cmd, startTicks: child.startTicks,
+        rootPid: c, kind: kindByAge(child), tag,
+        sizeKb: sum(pids), pids, label: maskSecrets(child.cmd), startTicks: child.startTicks,
       });
     }
   }

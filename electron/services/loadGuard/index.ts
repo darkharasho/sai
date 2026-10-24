@@ -45,6 +45,8 @@ export interface LoadGuardDeps {
   /** /proc/stat btime, for process ages */
   bootTimeSec: number;
   clockTicksPerSec?: number;
+  /** SAI main's cgroup (/proc/self/cgroup); tagged pids in another app unit aren't SAI's */
+  selfCgroup?: string;
 }
 
 const TICK_MS = 2_000;
@@ -235,6 +237,7 @@ export class LoadGuard {
           clockTicksPerSec: d.clockTicksPerSec ?? CLK_TCK,
           bootTimeSec: d.bootTimeSec,
           nowSec: now / 1000,
+          selfCgroup: d.selfCgroup,
         });
       }
     }

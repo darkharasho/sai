@@ -1,13 +1,14 @@
 // @vitest-environment node
 import { describe, it, expect } from 'vitest';
-import { classify, appLabelFromCgroup, type ClassifyCtx } from '../../../../electron/services/loadGuard/classify';
+import { classify, appLabelFromCgroup, cgroupUnit, maskSecrets, type ClassifyCtx } from '../../../../electron/services/loadGuard/classify';
 import type { ProcInfo, ScopeTag } from '../../../../electron/services/loadGuard/types';
 
 const GiB = 1024 * 1024;
 const HZ = 100;
 const NOW = 10_000;
+// pid 0 stands in for SAI main: fixture agent roots (ppid 0) are spawned by the app.
 const ctx = (over: Partial<ClassifyCtx> = {}): ClassifyCtx => ({
-  instance: 7, appPids: new Set(), terminalPids: new Set(), clockTicksPerSec: HZ, bootTimeSec: 0, nowSec: NOW, ...over,
+  instance: 7, appPids: new Set([0]), terminalPids: new Set(), clockTicksPerSec: HZ, bootTimeSec: 0, nowSec: NOW, ...over,
 });
 const tag = (over: Partial<ScopeTag> = {}): ScopeTag => ({ instance: 7, provider: 'claude', projectPath: '/p', scope: 's', ...over });
 /** age in seconds -> startTicks */
@@ -137,6 +138,119 @@ describe('classify', () => {
     const r = classify(procs, ctx());
     expect(r.top).toHaveLength(10);
     expect(r.top[0].sizeKb).toBe(15);
+  });
+});
+
+describe('classify: orphaned tagged roots (I1)', () => {
+  it.each([
+    ['reparented to init', 1],
+    ['reparented to a non-app subreaper', 4242],
+  ])('a tagged root %s is a command/service unit, never the agent', (_name, ppid) => {
+    const procs = [
+      proc(4242, 1, { comm: 'systemd' }),
+      proc(10, 0, { tag: tag(), cmd: 'claude' }),
+      proc(50, ppid, { tag: tag(), cmd: 'npm run dev', rssKb: 100, startTicks: started(900) }),
+      proc(51, 50, { cmd: 'vite', rssKb: 2000 }),
+      proc(60, ppid, { tag: tag(), cmd: 'sleep 9', rssKb: 10, startTicks: started(5) }),
+    ];
+    const r = classify(procs, ctx());
+    expect(r.units.filter(u => u.kind === 'agent').map(u => u.rootPid)).toEqual([10]);
+    const svc = r.units.find(u => u.rootPid === 50)!;
+    expect(svc).toMatchObject({ kind: 'service', sizeKb: 2100, pids: [51, 50] });
+    expect(r.units.find(u => u.rootPid === 60)?.kind).toBe('command');
+    // the orphan's child is part of the orphan's unit, not a unit of its own
+    expect(r.units.some(u => u.rootPid === 51)).toBe(false);
+  });
+
+  it('keeps a root spawned by any SAI app pid (main, utility) as the agent', () => {
+    const procs = [proc(1, 900, { tag: tag() }), proc(2, 1, { startTicks: started(10) })];
+    const r = classify(procs, ctx({ appPids: new Set([900, 901]) }));
+    expect(r.units.map(u => [u.rootPid, u.kind]).sort()).toEqual([[1, 'agent'], [2, 'command']]);
+  });
+});
+
+describe('classify: foreign apps the AI cold-started (I2)', () => {
+  const SELF = '/user.slice/user-1000.slice/user@1000.service/app.slice/app-sai-1.scope';
+  const FOX = '/user.slice/user-1000.slice/user@1000.service/app.slice/app-firefox-9.scope';
+
+  it('drops the tag for a pid (and its subtree) in a different app scope', () => {
+    const procs = [
+      proc(1, 0, { tag: tag(), cgroup: SELF, rssKb: 100 }),
+      proc(2, 1, { tag: tag(), cgroup: SELF, rssKb: 10 }),
+      proc(30, 77, { tag: tag(), cgroup: FOX, comm: 'firefox-bin', rssKb: 5 * GiB }),
+      proc(31, 30, { tag: tag(), cgroup: FOX, comm: 'Isolated Web Co', rssKb: GiB }),
+    ];
+    const r = classify(procs, ctx({ selfCgroup: SELF }));
+    expect(r.units.flatMap(u => u.pids).filter((p, i, a) => a.indexOf(p) === i).sort()).toEqual([1, 2]);
+    expect(r.saiAiKb).toBe(110);
+    expect(r.top.find(t => t.label === 'firefox')).toMatchObject({ owner: 'other', sizeKb: 6 * GiB });
+  });
+
+  it('drops the tag for a *.service unit too, but not for a nested cgroup of SAI\'s own scope', () => {
+    const procs = [
+      proc(1, 0, { tag: tag(), cgroup: SELF }),
+      proc(2, 1, { tag: tag(), cgroup: `${SELF}/sub` }),
+      proc(3, 1, { tag: tag(), cgroup: '/user.slice/user-1000.slice/user@1000.service/app.slice/gpg-agent.service' }),
+    ];
+    const r = classify(procs, ctx({ selfCgroup: SELF }));
+    expect(r.units.flatMap(u => u.pids).filter((p, i, a) => a.indexOf(p) === i).sort()).toEqual([1, 2]);
+  });
+
+  it('keeps every tag when SAI runs outside any app scope and so do its children', () => {
+    const SESSION = '/user.slice/user-1000.slice/session-2.scope';
+    const procs = [proc(1, 0, { tag: tag(), cgroup: SESSION }), proc(2, 1, { tag: tag(), cgroup: SESSION })];
+    expect(classify(procs, ctx({ selfCgroup: SESSION })).units.flatMap(u => u.pids).filter((p, i, a) => a.indexOf(p) === i).sort()).toEqual([1, 2]);
+  });
+
+  it.each(['firefox', 'chrome', 'chromium', 'code', 'tmux: server', 'gpg-agent', 'ssh-agent'])(
+    'denylists comm %s and its subtree even in SAI\'s own cgroup',
+    (comm) => {
+      const procs = [
+        proc(1, 0, { tag: tag(), rssKb: 100 }),
+        proc(2, 1, { tag: tag(), comm, rssKb: 3 * GiB }),
+        proc(3, 2, { tag: tag(), rssKb: GiB }),
+      ];
+      const r = classify(procs, ctx());
+      expect(r.units.map(u => u.rootPid)).toEqual([1]);
+      expect(r.units[0].pids).toEqual([1]);
+      expect(r.saiAiKb).toBe(100);
+      expect(r.top.filter(t => t.owner === 'sai-ai').every(t => t.sizeKb === 100)).toBe(true);
+    },
+  );
+
+  it('extracts the owning systemd unit from a cgroup path', () => {
+    expect(cgroupUnit(`${FOX}`)).toBe(FOX);
+    expect(cgroupUnit(`${SELF}/sub/leaf`)).toBe(SELF);
+    expect(cgroupUnit('/user.slice/user-1000.slice/user@1000.service/init.scope')).toBeNull();
+    expect(cgroupUnit('/user.slice/user-1000.slice/session-2.scope')).toBeNull();
+    expect(cgroupUnit('')).toBeNull();
+  });
+});
+
+describe('maskSecrets (M3)', () => {
+  it.each([
+    ['curl -H Authorization: Bearer abc.def https://x', 'curl -H Authorization: Bearer *** https://x'],
+    ['curl -H Authorization: tok123 https://x', 'curl -H Authorization: *** https://x'],
+    ['curl -H authorization:Basic Zm9v x', 'curl -H authorization:Basic *** x'],
+    ['http GET x Bearer sekrit', 'http GET x Bearer ***'],
+    ['gh --token ghp_123 api', 'gh --token *** api'],
+    ['tool --token=ghp_123 run', 'tool --token=*** run'],
+    ['mysql --password hunter2 db', 'mysql --password *** db'],
+    ['x --api-key=sk-1 --api-key sk-2', 'x --api-key=*** --api-key ***'],
+    ['env GITHUB_TOKEN=ghp_1 AWS_SECRET=a OPENAI_API_KEY=sk node s.js', 'env GITHUB_TOKEN=*** AWS_SECRET=*** OPENAI_API_KEY=*** node s.js'],
+    ['npm run dev -- --port 5173', 'npm run dev -- --port 5173'],
+  ])('%s', (input, out) => {
+    expect(maskSecrets(input)).toBe(out);
+  });
+
+  it('masks unit labels before they leave classify', () => {
+    const procs = [
+      proc(1, 0, { tag: tag(), cmd: 'claude --api-key sk-1' }),
+      proc(2, 1, { cmd: 'curl -H Authorization: Bearer xyz https://api', startTicks: started(5) }),
+    ];
+    const r = classify(procs, ctx());
+    expect(r.units.map(u => u.label).sort()).toEqual(['claude --api-key ***', 'curl -H Authorization: Bearer *** https://api']);
+    expect(r.top.some(t => /sk-1|xyz/.test(t.label))).toBe(false);
   });
 });
 

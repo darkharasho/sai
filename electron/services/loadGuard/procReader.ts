@@ -62,6 +62,16 @@ export function readBootTimeSec(procRoot = '/proc'): number | null {
   }
 }
 
+/** This process's cgroup v2 path (the `0::` line of /proc/self/cgroup); '' when unreadable. Read once at boot. */
+export function readSelfCgroup(procRoot = '/proc'): string {
+  try {
+    const line = readFileSync(`${procRoot}/self/cgroup`, 'utf8').split('\n').find(l => l.startsWith('0::'));
+    return line ? line.slice(3) : '';
+  } catch {
+    return '';
+  }
+}
+
 async function readProc(procRoot: string, pid: number): Promise<ProcInfo | null> {
   try {
     const dir = `${procRoot}/${pid}`;
