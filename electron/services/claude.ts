@@ -38,6 +38,7 @@ import { classifyTurnEnd, isSchedulingTool, isBackgroundLaunch, isAsyncLaunchRes
 import { getSudoAskpassHelperPath, getSudoBroker, getSudoSession, lockSudo } from './sudo';
 import { readCachedSlashCommands, writeCachedSlashCommands, type SlashCommandInfo } from './slashCommands';
 import { withScopeTag } from './loadGuard/scopeTag';
+import { withLoadNote } from './loadGuard/hook';
 export { CHAT_RENDER_NUDGE, CHAT_GITHUB_WATCH_NUDGE };
 
 
@@ -860,16 +861,18 @@ export function sendImpl(
   claude.streaming = true;
   emitStreamingStart(ws, claude, effectiveScope, { interrupting: wasInterrupt });
 
-  const msg = JSON.stringify({
-    type: 'user',
-    message: { role: 'user', content: prompt },
-  });
   if (!proc.stdin || proc.stdin.destroyed) {
     claude.busy = false;
     claude.streaming = false;
     emitChatMessage({ type: 'done', projectPath: ws.projectPath, scope: effectiveScope, turnSeq: claude.turnSeq });
     return;
   }
+  const msg = JSON.stringify({
+    type: 'user',
+    // Load-guard note rides the CLI payload only (SDK scopes get it via hook);
+    // user_message below keeps the user's own text.
+    message: { role: 'user', content: withLoadNote('claude', projectPath, effectiveScope, prompt) },
+  });
   proc.stdin.write(msg + '\n');
   emitChatMessage({
     type: 'user_message',

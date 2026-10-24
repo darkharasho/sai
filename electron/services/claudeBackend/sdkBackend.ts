@@ -11,6 +11,7 @@
 
 import * as fs from 'fs';
 import { withScopeTag } from '../loadGuard/scopeTag';
+import { buildLoadGuardHook } from '../loadGuard/hook';
 import * as path from 'path';
 import * as os from 'os';
 import type { query as QueryFn, SDKUserMessage, PermissionResult, McpSdkServerConfigWithInstance, McpServerConfig, SdkPluginConfig } from '@anthropic-ai/claude-agent-sdk';
@@ -1188,6 +1189,8 @@ export class SdkBackend implements ClaudeBackend {
       agentProgressSummaries: readSaiSetting('claudeAgentProgressSummaries') !== false,
       stopHook,
       preToolUseHook: sudoHook,
+      // Load-guard notes for this scope (the hook reads the guard lazily; {} on non-linux).
+      loadGuardHook: buildLoadGuardHook('claude', projectPath, effectiveScope),
     });
 
     // Build an async-iterable input channel (push-based queue)
@@ -1925,21 +1928,34 @@ export class SdkBackend implements ClaudeBackend {
       now,
       idleMs: IDLE_SCOPE_MS,
       scopes: records,
-      stop: (workspaceId, scope) => {
-        this._emit({ type: 'scope_suspended', projectPath: workspaceId, scope });
-        // Tear down the session properly (mirrors setSessionId's close+resume-stash),
-        // so the SDK runtime is freed but the conversation resumes on the next send.
-        // `scope` here is `_scopeName`, stored as `scope ?? 'chat'`, so the chat scope
-        // is the literal string 'chat'; convert it back to undefined for toScopeKey.
-        const scopeKey = toScopeKey(workspaceId, scope === 'chat' ? undefined : scope);
-        const session = this.sessions.get(scopeKey);
-        if (session) {
-          if (session.sessionId && !session.warm) this.pendingResume.set(scopeKey, session.sessionId);
-          session.query.close();
-          this.sessions.delete(scopeKey);
-        }
-      },
+      stop: (workspaceId, scope) => this.suspendScope(workspaceId, scope),
     });
+  }
+
+  /** Suspend one scope: free the SDK runtime, keep the conversation resumable on
+   *  the next send. Used by the idle sweep and by the load guard after it killed
+   *  the scope's agent process. Never throws. */
+  suspendScope(projectPath: string, scope?: string): void {
+    try {
+      this._emit({ type: 'scope_suspended', projectPath, scope: scope ?? 'chat' });
+      // Tear down the session properly (mirrors setSessionId's close+resume-stash).
+      // `scope` from the sweep is `_scopeName`, stored as `scope ?? 'chat'`, so the
+      // chat scope is the literal string 'chat'; toScopeKey maps both to one key.
+      const scopeKey = toScopeKey(projectPath, scope === 'chat' ? undefined : scope);
+      const session = this.sessions.get(scopeKey);
+      if (!session) return;
+      // Delete first: the drain's finally then sees the session gone and skips
+      // its own streaming done (the one below covers it).
+      this.sessions.delete(scopeKey);
+      if (session.sessionId && !session.warm) this.pendingResume.set(scopeKey, session.sessionId);
+      // The sweep only reaches idle scopes; a killed agent may be mid-turn or
+      // holding a gate — end the turn and release the gates like suspendWorkspace.
+      this._resolveGatesForScope(scopeKey, 'Session ended');
+      if (session.mapperState.streaming) {
+        this._emit({ type: 'done', projectPath, scope: session._scopeName, turnSeq: session.turnSeq });
+      }
+      try { session.query.close(); } catch { /* runtime already gone */ }
+    } catch { /* never throws */ }
   }
 
   private _startIdleSweep(): void {

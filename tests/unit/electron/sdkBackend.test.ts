@@ -1270,6 +1270,46 @@ describe('SdkBackend', () => {
     expect(fakeQuery.interruptSpy).not.toHaveBeenCalled();
   });
 
+  it('suspendScope closes the query, stashes the resume id, emits scope_suspended and ends a live turn', async () => {
+    const fakeQuery = makeFakeQuery([], { hang: true });
+    const queryFn = vi.fn(() => fakeQuery);
+    const backend = new SdkBackend({ queryFn, emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.send({ projectPath: PROJECT, message: 'hi', scope: SCOPE, permMode: 'default' });
+    await new Promise<void>((r) => setTimeout(r, 10));
+
+    const key = `${PROJECT} ${SCOPE}`;
+    const session: any = (backend as any).sessions.get(key);
+    session.sessionId = 'sess-k';
+    session.mapperState.streaming = true; // killed mid-turn
+
+    emits.length = 0;
+    backend.suspendScope(PROJECT, SCOPE);
+
+    expect(emits.find((e) => e.type === 'scope_suspended' && e.scope === SCOPE)).toBeTruthy();
+    expect(emits.find((e) => e.type === 'done' && e.scope === SCOPE)).toBeTruthy();
+    expect(fakeQuery.closeSpy).toHaveBeenCalled();
+    expect((backend as any).sessions.has(key)).toBe(false);
+    expect((backend as any).pendingResume.get(key)).toBe('sess-k');
+    // unknown scope + a throwing close never throw
+    expect(() => backend.suspendScope(PROJECT, 'nope')).not.toThrow();
+  });
+
+  it('suspendScope never throws when query.close() throws', async () => {
+    const fakeQuery = makeFakeQuery([], { hang: true });
+    const queryFn = vi.fn(() => fakeQuery);
+    const backend = new SdkBackend({ queryFn, emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.send({ projectPath: PROJECT, message: 'hi', scope: SCOPE, permMode: 'default' });
+    await new Promise<void>((r) => setTimeout(r, 10));
+    const session: any = (backend as any).sessions.get(`${PROJECT} ${SCOPE}`);
+    const realClose = session.query.close.bind(session.query);
+    session.query.close = () => { throw new Error('already dead'); };
+    expect(() => backend.suspendScope(PROJECT, SCOPE)).not.toThrow();
+    expect((backend as any).sessions.has(`${PROJECT} ${SCOPE}`)).toBe(false);
+    realClose();
+  });
+
   it('(23) chat scope merges user mcpConfigPath servers alongside sai', async () => {
     mockReadSaiSetting.mockReturnValue('/cfg/a.json');
     mockReadFileSync.mockReturnValue(JSON.stringify({ mcpServers: { foo: { type: 'stdio', command: 'foo' } } }) as any);

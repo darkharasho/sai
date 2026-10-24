@@ -19,7 +19,9 @@ import {
   isCodexMcpElicitationDecision,
   isCodexUserInputResponse,
   isCodexMcpConfigWriteRequest,
+  codexScope,
 } from './codexBackend';
+import { withLoadNote } from './loadGuard/hook';
 import { CodexTelemetryService } from './codexTelemetry';
 
 type StartIpcTail = [
@@ -163,14 +165,17 @@ export function registerCodexHandlers(): void {
       // Temporary bridge for the pre-Task-8 preload shape:
       // codex:send(projectPath, message, images, permission, model).
       const legacy = tail.length === 3;
+      const scope = legacy ? undefined : tail[4];
       return getCodexBackend().send({
         projectPath,
-        message,
+        // Codex backends forward message straight to the provider (no stored
+        // user_message), so the load note can ride it here.
+        message: withLoadNote('codex', projectPath, codexScope(scope), message),
         imagePaths: tail[0],
         permission: tail[1],
         effort: legacy || !isCodexReasoningEffort(tail[2]) ? undefined : tail[2] as CodexReasoningEffort,
         model: legacy ? tail[2] : tail[3],
-        scope: legacy ? undefined : tail[4],
+        scope,
         origin: legacy ? undefined : tail[5],
       });
     },

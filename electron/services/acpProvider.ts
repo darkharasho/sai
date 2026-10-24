@@ -7,6 +7,7 @@ import type { Workspace } from './workspace';
 import { notifyCompletion } from './notify';
 import { createAcpClient, type AcpClient } from './acp';
 import { withScopeTag } from './loadGuard/scopeTag';
+import { withLoadNote } from './loadGuard/hook';
 
 export interface AcpProviderConfig {
   key: 'kimi';                   // IPC channel prefix AND Workspace slot name
@@ -778,7 +779,7 @@ export function registerAcpProviderHandlers(win: BrowserWindow, config: AcpProvi
           result = await Promise.race([timeoutPromise, client.request<any>('session/prompt', {
             sessionId,
             scope,
-            prompt: buildPromptItems(message, imagePaths, bootstrapText),
+            prompt: buildPromptItems(withLoadNote(config.key, ws.projectPath, scope, message), imagePaths, bootstrapText),
             approvalMode: approvalMode || 'auto_edit',
             conversationMode,
             model: conversationMode === 'fast' && config.fastModel ? config.fastModel : (model || config.defaultModel),

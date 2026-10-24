@@ -556,8 +556,17 @@ function createWindow() {
       },
       emitChat: (projectPath, scope, provider, ev) =>
         emitChatMessage({ type: 'load_guard', projectPath, scope, provider, loadGuard: ev }),
-      // TODO(Task 10): call SdkBackend.suspendScope for claude SDK scopes so the chat resumes cleanly.
-      onAgentKilled: (tag) => devlog('loadguard', 'agent_killed', { ...tag }),
+      onAgentKilled: (tag) => {
+        devlog('loadguard', 'agent_killed', { ...tag });
+        // A killed claude SDK runtime leaves a dead query in SdkBackend: suspend the
+        // scope so the next send resume-respawns it. Other providers (and '*' hosts)
+        // just die and are restarted by their own next-send paths.
+        if (tag.provider !== 'claude' || tag.scope === '*') return;
+        try {
+          const backend = getClaudeBackend() as ReturnType<typeof getClaudeBackend> & { suspendScope?: (p: string, s?: string) => void };
+          backend.suspendScope?.(tag.projectPath, tag.scope);
+        } catch { /* never throw into the guard */ }
+      },
       devlog: devlogFor('loadguard'),
       fake: fake === 'warning' || fake === 'critical' ? fake : undefined,
       instance: process.pid,
