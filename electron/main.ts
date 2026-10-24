@@ -513,6 +513,9 @@ function createWindow() {
   mainWindow.on('close', (e) => {
     if (!quitConfirmed) {
       e.preventDefault();
+      // A before-quit that fired first already stopped the guard; the app keeps running, so
+      // restart it (start() is a no-op when running; stop() bumped the epoch, settings stay).
+      try { loadGuard?.start(); } catch { /* noop */ }
       mainWindow?.webContents.send('swarm:request-quit');
       return;
     }

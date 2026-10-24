@@ -56,6 +56,12 @@ beforeAll(async () => {
   // 104: comm containing parens and spaces
   await put('104/stat', '104 (a) b (c)) S 1 104 104 0 -1 0 0 0 0 0 0 0 0 0 20 0 1 0 321 1000 100\n');
   await put('104/status', 'VmRSS:\t 5 kB\n');
+  // 105: tagged but in D state (environ/cmdline reads could block on its mmap_lock)
+  await put('105/stat', '105 (node) D 1 105 105 0 -1 0 0 0 0 0 0 0 0 0 20 0 1 0 999 1000 100\n');
+  await put('105/status', 'VmRSS:\t 7 kB\n');
+  await put('105/cmdline', 'node\0secret.js\0');
+  await put('105/cgroup', '0::/x.scope\n');
+  await put('105/environ', `SAI_LOAD_SCOPE=${formatScopeTag({ instance: 4242, provider: 'claude', scope: 'chat', projectPath: '/p' })}\0`);
   // non-numeric dir is ignored
   await put('self/stat', 'garbage');
 });
@@ -92,6 +98,11 @@ describe('procReader', () => {
     expect(procs.some(p => p.pid === 103)).toBe(false);
     expect(procs.find(p => p.pid === 104)).toMatchObject({ comm: 'a) b (c)', ppid: 1, startTicks: 321 });
     expect(procs.some(p => Number.isNaN(p.pid))).toBe(false);
+  });
+
+  it('M1: skips environ and cmdline for a D-state pid (untagged this scan)', async () => {
+    const p105 = (await readProcesses(root)).find(p => p.pid === 105)!;
+    expect(p105).toMatchObject({ ppid: 1, startTicks: 999, rssKb: 7, cmd: '', tag: null, cgroup: '/x.scope' });
   });
 
   it('parses gpu', async () => {

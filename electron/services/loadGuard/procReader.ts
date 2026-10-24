@@ -86,12 +86,15 @@ async function readProc(procRoot: string, pid: number): Promise<ProcInfo | null>
     const ppid = Number(rest[1]);
     const startTicks = Number(rest[19]);
     if (!Number.isFinite(ppid) || !Number.isFinite(startTicks)) return null;
+    // environ/cmdline wait on the target's mmap_lock, which a D-state process may hold for
+    // a long time: skip them (untagged for this scan; frozen tracking lives in the signaller).
+    const unwaitable = rest[0] === 'D';
 
     // Sequential on purpose: worker count == max reads in flight.
     const status = await readTextOrEmpty(`${dir}/status`);
-    const cmdline = await readTextOrEmpty(`${dir}/cmdline`);
+    const cmdline = unwaitable ? '' : await readTextOrEmpty(`${dir}/cmdline`);
     const cgroupText = await readTextOrEmpty(`${dir}/cgroup`);
-    const environ = await readTextOrEmpty(`${dir}/environ`);
+    const environ = unwaitable ? '' : await readTextOrEmpty(`${dir}/environ`);
 
     const cgroupLine = cgroupText.split('\n').find(l => l.startsWith('0::'));
     let tag: ProcInfo['tag'] = null;

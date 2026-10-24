@@ -59,6 +59,8 @@ const GROWTH_LOOKBACK_MS = 60_000;
 /** a History entry older than lookup ts - this is a gap (suspend, skipped ticks), not a reference */
 const MAX_STALE_MS = 15_000;
 const SNAPSHOT_MS = 120_000;
+/** no tick has completed this long while pids are frozen: the loop is wedged, thaw (M1) */
+const WATCHDOG_MS = 20_000;
 const CLK_TCK = 100;
 const RANK: Record<Level, number> = { normal: 0, warning: 1, critical: 2 };
 const EMPTY_CLASSIFIED: Classified = { units: [], saiAiKb: 0, saiAppKb: 0, top: [], game: null };
@@ -101,6 +103,8 @@ export class LoadGuard {
   private readonly notes = new NoteBox();
   private timer: ReturnType<typeof setInterval> | null = null;
   private ticking = false;
+  /** last time a tick completed without throwing (watchdog reference) */
+  private lastTickOkAt = 0;
   private stopped = false;
   /** bumped by stop/disable so an in-flight tick knows its reads predate the final thaw */
   private epoch = 0;
@@ -115,7 +119,9 @@ export class LoadGuard {
     if (this.timer) return;
     this.stopped = false;
     current = this;
+    this.lastTickOkAt = this.deps.now();
     const run = () => {
+      this.watchdog();
       if (this.ticking) return; // previous tick still running (slow /proc, wedged read)
       this.ticking = true;
       void this.tick().finally(() => { this.ticking = false; });
@@ -190,6 +196,7 @@ export class LoadGuard {
   async tick(): Promise<void> {
     try {
       await this.tickInner();
+      this.lastTickOkAt = this.deps.now();
     } catch (e) {
       this.deps.devlog('tick_error', { error: String((e as Error)?.message ?? e) });
     }
@@ -302,6 +309,20 @@ export class LoadGuard {
     }
     if (!thawed && (next.level !== 'critical' || this.override)) this.retryThaw();
 
+    this.maybeBroadcast();
+  }
+
+  /**
+   * A tick wedged on a blocking /proc read (or failing every time) can't end the episode,
+   * so frozen pids would wait for a manual Resume. Thaw them; the epoch bump stops a
+   * wedged tick that later resumes from signalling on its stale reads.
+   */
+  private watchdog(): void {
+    const stalledMs = this.deps.now() - this.lastTickOkAt;
+    if (stalledMs <= WATCHDOG_MS || this.deps.signaller.frozenCount() === 0) return;
+    this.epoch++;
+    this.deps.devlog('watchdog_thaw', { stalledMs, ticking: this.ticking });
+    this.thaw('watchdog');
     this.maybeBroadcast();
   }
 

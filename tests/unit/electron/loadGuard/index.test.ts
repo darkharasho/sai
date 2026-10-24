@@ -362,6 +362,64 @@ describe('LoadGuard', () => {
     expect(signaller.thawAll).toHaveBeenCalled();
   });
 
+  it('M1 watchdog: no tick completing for >20s while frozen thaws all and devlogs watchdog_thaw', async () => {
+    vi.useFakeTimers();
+    const { g, deps, signaller } = setup();
+    (deps as { now: () => number }).now = () => Date.now();
+    signaller.frozen.set(100, started(20));
+    deps.readSystem.mockImplementation(() => new Promise(() => {})); // a wedged /proc read
+    g.start();
+    await vi.advanceTimersByTimeAsync(18_000);
+    expect(signaller.thawAll).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(4_000);
+    expect(signaller.thawAll).toHaveBeenCalledTimes(1);
+    expect(signaller.frozenCount()).toBe(0);
+    expect(deps.devlog).toHaveBeenCalledWith('watchdog_thaw', expect.objectContaining({ stalledMs: expect.any(Number) }));
+    // nothing frozen any more: the watchdog stays quiet
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(signaller.thawAll).toHaveBeenCalledTimes(1);
+    g.stop();
+  });
+
+  it('M1 watchdog: ticks that keep throwing while frozen also trip it', async () => {
+    vi.useFakeTimers();
+    const { g, deps, signaller } = setup();
+    (deps as { now: () => number }).now = () => Date.now();
+    signaller.frozen.set(100, started(20));
+    deps.readSystem.mockRejectedValue(new Error('EIO'));
+    g.start();
+    await vi.advanceTimersByTimeAsync(24_000);
+    expect(signaller.thawAll).toHaveBeenCalled();
+    expect(deps.devlog.mock.calls.map(c => c[0])).toContain('watchdog_thaw');
+    g.stop();
+  });
+
+  it('M1 watchdog: healthy ticks while frozen never trip it', async () => {
+    vi.useFakeTimers();
+    const { g, deps, signaller, env } = setup();
+    (deps as { now: () => number }).now = () => Date.now();
+    env.sys = CRITICAL();
+    g.start();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(signaller.frozenCount()).toBeGreaterThan(0);
+    expect(deps.devlog.mock.calls.map(c => c[0])).not.toContain('watchdog_thaw');
+    g.stop();
+  });
+
+  it('M2: start() after stop() resumes ticking with the applied settings', async () => {
+    vi.useFakeTimers();
+    const { g, deps } = setup();
+    g.applySettings({ enabled: true, autoKill: false });
+    g.start();
+    g.stop();
+    const before = deps.readSystem.mock.calls.length;
+    g.start();
+    await vi.advanceTimersByTimeAsync(4_100);
+    expect(deps.readSystem.mock.calls.length).toBeGreaterThan(before);
+    expect(g.state().enabled).toBe(true);
+    g.stop();
+  });
+
   it('marks saiAppHeavy when a SAI app process is in the top 3 and reports the game', async () => {
     const { g, at } = setup({ appPids: () => new Set([300]) });
     await at(0, NORMAL(), [
