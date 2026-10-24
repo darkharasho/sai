@@ -37,6 +37,8 @@ import { CHAT_RENDER_NUDGE, CHAT_GITHUB_WATCH_NUDGE, CHAT_TASKS_NUDGE } from './
 import { classifyTurnEnd, isSchedulingTool, isBackgroundLaunch, isAsyncLaunchResult, WAKEUP_GRACE_MS, type WaitMeta, countLiveBackgroundTasks } from './waitClassifier';
 import { getSudoAskpassHelperPath, getSudoBroker, getSudoSession, lockSudo } from './sudo';
 import { readCachedSlashCommands, writeCachedSlashCommands, type SlashCommandInfo } from './slashCommands';
+import { withScopeTag } from './loadGuard/scopeTag';
+import { withLoadNote } from './loadGuard/hook';
 export { CHAT_RENDER_NUDGE, CHAT_GITHUB_WATCH_NUDGE };
 
 
@@ -379,7 +381,7 @@ function ensureProcess(
 
   const proc = spawn('claude', args, {
     cwd: claude.cwd || projectPath,
-    env: spawnEnv(),
+    env: withScopeTag(spawnEnv(), { provider: 'claude', projectPath, scope }),
     stdio: ['pipe', 'pipe', 'pipe'],
     shell: IS_WIN,
   });
@@ -859,16 +861,18 @@ export function sendImpl(
   claude.streaming = true;
   emitStreamingStart(ws, claude, effectiveScope, { interrupting: wasInterrupt });
 
-  const msg = JSON.stringify({
-    type: 'user',
-    message: { role: 'user', content: prompt },
-  });
   if (!proc.stdin || proc.stdin.destroyed) {
     claude.busy = false;
     claude.streaming = false;
     emitChatMessage({ type: 'done', projectPath: ws.projectPath, scope: effectiveScope, turnSeq: claude.turnSeq });
     return;
   }
+  const msg = JSON.stringify({
+    type: 'user',
+    // Load-guard note rides the CLI payload only (SDK scopes get it via hook);
+    // user_message below keeps the user's own text.
+    message: { role: 'user', content: withLoadNote('claude', projectPath, effectiveScope, prompt) },
+  });
   proc.stdin.write(msg + '\n');
   emitChatMessage({
     type: 'user_message',
@@ -1189,7 +1193,7 @@ export async function approveImpl(
           cwd,
           timeout: 120_000,
           maxBuffer: 10 * 1024 * 1024,
-          env: spawnEnv(),
+          env: withScopeTag(spawnEnv(), { provider: 'claude', projectPath: ws.projectPath, scope: effectiveScope }),
           windowsVerbatimArguments: IS_WIN,
         }, (err, stdout, stderr) => {
           if (err && !stdout && !stderr) {

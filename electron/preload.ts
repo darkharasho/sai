@@ -191,6 +191,14 @@ contextBridge.exposeInMainWorld('sai', {
     ipcRenderer.on('claude:message', listener);
     return () => ipcRenderer.removeListener('claude:message', listener);
   },
+  loadGuardGetState: () => ipcRenderer.invoke('loadGuard:getState'),
+  loadGuardTopUsers: () => ipcRenderer.invoke('loadGuard:topUsers'),
+  loadGuardResume: () => ipcRenderer.invoke('loadGuard:resume'),
+  loadGuardOnState: (callback: (state: unknown) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, state: unknown) => callback(state);
+    ipcRenderer.on('loadGuard:state', listener);
+    return () => ipcRenderer.removeListener('loadGuard:state', listener);
+  },
   gitStatus: (cwd: string) => ipcRenderer.invoke('git:status', cwd),
   gitStage: (cwd: string, filepath: string) => ipcRenderer.invoke('git:stage', cwd, filepath),
   gitUnstage: (cwd: string, filepath: string) => ipcRenderer.invoke('git:unstage', cwd, filepath),

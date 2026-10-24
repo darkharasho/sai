@@ -8,6 +8,7 @@ import {
   type AppServerServerRequestResponder,
 } from './appServerClient';
 import { mapAppServerEvent } from './appServerEventMap';
+import { withLoadNote } from '../loadGuard/hook';
 import { SAI_SWARM_CAPABILITY_PROBE, SAI_SWARM_DYNAMIC_TOOLS } from './appServerDynamicTools';
 import { dispatchSaiSwarmDynamicTool, dynamicToolResponse, validateSaiSwarmDynamicToolCall } from './dynamicToolBridge';
 import { isCodexUserInputResponse, normalizeCodexModelOption, codexScope, codexScopeKey, type CodexAppServerPreviewStatus, type CodexApprovalDecision, type CodexApprovalMetadata, type CodexApprovalResult, type CodexBackend, type CodexMcpConfigResult, type CodexMcpConfigServer, type CodexMcpElicitationDecision, type CodexMcpElicitationForm, type CodexMcpElicitationUrl, type CodexMcpRuntimeStatus, type CodexModelResult, type CodexSendArgs, type CodexSessionKind, type CodexStartArgs, type CodexUserInputAnswers, type CodexUserInputQuestion, type CodexUserInputResponse } from './types';
@@ -1316,7 +1317,8 @@ export class AppServerBackend implements CodexBackend {
   private turnStartParams(runtime: ScopeRuntime, args: Pick<CodexSendArgs, 'message' | 'model' | 'effort' | 'permission'>): Record<string, unknown> {
     const params: Record<string, unknown> = {
       threadId: runtime.threadId,
-      input: [{ type: 'text', text: args.message }],
+      // Load note rides the provider payload only, taken at dispatch (turn/start).
+      input: [{ type: 'text', text: withLoadNote('codex', runtime.projectPath, runtime.scope, args.message) }],
       cwd: runtime.cwd,
       // Codex defaults to no reasoning summary for several models. Request
       // the documented safe summary stream explicitly so the desktop

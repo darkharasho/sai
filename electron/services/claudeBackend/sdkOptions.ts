@@ -33,6 +33,9 @@ export interface SdkOptionInputs {
   /** Sudo gate for Bash (chat/task kinds). Fires in every permission mode —
    *  including bypass — unlike canUseTool, which pre-approved tools skip. */
   preToolUseHook?: HookCallback;
+  /** Load-guard note delivery: PreToolUse (every tool) + UserPromptSubmit,
+   *  returning the pending note as additionalContext. Never denies. */
+  loadGuardHook?: HookCallback;
 }
 
 const VALID_EFFORT = new Set<string>(['low', 'medium', 'high', 'xhigh', 'max']);
@@ -74,6 +77,7 @@ export function buildSdkOptions(input: SdkOptionInputs): Options {
     agentProgressSummaries,
     stopHook,
     preToolUseHook,
+    loadGuardHook,
   } = input;
 
   const permissionMode: Options['permissionMode'] =
@@ -157,8 +161,16 @@ export function buildSdkOptions(input: SdkOptionInputs): Options {
   if (stopHook) {
     hooks.Stop = [{ hooks: [stopHook] }];
   }
+  const preToolUse: NonNullable<typeof hooks.PreToolUse> = [];
   if (preToolUseHook) {
-    hooks.PreToolUse = [{ matcher: 'Bash', hooks: [preToolUseHook] }];
+    preToolUse.push({ matcher: 'Bash', hooks: [preToolUseHook] });
+  }
+  if (loadGuardHook) {
+    preToolUse.push({ hooks: [loadGuardHook] });
+    hooks.UserPromptSubmit = [{ hooks: [loadGuardHook] }];
+  }
+  if (preToolUse.length > 0) {
+    hooks.PreToolUse = preToolUse;
   }
   if (Object.keys(hooks).length > 0) {
     opts.hooks = hooks;

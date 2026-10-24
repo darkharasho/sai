@@ -4,6 +4,8 @@ import { getOrCreate, get, touchActivity } from './workspace';
 import type { Workspace } from './workspace';
 import { notifyCompletion } from './notify';
 import { enrichedEnv } from './shellEnv';
+import { withScopeTag } from './loadGuard/scopeTag';
+import { withLoadNote } from './loadGuard/hook';
 
 /**
  * Compatibility module for the provider that used to be backed by Gemini CLI.
@@ -137,7 +139,7 @@ export async function promptAntigravityText(
   return new Promise((resolve, reject) => {
     const child = spawn(COMMAND, args, {
       cwd: scopeCwd(ws, scope),
-      env: enrichedEnv(),
+      env: withScopeTag(enrichedEnv(), { provider: 'gemini', projectPath: ws.projectPath, scope }),
       stdio: ['ignore', 'pipe', 'pipe'],
       shell: process.platform === 'win32',
     });
@@ -246,7 +248,7 @@ export function registerGeminiHandlers(win: BrowserWindow) {
     safeSend(win, { type: 'streaming_start', projectPath, scope, turnSeq, sessionId: scopeSession(ws, scope) });
     try {
       const preamble = ws.gemini.metaPreamble && !scopeSession(ws, scope) ? `${ws.gemini.metaPreamble}\n\n` : '';
-      await promptAntigravityText(win, ws, { scope, prompt: `${preamble}${message}`, imagePaths, approvalMode, conversationMode, model });
+      await promptAntigravityText(win, ws, { scope, prompt: `${preamble}${withLoadNote('gemini', projectPath, scope, message)}`, imagePaths, approvalMode, conversationMode, model });
       safeSend(win, { type: 'result', projectPath, scope, usage: { input_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, output_tokens: 0 } });
       notifyCompletion(win, projectPath, { provider: DISPLAY_NAME }, { site: 'gemini.turnEnd' });
     } catch (error) {

@@ -77,6 +77,7 @@ vi.mock('../../../electron/services/notify', () => ({
 }));
 
 // Import after mocks are set up
+import { parseScopeTag } from '../../../electron/services/loadGuard/scopeTag';
 import { SdkBackend } from '../../../electron/services/claudeBackend/sdkBackend';
 import { BACKGROUND_WAIT_SETTLE_MS, BACKGROUND_WAIT_IDLE_MS } from '../../../electron/services/waitClassifier';
 import {
@@ -1269,6 +1270,113 @@ describe('SdkBackend', () => {
     expect(fakeQuery.interruptSpy).not.toHaveBeenCalled();
   });
 
+  it('suspendScope closes the query, stashes the resume id, emits scope_suspended and ends a live turn', async () => {
+    const fakeQuery = makeFakeQuery([], { hang: true });
+    const queryFn = vi.fn(() => fakeQuery);
+    const backend = new SdkBackend({ queryFn, emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.send({ projectPath: PROJECT, message: 'hi', scope: SCOPE, permMode: 'default' });
+    await new Promise<void>((r) => setTimeout(r, 10));
+
+    const key = `${PROJECT} ${SCOPE}`;
+    const session: any = (backend as any).sessions.get(key);
+    session.sessionId = 'sess-k';
+    session.mapperState.streaming = true; // killed mid-turn
+
+    emits.length = 0;
+    backend.suspendScope(PROJECT, SCOPE);
+
+    expect(emits.find((e) => e.type === 'scope_suspended' && e.scope === SCOPE)).toBeTruthy();
+    expect(emits.find((e) => e.type === 'done' && e.scope === SCOPE)).toBeTruthy();
+    expect(fakeQuery.closeSpy).toHaveBeenCalled();
+    expect((backend as any).sessions.has(key)).toBe(false);
+    expect((backend as any).pendingResume.get(key)).toBe('sess-k');
+    // unknown scope + a throwing close never throw
+    expect(() => backend.suspendScope(PROJECT, 'nope')).not.toThrow();
+  });
+
+  it('suspendScope never throws when query.close() throws', async () => {
+    const fakeQuery = makeFakeQuery([], { hang: true });
+    const queryFn = vi.fn(() => fakeQuery);
+    const backend = new SdkBackend({ queryFn, emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.send({ projectPath: PROJECT, message: 'hi', scope: SCOPE, permMode: 'default' });
+    await new Promise<void>((r) => setTimeout(r, 10));
+    const session: any = (backend as any).sessions.get(`${PROJECT} ${SCOPE}`);
+    const realClose = session.query.close.bind(session.query);
+    session.query.close = () => { throw new Error('already dead'); };
+    expect(() => backend.suspendScope(PROJECT, SCOPE)).not.toThrow();
+    expect((backend as any).sessions.has(`${PROJECT} ${SCOPE}`)).toBe(false);
+    realClose();
+  });
+
+  it('suspendScope: a drain that throws afterwards emits no extra error or done', async () => {
+    // Iterator that blocks, then rejects once the query is closed (the killed runtime).
+    let rejectNext: ((e: Error) => void) | null = null;
+    const closeSpy = vi.fn(() => rejectNext?.(new Error('Claude Code process terminated by signal SIGKILL')));
+    const throwingQuery: any = {
+      interrupt: vi.fn().mockResolvedValue(undefined),
+      close: closeSpy,
+      [Symbol.asyncIterator]() {
+        return { next: () => new Promise((_res, rej) => { rejectNext = rej; }) };
+      },
+    };
+    const backend = new SdkBackend({ queryFn: vi.fn(() => throwingQuery), emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.send({ projectPath: PROJECT, message: 'hi', scope: SCOPE, permMode: 'default' });
+    await new Promise<void>((r) => setTimeout(r, 10));
+    const session: any = (backend as any).sessions.get(`${PROJECT} ${SCOPE}`);
+    session.mapperState.streaming = true;
+
+    emits.length = 0;
+    backend.suspendScope(PROJECT, SCOPE);
+    expect(closeSpy).toHaveBeenCalled();
+    await new Promise<void>((r) => setTimeout(r, 10)); // let the drain's catch/finally run
+
+    expect(emits.filter((e) => e.type === 'error')).toEqual([]);
+    expect(emits.filter((e) => e.type === 'done')).toHaveLength(1); // suspendScope's own turn-end only
+  });
+
+  it('suspendScope drops an open background-wait pill (done turnSeq null) and its timer', async () => {
+    const fakeQuery = makeFakeQuery([], { hang: true });
+    const backend = new SdkBackend({ queryFn: vi.fn(() => fakeQuery), emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.send({ projectPath: PROJECT, message: 'hi', scope: SCOPE, permMode: 'default' });
+    await new Promise<void>((r) => setTimeout(r, 10));
+    const session: any = (backend as any).sessions.get(`${PROJECT} ${SCOPE}`);
+    session.mapperState.streaming = false;
+    session.backgroundWaitOpen = true;
+    session.pendingBackgroundResume = true;
+    const timer = setTimeout(() => { throw new Error('timer should be cleared'); }, 50);
+    session.backgroundWaitTimer = timer;
+
+    emits.length = 0;
+    backend.suspendScope(PROJECT, SCOPE);
+    expect(emits.filter((e) => e.type === 'done')).toEqual([{ type: 'done', projectPath: PROJECT, scope: SCOPE, turnSeq: null }]);
+    expect(session.backgroundWaitTimer).toBeNull();
+    await new Promise<void>((r) => setTimeout(r, 70)); // cleared timer never fires
+  });
+
+  it('suspendWorkspace drops an open background-wait pill (done turnSeq null) and its timer', async () => {
+    const fakeQuery = makeFakeQuery([], { hang: true });
+    const backend = new SdkBackend({ queryFn: vi.fn(() => fakeQuery), emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.send({ projectPath: PROJECT, message: 'hi', scope: SCOPE, permMode: 'default' });
+    await new Promise<void>((r) => setTimeout(r, 10));
+    const session: any = (backend as any).sessions.get(`${PROJECT} ${SCOPE}`);
+    session.mapperState.streaming = false;
+    session.backgroundWaitOpen = true;
+    session.pendingBackgroundResume = true;
+    session.backgroundWaitTimer = setTimeout(() => { throw new Error('timer should be cleared'); }, 50);
+
+    emits.length = 0;
+    backend.suspendWorkspace(PROJECT);
+    await new Promise<void>((r) => setTimeout(r, 70)); // drain settles; cleared timer never fires
+    expect(emits.filter((e) => e.type === 'done')).toEqual([{ type: 'done', projectPath: PROJECT, scope: SCOPE, turnSeq: null }]);
+    expect(session.backgroundWaitTimer).toBeNull();
+    expect((backend as any).sessions.has(`${PROJECT} ${SCOPE}`)).toBe(false);
+  });
+
   it('(23) chat scope merges user mcpConfigPath servers alongside sai', async () => {
     mockReadSaiSetting.mockReturnValue('/cfg/a.json');
     mockReadFileSync.mockReturnValue(JSON.stringify({ mcpServers: { foo: { type: 'stdio', command: 'foo' } } }) as any);
@@ -1750,7 +1858,9 @@ describe('SdkBackend', () => {
     await new Promise<void>((r) => { const c = () => capturedOptions ? r() : setTimeout(c, 5); setTimeout(c, 5); });
 
     expect(mockSpawnEnv).toHaveBeenCalled();
-    expect(capturedOptions.env).toEqual({ PATH: '/enriched/bin', NODE_OPTIONS: '--max-old-space-size=1024' });
+    const { SAI_LOAD_SCOPE, ...restEnv } = capturedOptions.env;
+    expect(restEnv).toEqual({ PATH: '/enriched/bin', NODE_OPTIONS: '--max-old-space-size=1024' });
+    expect(parseScopeTag(SAI_LOAD_SCOPE)).toMatchObject({ provider: 'claude', projectPath: PROJECT, scope: SCOPE });
     expect(typeof capturedOptions.stderr).toBe('function');
     capturedOptions.stderr('not logged in\n');
     expect(emits.find(e => e.type === 'error' && String(e.text).includes('not logged in'))).toBeDefined();

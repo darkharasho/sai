@@ -462,6 +462,16 @@ export function subscribeTerminal(termId: number, cb: DesktopDataListener): () =
   return () => { set?.delete(cb); };
 }
 
+/** Shell pids of every SAI terminal (desktop and phone), for the load guard's ownership map. */
+export function listTerminalPids(): Set<number> {
+  const out = new Set<number>();
+  for (const term of allTerminals.values()) {
+    const pid = (term as unknown as { pid?: number }).pid;
+    if (typeof pid === 'number') out.add(pid);
+  }
+  return out;
+}
+
 /**
  * List desktop-owned terminals with best-effort cwd / cols / rows.
  * cwd is taken from terminalOwner; cols/rows from the IPty instance.

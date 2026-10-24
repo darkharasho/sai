@@ -10,6 +10,8 @@
  */
 
 import * as fs from 'fs';
+import { withScopeTag } from '../loadGuard/scopeTag';
+import { buildLoadGuardHook } from '../loadGuard/hook';
 import * as path from 'path';
 import * as os from 'os';
 import type { query as QueryFn, SDKUserMessage, PermissionResult, McpSdkServerConfigWithInstance, McpServerConfig, SdkPluginConfig } from '@anthropic-ai/claude-agent-sdk';
@@ -1171,7 +1173,7 @@ export class SdkBackend implements ClaudeBackend {
       canUseTool,
       mcpServers,
       plugins,
-      env: spawnEnv() as Record<string, string | undefined>,
+      env: withScopeTag(spawnEnv() as Record<string, string | undefined>, { provider: 'claude', projectPath, scope: effectiveScope }),
       stderr: (data: string) => {
         const text = data.toString().trim();
         if (text) {
@@ -1187,6 +1189,8 @@ export class SdkBackend implements ClaudeBackend {
       agentProgressSummaries: readSaiSetting('claudeAgentProgressSummaries') !== false,
       stopHook,
       preToolUseHook: sudoHook,
+      // Load-guard notes for this scope (the hook reads the guard lazily; {} on non-linux).
+      loadGuardHook: buildLoadGuardHook('claude', projectPath, effectiveScope),
     });
 
     // Build an async-iterable input channel (push-based queue)
@@ -1834,8 +1838,14 @@ export class SdkBackend implements ClaudeBackend {
         // a crash right after an interrupt/chained send would otherwise emit a
         // lagging seq the stale-turn guard drops, stranding the thinking
         // animation with the session gone (so Stop couldn't recover it either).
-        this._emit({ type: 'error', fatal: true, text: friendlyError(text), projectPath, scope: effectiveScope });
-        this._emit({ type: 'done', projectPath, scope: effectiveScope, turnSeq: session.turnSeq });
+        // Only while this session still owns the scope (same check as finally):
+        // after a suspend/kill/restart the teardown already ended the turn, and a
+        // replacement session restarts turnSeq — a stale done here could falsely
+        // end its turn 1.
+        if (this.sessions.get(scopeKey) === session) {
+          this._emit({ type: 'error', fatal: true, text: friendlyError(text), projectPath, scope: effectiveScope });
+          this._emit({ type: 'done', projectPath, scope: effectiveScope, turnSeq: session.turnSeq });
+        }
         session.mapperState = { ...session.mapperState, streaming: false };
       } finally {
         // Release any gates still held by this scope — a closed query can never
@@ -1876,6 +1886,7 @@ export class SdkBackend implements ClaudeBackend {
         // turnSeq, not activeTurnSeq: the lagging seq gets dropped as stale.
         this._emit({ type: 'done', projectPath, scope: session._scopeName, turnSeq: session.turnSeq });
       }
+      this._dropBackgroundWait(session);
       if (session.sessionId && !session.warm) this.pendingResume.set(scopeKey, session.sessionId);
       session.query.close();
       this.sessions.delete(scopeKey);
@@ -1924,21 +1935,48 @@ export class SdkBackend implements ClaudeBackend {
       now,
       idleMs: IDLE_SCOPE_MS,
       scopes: records,
-      stop: (workspaceId, scope) => {
-        this._emit({ type: 'scope_suspended', projectPath: workspaceId, scope });
-        // Tear down the session properly (mirrors setSessionId's close+resume-stash),
-        // so the SDK runtime is freed but the conversation resumes on the next send.
-        // `scope` here is `_scopeName`, stored as `scope ?? 'chat'`, so the chat scope
-        // is the literal string 'chat'; convert it back to undefined for toScopeKey.
-        const scopeKey = toScopeKey(workspaceId, scope === 'chat' ? undefined : scope);
-        const session = this.sessions.get(scopeKey);
-        if (session) {
-          if (session.sessionId && !session.warm) this.pendingResume.set(scopeKey, session.sessionId);
-          session.query.close();
-          this.sessions.delete(scopeKey);
-        }
-      },
+      stop: (workspaceId, scope) => this.suspendScope(workspaceId, scope),
     });
+  }
+
+  /** Suspend one scope: free the SDK runtime, keep the conversation resumable on
+   *  the next send. Used by the idle sweep and by the load guard after it killed
+   *  the scope's agent process. Never throws. */
+  suspendScope(projectPath: string, scope?: string): void {
+    try {
+      this._emit({ type: 'scope_suspended', projectPath, scope: scope ?? 'chat' });
+      // Tear down the session properly (mirrors setSessionId's close+resume-stash).
+      // `scope` from the sweep is `_scopeName`, stored as `scope ?? 'chat'`, so the
+      // chat scope is the literal string 'chat'; toScopeKey maps both to one key.
+      const scopeKey = toScopeKey(projectPath, scope === 'chat' ? undefined : scope);
+      const session = this.sessions.get(scopeKey);
+      if (!session) return;
+      // Delete first: the drain's finally then sees the session gone and skips
+      // its own streaming done (the one below covers it).
+      this.sessions.delete(scopeKey);
+      if (session.sessionId && !session.warm) this.pendingResume.set(scopeKey, session.sessionId);
+      // The sweep only reaches idle scopes; a killed agent may be mid-turn or
+      // holding a gate — end the turn and release the gates like suspendWorkspace.
+      this._resolveGatesForScope(scopeKey, 'Session ended');
+      if (session.mapperState.streaming) {
+        this._emit({ type: 'done', projectPath, scope: session._scopeName, turnSeq: session.turnSeq });
+      }
+      this._dropBackgroundWait(session);
+      try { session.query.close(); } catch { /* runtime already gone */ }
+    } catch { /* never throws */ }
+  }
+
+  /** A background wait can never resume on a closed query: clear its timer and,
+   *  if the pill is up, take it down (turnSeq null — never stale-dropped). */
+  private _dropBackgroundWait(session: ScopeSession): void {
+    if (session.backgroundWaitTimer) {
+      clearTimeout(session.backgroundWaitTimer);
+      session.backgroundWaitTimer = null;
+    }
+    if (session.backgroundWaitOpen) {
+      session.backgroundWaitOpen = false;
+      this._emit({ type: 'done', projectPath: session._projectPath, scope: session._scopeName, turnSeq: null });
+    }
   }
 
   private _startIdleSweep(): void {

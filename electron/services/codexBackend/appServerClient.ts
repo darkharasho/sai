@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
 import path from 'node:path';
+import { withScopeTag } from '../loadGuard/scopeTag';
 import { enrichedEnv } from '../shellEnv';
 import { resolveBundledCodex } from './bundledModels';
 import { isCodexMcpConfigServers, type CodexMcpConfigServer, type CodexMcpConfigSnapshot, type CodexMcpRuntimeServerStatus, type CodexMcpRuntimeStatus } from './types';
@@ -435,7 +436,8 @@ export class AppServerClient implements AppServerClientTransport {
 
     try {
       const bundled = this.resolveExecutable();
-      const env = { ...this.getEnv() };
+      // One host is shared by every project and scope, hence the '*' wildcards.
+      const env = withScopeTag({ ...this.getEnv() }, { provider: 'codex', projectPath: '*', scope: '*' });
       const pathKey = process.platform === 'win32'
         ? Object.keys(env).find((key) => key.toLowerCase() === 'path') ?? 'Path'
         : 'PATH';

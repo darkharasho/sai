@@ -6,6 +6,9 @@ import { getOrCreate, get, touchActivity } from './workspace';
 import type { Workspace } from './workspace';
 import { notifyCompletion } from './notify';
 import { createAcpClient, type AcpClient } from './acp';
+import { withScopeTag } from './loadGuard/scopeTag';
+import { withLoadNote } from './loadGuard/hook';
+import { getLoadGuard } from './loadGuard';
 
 export interface AcpProviderConfig {
   key: 'kimi';                   // IPC channel prefix AND Workspace slot name
@@ -19,6 +22,41 @@ export interface AcpProviderConfig {
   fastModel?: string;
   /** Extra sentence appended to transport-failure errors (install/login guidance). */
   installHint?: string;
+}
+
+/**
+ * Idle timer that never fires while `isPaused()` (the load guard holds the agent
+ * SIGSTOPped, so its silence is expected): it re-arms a full window instead, and after a
+ * pause the agent gets one more full silent window before it times out.
+ */
+export function pauseAwareIdleTimeout(ms: number, isPaused: () => boolean, onTimeout: () => void) {
+  let handle: ReturnType<typeof setTimeout> | null = null;
+  let wasPaused = false;
+  const paused = () => {
+    try { return isPaused(); } catch { return false; }
+  };
+  const arm = () => {
+    handle = setTimeout(() => {
+      const now = paused();
+      if (now || wasPaused) {
+        wasPaused = now;
+        arm();
+      } else {
+        onTimeout();
+      }
+    }, ms);
+  };
+  return {
+    reset() {
+      if (handle) clearTimeout(handle);
+      wasPaused = false;
+      arm();
+    },
+    clear() {
+      if (handle) clearTimeout(handle);
+      handle = null;
+    },
+  };
 }
 
 function getEnrichedEnv(): NodeJS.ProcessEnv {
@@ -459,7 +497,7 @@ export async function ensureAcpTransport(win: BrowserWindow, ws: Workspace, conf
 
   const client = createAcpClient({
     cwd: state(ws).cwd || ws.projectPath,
-    env: getEnrichedEnv(),
+    env: withScopeTag(getEnrichedEnv(), { provider: config.key, projectPath: ws.projectPath, scope: '*' }),
     clientInfo: { name: 'sai', version: '1.0' },
     command: config.command,
     args: config.args,
@@ -754,17 +792,16 @@ export function registerAcpProviderHandlers(win: BrowserWindow, config: AcpProvi
         // every onEvent so active streaming turns never hit it, but a truly
         // silent/stuck ACP is caught. A fixed total timeout fires even when
         // content has already streamed — this idle approach avoids that.
+        // A load-guard freeze silences the agent on purpose: the timer re-arms meanwhile.
         const IDLE_TIMEOUT_MS = 2 * 60 * 1000;
-        let idleHandle: ReturnType<typeof setTimeout> | null = null;
         let timeoutReject: ((e: Error) => void) | null = null;
+        const idle = pauseAwareIdleTimeout(
+          IDLE_TIMEOUT_MS,
+          () => getLoadGuard()?.isFrozen(config.key) ?? false,
+          () => timeoutReject?.(new Error(`${config.displayName} request timed out: no response for 2 minutes`)),
+        );
         const resetIdle = () => {
-          if (idleHandle) clearTimeout(idleHandle);
-          if (timeoutReject) {
-            idleHandle = setTimeout(
-              () => timeoutReject!(new Error(`${config.displayName} request timed out: no response for 2 minutes`)),
-              IDLE_TIMEOUT_MS,
-            );
-          }
+          if (timeoutReject) idle.reset();
         };
         const timeoutPromise = new Promise<never>((_, reject) => {
           timeoutReject = reject;
@@ -777,14 +814,14 @@ export function registerAcpProviderHandlers(win: BrowserWindow, config: AcpProvi
           result = await Promise.race([timeoutPromise, client.request<any>('session/prompt', {
             sessionId,
             scope,
-            prompt: buildPromptItems(message, imagePaths, bootstrapText),
+            prompt: buildPromptItems(withLoadNote(config.key, ws.projectPath, scope, message), imagePaths, bootstrapText),
             approvalMode: approvalMode || 'auto_edit',
             conversationMode,
             model: conversationMode === 'fast' && config.fastModel ? config.fastModel : (model || config.defaultModel),
           })]);
         } finally {
           // Always cancel the idle timer and unsubscribe once session/prompt settles.
-          if (idleHandle) clearTimeout(idleHandle);
+          idle.clear();
           timeoutReject = null;
           unsubIdle();
         }

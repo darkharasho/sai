@@ -23,6 +23,7 @@ import { listKdotoolWindows, activateKdotoolWindow, kdotoolActiveWindowTitle, kd
 import { activeWindowTitle, raiseWindowByTitle } from './capture/windowControl';
 import { gitStatusImpl, gitDiffImpl, gitStageImpl, gitUnstageImpl, gitCommitImpl, gitPushImpl, gitPullImpl } from './services/git';
 import { enrichedEnv, patchProcessPath } from './services/shellEnv';
+import { stripInheritedScopeTag } from './services/loadGuard/scopeTag';
 import {
   createRenderProtocolStore,
   resolveRenderAsset,
@@ -36,6 +37,10 @@ import {
 import { execFile as _execFile, execFileSync } from 'node:child_process';
 import { promisify as _promisify } from 'node:util';
 const _execFileP = _promisify(_execFile);
+
+// A dev SAI launched by a parent SAI's AI inherits that instance's load-guard
+// tag; drop it so this instance's own terminals and spawns stay untagged.
+stripInheritedScopeTag(process.env);
 
 // Widen the process-global PATH immediately (heuristic dirs) so early spawns —
 // including the claude-agent-sdk, which spawns the CLI with a plain
@@ -67,7 +72,7 @@ async function _resolveTailnetEndpointWithEnv() {
     },
   });
 }
-import { registerTerminalHandlers, destroyAllTerminals } from './services/pty';
+import { registerTerminalHandlers, destroyAllTerminals, listTerminalPids } from './services/pty';
 import { registerClaudeHandlers, destroyClaude, setRemoteCeiling, setRemoteBus, setSubprocessMemoryCapMB, emitChatMessage } from './services/claude';
 import { initSudoService, lockSudo } from './services/sudo';
 import { getClaudeBackend, getClaudeBackendSetting } from './services/claudeBackend';
@@ -78,7 +83,11 @@ import { registerUpdater } from './services/updater';
 import { registerUsageHandlers, destroyUsagePolling } from './services/usage';
 import { destroyAll, startSuspendTimer, stopSuspendTimer, getAll, remove, suspend, getOrCreate as getOrCreateWorkspace, DEFAULT_SUSPEND_TIMEOUT } from './services/workspace';
 import { initFocusTracking, setActiveWorkspace } from './services/notify';
-import { devlog, devlogEnabled, devlogPath } from './services/devlog';
+import { devlog, devlogEnabled, devlogFor, devlogPath } from './services/devlog';
+import { LoadGuard, inactiveState } from './services/loadGuard';
+import { makeOnAgentKilled, type ScopeSuspender } from './services/loadGuard/hook';
+import { Signaller, defaultSignalDeps, frozenFileName, readStartTicks, recoverOrphanedFrozenFiles } from './services/loadGuard/signals';
+import { readBootTimeSec, readGpu, readProcesses, readSelfCgroup, readSystemSample } from './services/loadGuard/procReader';
 import { OverlayManager } from './services/overlay';
 import { registerGithubAuthHandlers } from './services/github-auth';
 import { initialSync, schedulePush } from './services/github-sync';
@@ -126,6 +135,9 @@ if (process.platform === 'linux') {
 }
 
 let mainWindow: BrowserWindow | null = null;
+/** System load guard; linux only, null elsewhere. */
+let loadGuard: LoadGuard | null = null;
+let loadGuardEventSeq = 0;
 let quitConfirmed = false;
 let overlayManager: OverlayManager | null = null;
 
@@ -502,6 +514,9 @@ function createWindow() {
   mainWindow.on('close', (e) => {
     if (!quitConfirmed) {
       e.preventDefault();
+      // A before-quit that fired first already stopped the guard; the app keeps running, so
+      // restart it (start() is a no-op when running; stop() bumped the epoch, settings stay).
+      try { loadGuard?.start(); } catch { /* noop */ }
       mainWindow?.webContents.send('swarm:request-quit');
       return;
     }
@@ -523,6 +538,44 @@ function createWindow() {
   }
 
   registerTerminalHandlers(mainWindow);
+  if (process.platform === 'linux' && !loadGuard) {
+    const userData = app.getPath('userData');
+    // Resume whatever a crashed SAI (any instance, or the legacy shared file) left stopped.
+    // Live instances' files are skipped. Once, before this instance freezes anything.
+    const orphans = recoverOrphanedFrozenFiles(userData, defaultSignalDeps(''));
+    if (orphans.files > 0) devlog('loadguard', 'crash_recovered', orphans);
+    // Per-instance file, so a second SAI never resumes or overwrites our frozen set.
+    const selfTicks = readStartTicks(process.pid) ?? 0;
+    const signaller = new Signaller(defaultSignalDeps(
+      path.join(userData, frozenFileName(process.pid, selfTicks)),
+      devlogFor('loadguard'),
+    ));
+    const fake = process.env.SAI_LOAD_GUARD_FAKE;
+    loadGuard = new LoadGuard({
+      now: () => Date.now(),
+      readSystem: () => readSystemSample(),
+      readProcs: () => readProcesses(),
+      readGpu: () => readGpu(),
+      appPids: () => new Set(app.getAppMetrics().map((m) => m.pid)),
+      terminalPids: listTerminalPids,
+      signaller,
+      broadcastState: (state) => {
+        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('loadGuard:state', state);
+      },
+      // The id lets the renderer dedupe a live panel's card against App's buffered copy.
+      emitChat: (projectPath, scope, provider, ev) =>
+        emitChatMessage({ type: 'load_guard', id: `load-guard-${Date.now()}-${++loadGuardEventSeq}`, projectPath, scope, provider, loadGuard: ev }),
+      onAgentKilled: makeOnAgentKilled(
+        () => getClaudeBackend() as ReturnType<typeof getClaudeBackend> & ScopeSuspender,
+        (event, data) => devlog('loadguard', event, data),
+      ),
+      devlog: devlogFor('loadguard'),
+      fake: fake === 'warning' || fake === 'critical' ? fake : undefined,
+      instance: process.pid,
+      bootTimeSec: readBootTimeSec() ?? Math.floor(Date.now() / 1000 - os.uptime()),
+      selfCgroup: readSelfCgroup(),
+    });
+  }
   registerClaudeHandlers(mainWindow);
   initSudoService(emitChatMessage);
   registerJiraHandlers();
@@ -854,6 +907,17 @@ function createWindow() {
     }
   }
 
+  /** Missing settings mean on. */
+  function applyLoadGuardSettings() {
+    const s = readSettings();
+    loadGuard?.applySettings({ enabled: s.loadGuardEnabled !== false, autoKill: s.loadGuardAutoKill !== false });
+  }
+
+  // Registered on every platform; without a guard (non-linux) they report an inactive normal state.
+  ipcMain.handle('loadGuard:getState', () => loadGuard?.state() ?? inactiveState());
+  ipcMain.handle('loadGuard:topUsers', () => loadGuard?.topUsers() ?? []);
+  ipcMain.handle('loadGuard:resume', () => { loadGuard?.resumeOverride(); });
+
   ipcMain.handle('settings:get', (_event, key: string, defaultValue?: any) => {
     const settings = readSettings();
     return key in settings ? settings[key] : defaultValue;
@@ -863,6 +927,9 @@ function createWindow() {
     writeSetting(key, value);
     if (key === 'subprocessMemoryCapMB') {
       setSubprocessMemoryCapMB(typeof value === 'number' ? value : 0);
+    }
+    if (key === 'loadGuardEnabled' || key === 'loadGuardAutoKill') {
+      applyLoadGuardSettings();
     }
     if (key === 'overlayEnabled') {
       overlayManager?.setEnabled(value === true);
@@ -891,6 +958,9 @@ function createWindow() {
       ? readSettings().subprocessMemoryCapMB
       : 4096,
   );
+
+  applyLoadGuardSettings();
+  loadGuard?.start();
 
   ipcMain.handle('titlebar:setOverlay', (_event, color: string, symbolColor: string) => {
     if (mainWindow && !useFramelessRounded && !isMac) {
@@ -1413,6 +1483,8 @@ app.on('before-quit', (e) => {
   try { cleanupSwarmMcpConfigs(); } catch { /* noop */ }
   // The sudo pw file holds the user's password — never leave it behind.
   try { lockSudo(); } catch { /* noop */ }
+  // Never leave SAI's processes SIGSTOPped behind us.
+  try { loadGuard?.stop(); } catch { /* noop */ }
   // Synchronously release the remote bridge port before Electron exits.
   if (remote && !_quitInProgress) {
     _quitInProgress = true;

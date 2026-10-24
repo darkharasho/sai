@@ -92,6 +92,7 @@ import { shouldRequireApproval } from './lib/swarmApprovalPolicy';
 import { deriveSwarmMirror, applySwarmPatch } from './lib/swarmStatusMirror';
 import { convertAssistantEnvelope, appendAssistantChunk, mergePersistedWithBuffer } from './lib/swarmTaskMessageBuffer';
 import { hasChatListener, scopeMessageBuffer } from './lib/chatFrameGate';
+import { bufferLoadGuardEvent } from './lib/loadGuardBuffer';
 import { isImageFile } from './utils/imageFiles';
 import { getMonacoEditorFor } from './utils/monacoEditorRegistry';
 import * as monaco from 'monaco-editor';
@@ -2943,7 +2944,7 @@ export default function App() {
               }
               if (kind === 'task_failed') {
                 input.prompt = patchedTask.prompt;
-                if ((statusPatch as any).reason) input.reason = (statusPatch as any).reason;
+                if (statusPatch.reason) input.reason = statusPatch.reason;
               }
               void (window.sai as any).swarmEmitCard?.(msg.projectPath, kind, input)
                 .then((r: { id: string } | null) => {
@@ -3028,6 +3029,12 @@ export default function App() {
       // the focused workspace's active session IS this scope — in that case
       // ChatPanel's own onTurnComplete handles persistence and a parallel write
       // would race / duplicate.
+      // A load-guard card for a chat with no listening panel would otherwise be lost
+      // (a kill there would end the turn with no explanation): buffer it like background
+      // assistant content — merged on select, drained on mount, persisted by the done flush.
+      if (msg.type === 'load_guard') {
+        bufferLoadGuardEvent(msg, workspacesRef.current);
+      }
       if (msg.type === 'assistant' && msg.message?.content) {
         const scope = msg.scope || 'chat';
         if (scope !== 'chat') {

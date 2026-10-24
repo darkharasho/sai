@@ -2,6 +2,8 @@ import { useState, useRef, KeyboardEvent, useEffect, useMemo } from 'react';
 import type { PendingApproval, PendingSudoPrompt, TerminalTab, ChatMessage as ChatMessageType, QueuedMessage, MetaWorkspaceRuntime, EffortLevel, CodexEffort, CodexModelOption, ModelChoice, AIProvider } from '../../types';
 import TodoProgress from './TodoProgress';
 import MessageQueue from './MessageQueue';
+import LoadGuardPill from './LoadGuardPill';
+import type { LoadGuardPublicState } from '../../../electron/services/loadGuard';
 import { basename } from '../../utils/pathUtils';
 import { fileBadge, shortDir } from './userAttachments';
 import ApprovalPanel from './ApprovalPanel';
@@ -48,6 +50,10 @@ interface ChatInputProps {
   awaitingQuestion?: boolean;
   messages?: ChatMessageType[];
   onStop?: () => void;
+  /** Sends are being queued even though idle (system load guard paused); placeholder only. */
+  sendsQueued?: boolean;
+  /** System load guard state; drives the always-visible load pill in the toolbar. */
+  loadGuard?: LoadGuardPublicState;
   onQueue?: (text: string, fullText: string, images?: string[], attachments?: { images: number; files: number; terminal: boolean }) => void;
   queueCount?: number;
   permissionMode: 'default' | 'bypass';
@@ -287,7 +293,7 @@ function getBarColor(pct: number, isOverage: boolean): string {
   return 'var(--accent)';
 }
 
-export default function ChatInput({ projectPath, onSend, overlayControl, onBeforeSend, disabled, slashCommands = [], onSlashRefresh, isStreaming, waiting, awaitingQuestion, messages = [], onStop, onQueue, queueCount, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, availableModels, claudeOverrideState, contextUsage, sessionUsage, sessionCost, usageLimits = [], billingMode = 'subscription', activeFilePath, fileContextEnabled = true, onFileContextToggle, aiProvider = 'claude', pendingApproval, pendingSudoPrompt, onApprove, onDeny, onAlwaysAllow, onAmend, codexModel = 'o3', codexModels = [], onCodexModelChange, onCodexModelsRefresh, codexPermission = 'auto', onCodexPermissionChange, codexEffort = 'high', onCodexEffortChange, geminiModel = 'auto-gemini-3', geminiModels = [], onGeminiModelChange, geminiApprovalMode = 'default', onGeminiApprovalModeChange, geminiConversationMode = 'planning', onGeminiConversationModeChange, kimiModel = 'kimi-k3', kimiModels = [], onKimiModelChange, kimiApprovalMode = 'default', onKimiApprovalModeChange, terminalTabs = [], messageQueue = [], onQueueRemove, onQueuePromote, onQueueSendNow, initialDraft = '', onDraftChange, initialContextItems = [], onContextItemsChange, metaRuntime, mentionInsertRef }: ChatInputProps) {
+export default function ChatInput({ projectPath, onSend, overlayControl, onBeforeSend, disabled, slashCommands = [], onSlashRefresh, isStreaming, waiting, awaitingQuestion, messages = [], onStop, onQueue, sendsQueued, loadGuard, queueCount, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, availableModels, claudeOverrideState, contextUsage, sessionUsage, sessionCost, usageLimits = [], billingMode = 'subscription', activeFilePath, fileContextEnabled = true, onFileContextToggle, aiProvider = 'claude', pendingApproval, pendingSudoPrompt, onApprove, onDeny, onAlwaysAllow, onAmend, codexModel = 'o3', codexModels = [], onCodexModelChange, onCodexModelsRefresh, codexPermission = 'auto', onCodexPermissionChange, codexEffort = 'high', onCodexEffortChange, geminiModel = 'auto-gemini-3', geminiModels = [], onGeminiModelChange, geminiApprovalMode = 'default', onGeminiApprovalModeChange, geminiConversationMode = 'planning', onGeminiConversationModeChange, kimiModel = 'kimi-k3', kimiModels = [], onKimiModelChange, kimiApprovalMode = 'default', onKimiApprovalModeChange, terminalTabs = [], messageQueue = [], onQueueRemove, onQueuePromote, onQueueSendNow, initialDraft = '', onDraftChange, initialContextItems = [], onContextItemsChange, metaRuntime, mentionInsertRef }: ChatInputProps) {
   const selectedCodexModel = codexModels.find(model => model.id === codexModel);
   const supportedCodexEfforts = effortsForCodexModel(selectedCodexModel);
   const effectiveCodexEffort = normalizeCodexEffort(codexEffort, selectedCodexModel);
@@ -823,6 +829,7 @@ export default function ChatInput({ projectPath, onSend, overlayControl, onBefor
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       if (sendingRef.current) return;
+      if (sendsQueued && queueWhilePaused()) return;
       const sendValue = value;
       if (sendValue.trim()) {
         sendingRef.current = true;
@@ -843,6 +850,25 @@ export default function ChatInput({ projectPath, onSend, overlayControl, onBefor
         requestAnimationFrame(() => { sendingRef.current = false; });
       }
     }
+  };
+
+  // Paused: queue the composer like a busy send. Returns true when it handled
+  // the Enter/click (including a full queue, which keeps the text, as Ctrl+Enter does).
+  const queueWhilePaused = (): boolean => {
+    const trimmed = value.trim();
+    if (!trimmed || !onQueue) return false;
+    if ((queueCount ?? 0) >= 5) return true;
+    const queueImages = contextItems.filter(c => c.type === 'image' && c.data).map(c => c.data!);
+    const attachments = {
+      images: queueImages.length,
+      files: contextItems.filter(c => c.type === 'file').length,
+      terminal: contextItems.some(c => c.type === 'terminal'),
+    };
+    const hasAttachments = attachments.images > 0 || attachments.files > 0 || attachments.terminal;
+    onQueue(trimmed, buildMessage(trimmed), queueImages.length > 0 ? queueImages : undefined, hasAttachments ? attachments : undefined);
+    setValue('');
+    setContextItems([]);
+    return true;
   };
 
   const handlePaste = (e: React.ClipboardEvent) => {
@@ -993,7 +1019,7 @@ export default function ChatInput({ projectPath, onSend, overlayControl, onBefor
                 backgroundColor: 'var(--text-muted)',
               }} />
             )}
-            <span>{awaitingQuestion && aiProvider === 'claude' ? 'Type to answer, or use the buttons above…' : isStreaming ? 'Queue another message...' : `Message ${aiProvider === 'codex' ? 'Codex' : aiProvider === 'gemini' ? 'Antigravity' : aiProvider === 'kimi' ? 'Kimi' : 'Claude'}...`}</span>
+            <span>{awaitingQuestion && aiProvider === 'claude' ? 'Type to answer, or use the buttons above…' : isStreaming ? 'Queue another message...' : sendsQueued ? 'Message… (queued until resume)' : `Message ${aiProvider === 'codex' ? 'Codex' : aiProvider === 'gemini' ? 'Antigravity' : aiProvider === 'kimi' ? 'Kimi' : 'Claude'}...`}</span>
           </div>
         )}
         <textarea
@@ -1047,6 +1073,7 @@ export default function ChatInput({ projectPath, onSend, overlayControl, onBefor
             onPromote={onQueuePromote ?? (() => {})}
             onSendNow={onQueueSendNow}
           />
+          {loadGuard && <LoadGuardPill state={loadGuard} />}
           {activeFilePath && (
             <span
               className={`active-file-chip${!fileContextEnabled ? ' disabled' : ''}`}
@@ -1524,6 +1551,7 @@ export default function ChatInput({ projectPath, onSend, overlayControl, onBefor
               className="send-btn"
               onClick={() => {
                 if (sendingRef.current) return;
+                if (sendsQueued && queueWhilePaused()) return;
                 if (value.trim()) {
                   sendingRef.current = true;
                   setHistory(prev => {

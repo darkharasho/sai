@@ -2,6 +2,8 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { ChevronDown, CornerLeftUp } from 'lucide-react';
 import { motion, AnimatePresence, LayoutGroup } from 'motion/react';
 import { setFlipRect } from './flipRegistry';
+import { useLoadGuard } from '../../hooks/useLoadGuard';
+import LoadGuardBanner from './LoadGuardBanner';
 import ThinkingAnimation from '../ThinkingAnimation';
 import SaiLogo from '../SaiLogo';
 import { SPRING, DISTANCE, EASING, useReducedMotionTransition } from './motion';
@@ -9,6 +11,7 @@ import { useSaiAnimationPref } from './useSaiAnimationPref';
 import { markRevealed } from './revealRegistry';
 import { parseToolResultBlocks } from '../../lib/toolResultContent';
 import { registerChatListener, unregisterChatListener, takeBufferedMessages, reconcileDrainedMessages } from '../../lib/chatFrameGate';
+import { loadGuardCard } from '../../lib/loadGuardBuffer';
 import { buildPendingQuestionAnswer } from '../../lib/pendingQuestionAnswer';
 import { normalizeSlashCommands, type SlashCommandInfo } from '../../lib/slashCommands';
 import WaitingIndicator from './WaitingIndicator';
@@ -451,6 +454,8 @@ const THINKING_ROW_MOTION = {
   style: { overflow: 'hidden', flexShrink: 0 },
 } as const;
 const LOAD_MORE_CHUNK = 30; // messages to load when scrolling up
+/** After the load guard kills this chat's agent, its crash errors are swallowed this long. */
+const LOAD_GUARD_ERROR_QUIET_MS = 15_000;
 
 
 export default function ChatPanel({ projectPath, overlayControl, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, availableModels, claudeOverrideState, aiProvider, codexModel, onCodexModelChange, codexModels, onCodexModelsRefresh, codexPermission, onCodexPermissionChange, codexEffort, onCodexEffortChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, kimiModel, onKimiModelChange, kimiModels, kimiApprovalMode, onKimiApprovalModeChange, initialMessages, onMessagesChange, onTurnComplete, onClaudeSessionId, onGeminiSessionId, onKimiSessionId, onCodexSessionId, activeFilePath, onFileOpen, isActive, isStreaming = false, awaitingQuestion = false, initialDraft, onDraftChange, initialContextItems, onContextItemsChange, messageQueue = [], onQueueAdd, onQueueRemove, onQueueShift, onQueuePromote, sessionId, terminalTabs = [], onSlashCommandsUpdate, onInterceptSend, claudeScope = 'chat', onOpenMcpPanel, claudeKind = 'chat', claudeOrchestratorContext, initialPendingApproval = null, renderToolCall, renderMessage, activeMetaRuntime, emptyStateVisual, conversationHeaderVisual, mentionInsertRef: mentionInsertRefProp, waiting = null }: ChatPanelProps) {
@@ -632,6 +637,8 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
   const dockTransition = useReducedMotionTransition(SPRING.dock);
   const followBtnTransition = useReducedMotionTransition(SPRING.flick);
   const turnSeqRef = useRef(0); // tracks the active turn's sequence number
+  // Open after the load guard killed this panel's agent (see LOAD_GUARD_ERROR_QUIET_MS).
+  const loadGuardKillRef = useRef<{ until: number; ended: boolean } | null>(null);
   useEffect(() => {
     // Incoming events are scoped by project/scope, not session. Retire the
     // old sequence so late child activity cannot revive a selected new chat.
@@ -861,13 +868,35 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
     const gateScope = (aiProvider === 'claude' || aiProvider === 'codex') && claudeKind === 'chat' && claudeScope !== 'chat'
       ? claudeScope : null;
     if (gateScope) registerChatListener(gateScope);
-    const cleanup = window.sai.claudeOnMessage((msg: any) => {
+    const onMessage = (msg: any) => {
+      const expectedScope = (aiProvider === 'gemini' || aiProvider === 'kimi') ? 'chat' : claudeScope;
+      // Load-guard events carry '*' wildcards for project and scope (Ruling R5),
+      // so they're matched before the generic filter. Provider must match.
+      if (msg.type === 'load_guard') {
+        const ev = msg.loadGuard;
+        if (msg.provider !== aiProvider) return;
+        if (msg.projectPath !== '*' && msg.projectPath !== projectPath) return;
+        if (msg.scope !== '*' && msg.scope !== expectedScope) return;
+        const card = loadGuardCard(msg);
+        if (!card) return;
+        flushStreamingText();
+        // A killed agent's process dies mid-turn: its crash error is expected
+        // noise. Swallow errors for a while and end the turn as a normal done.
+        if (ev.kind === 'killed' && ev.unitKind === 'agent') {
+          loadGuardKillRef.current = { until: Date.now() + LOAD_GUARD_ERROR_QUIET_MS, ended: false };
+        }
+        // Deduped by id: App may have buffered this card in the mount gap.
+        setMessages(prev => (prev.some(m => m.id === card.id) ? prev : [...prev, card]));
+        // A command/service kill has no done of its own; hand the card to the
+        // parent so the unmount/quit flushes persist it.
+        flushMessagesToParent();
+        return;
+      }
       // Only process messages for this workspace and chat scope.
       // Claude uses session UUIDs as scopes for multi-scope isolation.
       // Gemini uses a fixed chat scope. Claude and Codex preserve the panel's
       // scope so parallel sessions cannot consume each other's events.
       if (msg.projectPath && msg.projectPath !== projectPath) return;
-      const expectedScope = (aiProvider === 'gemini' || aiProvider === 'kimi') ? 'chat' : claudeScope;
       if (msg.scope && msg.scope !== expectedScope) return;
 
       // Flush any buffered streaming text before processing a non-delta event,
@@ -897,6 +926,8 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
       }
 
       if (msg.type === 'streaming_start') {
+        // A new turn's errors are its own, never the killed agent's.
+        loadGuardKillRef.current = null;
         if (msg.turnSeq != null) turnSeqRef.current = msg.turnSeq;
         // A new stream boundary supersedes any child state that did not get a
         // terminal lifecycle event (for example, an interrupted parent turn).
@@ -999,6 +1030,17 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
       }
 
       if (msg.type === 'error') {
+        const kill = loadGuardKillRef.current;
+        if (kill && Date.now() < kill.until) {
+          // Deliberate load-guard stop, not a crash. End the turn once through
+          // the normal done path: turnSeq null is never stale-dropped, and the
+          // dead process can't send trailing child events.
+          if (!kill.ended) {
+            kill.ended = true;
+            onMessage({ type: 'done', projectPath: msg.projectPath, scope: msg.scope, turnSeq: null, subagentsAborted: true });
+          }
+          return;
+        }
         const error = parseAiError(msg.text || 'Unknown error');
         setMessages(prev => [...prev, {
           id: Date.now().toString(),
@@ -1626,7 +1668,8 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
           });
         }
       }
-    });
+    };
+    const cleanup = window.sai.claudeOnMessage(onMessage);
 
     // A sudo prompt that fired while this chat was unmounted would otherwise
     // be lost until its 5-minute timeout — re-seed it from the broker.
@@ -1649,6 +1692,8 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
     }
 
     return () => {
+      // The window belongs to this subscription's scope; a scope switch drops it.
+      loadGuardKillRef.current = null;
       flushStreamingText();
       if (streamIdleTimerRef.current != null) {
         clearTimeout(streamIdleTimerRef.current);
@@ -2190,6 +2235,21 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
     }]);
   }, [setMessages]);
 
+  const loadGuard = useLoadGuard();
+  // Only an enabled, paused guard holds sends back; everything else is unchanged.
+  const loadPaused = loadGuard.enabled && loadGuard.paused;
+  const loadPausedRef = useRef(loadPaused);
+  loadPausedRef.current = loadPaused;
+  const messageQueueRef = useRef(messageQueue);
+  messageQueueRef.current = messageQueue;
+  // Paused: hold a provider-bound send in the queue instead of dispatching.
+  const queueWhilePaused = (text: string, images?: string[]): boolean => {
+    if (!loadPausedRef.current || !sessionId || !onQueueAdd) return false;
+    onQueueAdd(sessionId, text, text, images);
+    pendingComposerRectRef.current = null;
+    return true;
+  };
+
   const handleSend = async (text: string, images?: string[]) => {
     // Handle built-in commands locally
     if (import.meta.env.DEV && text.startsWith('/fake-error')) {
@@ -2262,6 +2322,9 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
       return;
     }
     if (text === '/compact' && aiProvider === 'claude') {
+      // /compact needs the live agent, so it waits out a pause like any send.
+      if (queueWhilePaused(text)) return;
+      loadGuardKillRef.current = null;
       window.sai.claudeCompact(projectPath, permissionMode, effortLevel, modelChoice, claudeScope);
       pendingComposerRectRef.current = null;
       return;
@@ -2282,6 +2345,9 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
       ]);
       return;
     }
+
+    // Everything below dispatches to a provider: hold it while the load guard is paused.
+    if (queueWhilePaused(text, images)) return;
 
     // Bypass-queue-on-enter: when streaming AND the queue has items, plain
     // Enter signals "send this now" — interrupt the current turn first, then
@@ -2319,6 +2385,9 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
       );
     }
 
+    // Our own send starts a fresh turn: its errors (even before streaming_start,
+    // e.g. a failed resume) are real, not the killed agent's.
+    loadGuardKillRef.current = null;
     const prompt = activeFilePath && fileContextEnabled ? `[File: ${activeFilePath}]\n\n${text}` : text;
     if (aiProvider === 'gemini') {
       (window.sai as any).geminiSend(projectPath, prompt, imagePaths, geminiApprovalMode, geminiConversationMode, geminiModel, 'chat');
@@ -2375,6 +2444,8 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
   const handleQueueSendNow = (id: string) => {
     const item = messageQueue.find(m => m.id === id);
     if (!item || !sessionId) return;
+    // Paused: leave it queued and don't interrupt the running turn.
+    if (loadPausedRef.current) return;
     onQueueRemove?.(sessionId, id);
     // Same semantics as bypass-queue-on-enter: interrupt the current turn and
     // dispatch immediately; the rest of the queue resumes draining afterwards.
@@ -2390,6 +2461,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
 
   const prevStreamingRef = useRef(false);
   const prevQueueLenRef = useRef(messageQueue.length);
+  const prevLoadPausedRef = useRef(loadPaused);
   const suppressNextDrainRef = useRef(false);
   const drainPendingRef = useRef(false);
   const turnStartedAtRef = useRef<number | null>(null);
@@ -2408,6 +2480,8 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
     const prevQueueLen = prevQueueLenRef.current;
     prevStreamingRef.current = isStreaming;
     prevQueueLenRef.current = messageQueue.length;
+    const resumedWithQueue = prevLoadPausedRef.current && !loadPaused && messageQueue.length > 0;
+    prevLoadPausedRef.current = loadPaused;
 
     const turnJustEnded = wasStreaming && !isStreaming;
     // Item(s) appeared while we were already settled and idle.
@@ -2448,7 +2522,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
       }
     }
 
-    if (!isStreaming && (turnJustEnded || queueGrewWhileIdle)) {
+    if (!isStreaming && !loadPaused && (turnJustEnded || queueGrewWhileIdle || resumedWithQueue)) {
       // suppressNextDrainRef is set right before an interrupting stop (bypass /
       // send-now). It must only ever consume the turn-end edge it was set for —
       // not a queue-grew-while-idle wake — otherwise it could swallow an
@@ -2464,9 +2538,19 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
         const next = messageQueue[0];
         drainPendingRef.current = true;
         setDrainInFlight(true);
-        onQueueShift(sessionId);
         autoSendTimerRef.current = setTimeout(() => {
           autoSendTimerRef.current = null;
+          // A pause (or the user removing/reordering the head) inside the 300ms
+          // window: leave the item queued, in place, and release the drain. The
+          // resume edge picks it up. The shift happens here, not earlier, so
+          // there's nothing to put back.
+          if (loadPausedRef.current || messageQueueRef.current[0]?.id !== next.id) {
+            drainPendingRef.current = false;
+            setDrainInFlight(false);
+            if (drainBackstopRef.current) { clearTimeout(drainBackstopRef.current); drainBackstopRef.current = null; }
+            return;
+          }
+          onQueueShift(sessionId);
           handleSend(next.fullText, next.images);
         }, 300);
         // Safety: if the follow-up never produces a streaming_start (e.g. a spawn
@@ -2482,7 +2566,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
         }, 8000);
       }
     }
-  }, [isStreaming, messageQueue]);
+  }, [isStreaming, messageQueue, loadPaused]);
 
   // Unmount-only: a pending queue-drain send must not fire into an unmounted
   // panel. Not cleared on isStreaming changes — that would drop a message the
@@ -2494,6 +2578,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
 
   return (
     <div className="chat-panel">
+      <LoadGuardBanner state={loadGuard} />
       <motion.div
         className="pinned-prompt-bar"
         layoutId={pinnedUserMessage ? `pinned-${pinnedUserMessage.id}` : undefined}
@@ -2703,6 +2788,8 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
             slashCommands={slashCommands}
             onSlashRefresh={refreshSlashCommands}
             onQueue={handleQueue}
+            sendsQueued={loadPaused}
+            loadGuard={loadGuard}
             queueCount={messageQueue.length}
             pendingApproval={pendingApproval}
             pendingSudoPrompt={pendingSudoPrompt}

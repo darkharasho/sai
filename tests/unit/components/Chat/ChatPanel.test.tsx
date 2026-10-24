@@ -14,6 +14,7 @@ vi.mock('../../../../src/components/Chat/ChatMessage', () => ({
       data-tool-output={props.message?.toolCalls?.[0]?.output ?? ''}
       data-tool-live-output={props.message?.toolCalls?.[0]?.liveOutput === true ? 'true' : 'false'}
       data-streaming={props.isStreaming ? 'true' : 'false'}
+      data-load-guard={props.message?.loadGuard?.kind ?? ''}
     />
   ),
 }));
@@ -45,6 +46,7 @@ vi.mock('../../../../src/components/ThinkingAnimation', () => ({
   ),
 }));
 
+import { scopeMessageBuffer } from '../../../../src/lib/chatFrameGate';
 import ChatPanel from '../../../../src/components/Chat/ChatPanel';
 
 type ChatPanelProps = ComponentProps<typeof ChatPanel>;
@@ -2444,6 +2446,136 @@ describe('ChatPanel', () => {
         ]));
         expect(calls).toHaveLength(2);
       });
+    });
+  });
+
+  describe('load_guard events', () => {
+    const killedEv = {
+      kind: 'killed', unitKind: 'agent', label: 'claude', sizeKb: 5 * 1024 * 1024, memUsedPct: 97,
+      top: [], toldAi: '[SAI system load: CRITICAL] SAI killed `claude`.',
+    };
+    const lgProps = () => ({
+      ...baseProps(), aiProvider: 'claude' as const, claudeScope: 's1', isStreaming: false,
+    });
+    let now = 1_000_000;
+    beforeEach(() => {
+      now = 1_000_000;
+      vi.spyOn(Date, 'now').mockImplementation(() => now);
+    });
+    afterEach(() => { vi.restoreAllMocks(); });
+
+    it('killed: appends one system card, swallows an error 3s later and ends the turn; an error 16s later shows', async () => {
+      const props = lgProps();
+      const { container } = render(<ChatPanel {...props} />);
+      await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+      const handler = mockSai.claudeOnMessage.mock.calls[0][0] as (msg: any) => void;
+
+      await act(async () => {
+        handler({ type: 'streaming_start', turnSeq: 5, projectPath: '/project', scope: 's1' });
+        handler({ type: 'subagent_activity', agentId: 'c1', status: 'running', summary: 'Child', turnSeq: 5, projectPath: '/project', scope: 's1' });
+      });
+      expect(latestChatInputProps.isStreaming).toBe(true);
+
+      await act(async () => {
+        handler({ type: 'load_guard', projectPath: '/project', scope: 's1', provider: 'claude', loadGuard: killedEv });
+      });
+      const cards = container.querySelectorAll('[data-load-guard="killed"]');
+      expect(cards).toHaveLength(1);
+      expect(container.querySelectorAll('[data-testid="chat-message"]')).toHaveLength(1);
+      expect(props.onMessagesChange).toHaveBeenLastCalledWith([
+        expect.objectContaining({ role: 'system', content: '', loadGuard: killedEv }),
+      ]);
+
+      now += 3_000;
+      await act(async () => {
+        handler({ type: 'error', text: 'Claude process exited unexpectedly (signal SIGKILL)', turnSeq: 5, projectPath: '/project', scope: 's1' });
+      });
+      expect(container.querySelectorAll('[data-testid="chat-message"]')).toHaveLength(1);
+      expect(props.onTurnComplete).toHaveBeenCalledTimes(1);
+      expect(latestChatInputProps.isStreaming).toBe(false);
+
+      now += 13_000; // 16s after the kill
+      await act(async () => {
+        handler({ type: 'error', text: 'Later failure', projectPath: '/project', scope: 's1' });
+      });
+      const msgs = container.querySelectorAll('[data-testid="chat-message"]');
+      expect(msgs).toHaveLength(2);
+      expect(msgs[1].getAttribute('data-msg-content')).toContain('Later failure');
+    });
+
+    it("the panel's own send closes the quiet window (pre-streaming_start errors show)", async () => {
+      const props = lgProps();
+      const { container } = render(<ChatPanel {...props} />);
+      await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+      const handler = mockSai.claudeOnMessage.mock.calls[0][0] as (msg: any) => void;
+      await act(async () => {
+        handler({ type: 'load_guard', projectPath: '/project', scope: 's1', provider: 'claude', loadGuard: killedEv });
+      });
+      await act(async () => { fireEvent.click(screen.getByTestId('chat-input')); });
+      await waitFor(() => expect(mockSai.claudeSend).toHaveBeenCalled());
+      now += 1_000;
+      await act(async () => {
+        handler({ type: 'error', text: 'Resume failed', projectPath: '/project', scope: 's1' });
+      });
+      const contents = [...container.querySelectorAll('[data-testid="chat-message"]')].map(m => m.getAttribute('data-msg-content'));
+      expect(contents.some(c => c?.includes('Resume failed'))).toBe(true);
+      expect(props.onTurnComplete).not.toHaveBeenCalled();
+    });
+
+    it('a killed command (agent still running) opens no quiet window', async () => {
+      const props = lgProps();
+      const { container } = render(<ChatPanel {...props} />);
+      await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+      const handler = mockSai.claudeOnMessage.mock.calls[0][0] as (msg: any) => void;
+      await act(async () => {
+        handler({ type: 'load_guard', projectPath: '/project', scope: 's1', provider: 'claude', loadGuard: { ...killedEv, unitKind: 'command', label: 'vitest' } });
+      });
+      now += 3_000;
+      await act(async () => {
+        handler({ type: 'error', text: 'Real error', projectPath: '/project', scope: 's1' });
+      });
+      expect(container.querySelectorAll('[data-testid="chat-message"]')).toHaveLength(2);
+      expect(props.onTurnComplete).not.toHaveBeenCalled();
+    });
+
+    it('I5: drains a card App buffered before mount; the same id arriving live is not duplicated', async () => {
+      scopeMessageBuffer.set('s1', [{ id: 'lg-7', role: 'system', content: '', timestamp: 1, loadGuard: killedEv } as any]);
+      const { container } = render(<ChatPanel {...lgProps()} />);
+      await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+      await waitFor(() => expect(container.querySelectorAll('[data-load-guard="killed"]')).toHaveLength(1));
+      expect(scopeMessageBuffer.has('s1')).toBe(false);
+      const handler = mockSai.claudeOnMessage.mock.calls[0][0] as (msg: any) => void;
+      await act(async () => {
+        handler({ type: 'load_guard', id: 'lg-7', projectPath: '/project', scope: 's1', provider: 'claude', loadGuard: killedEv });
+      });
+      expect(container.querySelectorAll('[data-load-guard="killed"]')).toHaveLength(1);
+    });
+
+    it("note with '*' scope and project is appended to a matching-provider panel", async () => {
+      const { container } = render(<ChatPanel {...lgProps()} />);
+      await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+      const handler = mockSai.claudeOnMessage.mock.calls[0][0] as (msg: any) => void;
+      await act(async () => {
+        handler({ type: 'load_guard', projectPath: '*', scope: '*', provider: 'claude', loadGuard: { kind: 'note', text: 'x' } });
+      });
+      expect(container.querySelectorAll('[data-load-guard="note"]')).toHaveLength(1);
+    });
+
+    it("ignores a '*' scope event for another provider, another scope, or another project", async () => {
+      const { container } = render(<ChatPanel {...lgProps()} />);
+      await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+      const handler = mockSai.claudeOnMessage.mock.calls[0][0] as (msg: any) => void;
+      await act(async () => {
+        handler({ type: 'load_guard', projectPath: '/project', scope: '*', provider: 'codex', loadGuard: killedEv });
+        handler({ type: 'load_guard', projectPath: '/project', scope: 's2', provider: 'claude', loadGuard: killedEv });
+        handler({ type: 'load_guard', projectPath: '/other', scope: 's1', provider: 'claude', loadGuard: killedEv });
+      });
+      expect(container.querySelectorAll('[data-testid="chat-message"]')).toHaveLength(0);
+      // No kill window opened: errors still show.
+      await act(async () => {
+        handler({ type: 'error', text: 'Real error', projectPath: '/project', scope: 's1' });
+      });
+      expect(container.querySelectorAll('[data-testid="chat-message"]')).toHaveLength(1);
     });
   });
 });

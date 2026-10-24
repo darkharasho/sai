@@ -138,6 +138,28 @@ describe('ChatInput', () => {
   });
 
   describe('message queueing', () => {
+    it('sendsQueued: Enter queues via onQueue, shows the queued placeholder, respects the cap', () => {
+      const onQueue = vi.fn();
+      const onSend = vi.fn();
+      const { rerender } = render(
+        <ChatInput {...defaultProps} onSend={onSend} sendsQueued onQueue={onQueue} queueCount={0} />
+      );
+      expect(screen.getByText('Message… (queued until resume)')).toBeTruthy();
+      const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
+      fireEvent.change(textarea, { target: { value: 'hold me' } });
+      fireEvent.keyDown(textarea, { key: 'Enter' });
+      expect(onQueue).toHaveBeenCalledWith('hold me', 'hold me', undefined, undefined);
+      expect(onSend).not.toHaveBeenCalled();
+      expect(textarea.value).toBe('');
+      // Full queue: nothing sent, text kept.
+      rerender(<ChatInput {...defaultProps} onSend={onSend} sendsQueued onQueue={onQueue} queueCount={5} />);
+      fireEvent.change(textarea, { target: { value: 'too many' } });
+      fireEvent.keyDown(textarea, { key: 'Enter' });
+      expect(onQueue).toHaveBeenCalledTimes(1);
+      expect(onSend).not.toHaveBeenCalled();
+      expect(textarea.value).toBe('too many');
+    });
+
     it('calls onQueue on Ctrl+Enter when streaming and queue not full', () => {
       const onQueue = vi.fn();
       render(
@@ -536,5 +558,27 @@ describe('ChatInput file context tabs', () => {
     expect(chips.map(c => c.getAttribute('title'))).toEqual(items.map(i => i.data));
     expect(chips.map(c => c.querySelector('.context-chip-badge')?.textContent)).toEqual(['TS', 'MD']);
     expect(chips.map(c => c.querySelector('.context-chip-dir')?.textContent ?? null)).toEqual(['Chat/', null]);
+  });
+});
+
+describe('ChatInput load guard pill', () => {
+  beforeEach(() => { installMockSai(); });
+  const lg = (level: 'normal' | 'warning') => ({
+    level, paused: false, override: false, saiCaused: false, saiAppHeavy: false,
+    memUsedPct: 85, swapUsedPct: 0, game: null, recoveredAt: null, enabled: true,
+  });
+
+  it('renders the pill in the always-visible composer toolbar', () => {
+    const { container } = render(<ChatInput {...defaultProps} loadGuard={lg('warning')} />);
+    const pill = screen.getByRole('status');
+    expect(pill.textContent).toBe('RAM 85%');
+    expect(container.querySelector('.input-toolbar .toolbar-left')!.contains(pill)).toBe(true);
+  });
+
+  it('renders nothing at normal load or without state', () => {
+    const { container, rerender } = render(<ChatInput {...defaultProps} loadGuard={lg('normal')} />);
+    expect(container.querySelector('.load-guard-pill')).toBeNull();
+    rerender(<ChatInput {...defaultProps} />);
+    expect(container.querySelector('.load-guard-pill')).toBeNull();
   });
 });

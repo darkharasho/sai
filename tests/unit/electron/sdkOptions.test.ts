@@ -214,4 +214,18 @@ describe('feature options', () => {
     expect(buildSdkOptions({ kind: 'chat', cwd: '/ws', plugins: [] }).plugins).toBeUndefined();
     expect(buildSdkOptions({ kind: 'chat', cwd: '/ws' }).plugins).toBeUndefined();
   });
+  it('loadGuardHook → PreToolUse with no matcher next to the sudo Bash entry, plus UserPromptSubmit', () => {
+    const sudo = vi.fn(async () => ({}));
+    const lg = vi.fn(async () => ({}));
+    const opts = buildSdkOptions({ ...BASE, preToolUseHook: sudo, loadGuardHook: lg });
+    expect(opts.hooks?.PreToolUse).toEqual([{ matcher: 'Bash', hooks: [sudo] }, { hooks: [lg] }]);
+    expect(opts.hooks?.UserPromptSubmit).toEqual([{ hooks: [lg] }]);
+  });
+
+  it('loadGuardHook alone → no Bash entry', () => {
+    const lg = vi.fn(async () => ({}));
+    const opts = buildSdkOptions({ ...BASE, loadGuardHook: lg });
+    expect(opts.hooks?.PreToolUse).toEqual([{ hooks: [lg] }]);
+    expect(opts.hooks?.UserPromptSubmit).toEqual([{ hooks: [lg] }]);
+  });
 });

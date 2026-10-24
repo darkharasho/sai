@@ -42,7 +42,21 @@ export interface ChatMessage {
    * it to render purpose-built cards instead of plain text.
    */
   meta?: ChatMessageMeta;
+  /** Load-guard chat event (Stopped card / "System load:" note). role 'system',
+   *  empty content; never sent to the AI. */
+  loadGuard?: LoadGuardChatEvent;
 }
+
+/** Mirrors electron/services/loadGuard LoadGuardChatEvent; re-declared so types.ts stays electron-free. */
+export interface LoadGuardTopUser {
+  label: string;
+  sizeKb: number;
+  owner: 'sai-ai' | 'sai-app' | 'sai-terminal' | 'game' | 'other';
+}
+
+export type LoadGuardChatEvent =
+  | { kind: 'note'; text: string }
+  | { kind: 'killed'; unitKind: 'command' | 'service' | 'agent'; label: string; sizeKb: number; memUsedPct: number; top: LoadGuardTopUser[]; toldAi: string };
 
 export type ChatMessageMeta = ApprovalChatMeta;
 
@@ -487,6 +501,11 @@ declare global {
     devlogInfo?: () => Promise<{ enabled: boolean; path: string | null }>;
     /** Canonical home directory plus every alias spelling (symlinked homes). */
     homeDir?: () => Promise<{ path: string; aliases: string[] }>;
+    /** System load guard (linux; elsewhere getState reports enabled:false) — see electron/services/loadGuard. */
+    loadGuardGetState?: () => Promise<import('../electron/services/loadGuard').LoadGuardPublicState>;
+    loadGuardTopUsers?: () => Promise<import('../electron/services/loadGuard/types').TopUser[]>;
+    loadGuardResume?: () => Promise<void>;
+    loadGuardOnState?: (cb: (s: import('../electron/services/loadGuard').LoadGuardPublicState) => void) => () => void;
     metaWorkspaceList?: () => Promise<any[]>;
     metaWorkspaceCreate?: (input: any) => Promise<any>;
     metaWorkspaceUpdate?: (id: string, patch: any) => Promise<any>;

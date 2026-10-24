@@ -44,6 +44,17 @@ describe('ChatMessage', () => {
     installMockSai();
   });
 
+  it('renders the load-guard card for a persisted loadGuard message (history reload)', () => {
+    // Round-trip through structured clone, like IndexedDB does on save/reload.
+    const msg = structuredClone(makeMessage({
+      role: 'system', content: '',
+      loadGuard: { kind: 'note', text: '[SAI system load: WARNING] RAM 85% used.' },
+    }));
+    const { container } = render(<ChatMessage message={msg} />);
+    expect(screen.getByText('System load:')).toBeTruthy();
+    expect(container.textContent).toContain('RAM 85% used.');
+  });
+
   it('renders without crashing', () => {
     const msg = makeMessage();
     render(<ChatMessage message={msg} />);
