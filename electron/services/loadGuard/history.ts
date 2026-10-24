@@ -22,19 +22,21 @@ export class History {
     while (this.entries.length > 0 && this.entries[0].ts < cutoff) this.entries.shift();
   }
 
-  private at(ts: number): HistoryEntry | null {
+  /** Newest entry at or before ts; one older than ts - maxStaleMs (a gap: suspend, skipped ticks) counts as missing. */
+  private at(ts: number, maxStaleMs = Infinity): HistoryEntry | null {
     for (let i = this.entries.length - 1; i >= 0; i--) {
-      if (this.entries[i].ts <= ts) return this.entries[i];
+      const e = this.entries[i];
+      if (e.ts <= ts) return e.ts >= ts - maxStaleMs ? e : null;
     }
     return null;
   }
 
-  swapUsedKbAt(ts: number): number | null {
-    return this.at(ts)?.swapUsedKb ?? null;
+  swapUsedKbAt(ts: number, maxStaleMs?: number): number | null {
+    return this.at(ts, maxStaleMs)?.swapUsedKb ?? null;
   }
 
-  unitSizeAt(ts: number, rootPid: number, startTicks: number): number | null {
-    const u = this.at(ts)?.unitSizes.find(x => x.rootPid === rootPid && x.startTicks === startTicks);
+  unitSizeAt(ts: number, rootPid: number, startTicks: number, maxStaleMs?: number): number | null {
+    const u = this.at(ts, maxStaleMs)?.unitSizes.find(x => x.rootPid === rootPid && x.startTicks === startTicks);
     return u ? u.sizeKb : null;
   }
 

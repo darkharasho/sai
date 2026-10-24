@@ -3,7 +3,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { readSystemSample, readProcesses, readGpu } from '../../../../electron/services/loadGuard/procReader';
+import { readSystemSample, readProcesses, readGpu, readBootTimeSec } from '../../../../electron/services/loadGuard/procReader';
 import { formatScopeTag } from '../../../../electron/services/loadGuard/scopeTag';
 
 let root: string;
@@ -103,5 +103,13 @@ describe('procReader', () => {
 
   it('resolves null when exec never settles', async () => {
     expect(await readGpu(() => new Promise<string>(() => {}), 20)).toBeNull();
+  });
+});
+
+describe('readBootTimeSec', () => {
+  it('reads btime from <procRoot>/stat, null when missing', async () => {
+    await put('stat', 'cpu  1 2 3 4\nintr 5\nbtime 1761200000\nprocesses 42\n');
+    expect(readBootTimeSec(root)).toBe(1761200000);
+    expect(readBootTimeSec(path.join(root, 'nope'))).toBeNull();
   });
 });

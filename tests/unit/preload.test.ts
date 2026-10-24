@@ -295,3 +295,27 @@ describe('electron preload bridge — home directory', () => {
     expect(invoke).toHaveBeenCalledWith('app:homeDir');
   });
 });
+
+describe('electron preload bridge — load guard', () => {
+  beforeEach(() => { invoke.mockClear(); on.mockClear(); removeListener.mockClear(); });
+
+  it('invokes the loadGuard channels', () => {
+    exposed.loadGuardGetState();
+    expect(invoke).toHaveBeenCalledWith('loadGuard:getState');
+    exposed.loadGuardTopUsers();
+    expect(invoke).toHaveBeenCalledWith('loadGuard:topUsers');
+    exposed.loadGuardResume();
+    expect(invoke).toHaveBeenCalledWith('loadGuard:resume');
+  });
+
+  it('loadGuardOnState forwards the state and unsubscribes', () => {
+    const cb = vi.fn();
+    const un = exposed.loadGuardOnState(cb);
+    expect(on).toHaveBeenCalledWith('loadGuard:state', expect.any(Function));
+    const listener = on.mock.calls[0][1];
+    listener({}, { level: 'critical' });
+    expect(cb).toHaveBeenCalledWith({ level: 'critical' });
+    un();
+    expect(removeListener).toHaveBeenCalledWith('loadGuard:state', listener);
+  });
+});

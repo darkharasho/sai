@@ -31,6 +31,18 @@ describe('History', () => {
     expect(h.unitSizeAt(1000, 5, 10)).toBe(99);
     expect(h.unitSizeAt(1000, 5, 11)).toBeNull();
   });
+  it('maxStaleMs treats an entry older than ts - maxStaleMs as missing', () => {
+    const h = new History();
+    h.push(entry(0, { unitSizes: [{ rootPid: 5, startTicks: 10, sizeKb: 99 }] }));
+    h.push(entry(100_000));
+    // newest entry at/before 60s is ts 0: 60s stale
+    expect(h.swapUsedKbAt(60_000)).toBe(0);
+    expect(h.swapUsedKbAt(60_000, 15_000)).toBeNull();
+    expect(h.swapUsedKbAt(10_000, 15_000)).toBe(0);
+    expect(h.unitSizeAt(60_000, 5, 10)).toBe(99);
+    expect(h.unitSizeAt(60_000, 5, 10, 15_000)).toBeNull();
+    expect(h.unitSizeAt(15_000, 5, 10, 15_000)).toBe(99);
+  });
   it('summary returns top3 within the window', () => {
     const h = new History();
     const top: TopUser[] = Array.from({ length: 5 }, (_, i) => ({ label: `u${i}`, sizeKb: 5 - i, owner: 'other' as const }));

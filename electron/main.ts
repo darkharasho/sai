@@ -72,7 +72,7 @@ async function _resolveTailnetEndpointWithEnv() {
     },
   });
 }
-import { registerTerminalHandlers, destroyAllTerminals } from './services/pty';
+import { registerTerminalHandlers, destroyAllTerminals, listTerminalPids } from './services/pty';
 import { registerClaudeHandlers, destroyClaude, setRemoteCeiling, setRemoteBus, setSubprocessMemoryCapMB, emitChatMessage } from './services/claude';
 import { initSudoService, lockSudo } from './services/sudo';
 import { getClaudeBackend, getClaudeBackendSetting } from './services/claudeBackend';
@@ -83,7 +83,10 @@ import { registerUpdater } from './services/updater';
 import { registerUsageHandlers, destroyUsagePolling } from './services/usage';
 import { destroyAll, startSuspendTimer, stopSuspendTimer, getAll, remove, suspend, getOrCreate as getOrCreateWorkspace, DEFAULT_SUSPEND_TIMEOUT } from './services/workspace';
 import { initFocusTracking, setActiveWorkspace } from './services/notify';
-import { devlog, devlogEnabled, devlogPath } from './services/devlog';
+import { devlog, devlogEnabled, devlogFor, devlogPath } from './services/devlog';
+import { LoadGuard, inactiveState } from './services/loadGuard';
+import { Signaller, defaultSignalDeps } from './services/loadGuard/signals';
+import { readBootTimeSec, readGpu, readProcesses, readSystemSample } from './services/loadGuard/procReader';
 import { OverlayManager } from './services/overlay';
 import { registerGithubAuthHandlers } from './services/github-auth';
 import { initialSync, schedulePush } from './services/github-sync';
@@ -131,6 +134,8 @@ if (process.platform === 'linux') {
 }
 
 let mainWindow: BrowserWindow | null = null;
+/** System load guard; linux only, null elsewhere. */
+let loadGuard: LoadGuard | null = null;
 let quitConfirmed = false;
 let overlayManager: OverlayManager | null = null;
 
@@ -528,6 +533,34 @@ function createWindow() {
   }
 
   registerTerminalHandlers(mainWindow);
+  if (process.platform === 'linux' && !loadGuard) {
+    const signaller = new Signaller(defaultSignalDeps(path.join(app.getPath('userData'), 'loadguard-frozen.json')));
+    // Resume whatever a crashed previous run left stopped. Once, before any freeze:
+    // it resets the frozen set.
+    const resumed = signaller.recoverFromCrash();
+    if (resumed > 0) devlog('loadguard', 'crash_recovered', { count: resumed });
+    const fake = process.env.SAI_LOAD_GUARD_FAKE;
+    loadGuard = new LoadGuard({
+      now: () => Date.now(),
+      readSystem: () => readSystemSample(),
+      readProcs: () => readProcesses(),
+      readGpu: () => readGpu(),
+      appPids: () => new Set(app.getAppMetrics().map((m) => m.pid)),
+      terminalPids: listTerminalPids,
+      signaller,
+      broadcastState: (state) => {
+        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('loadGuard:state', state);
+      },
+      emitChat: (projectPath, scope, provider, ev) =>
+        emitChatMessage({ type: 'load_guard', projectPath, scope, provider, loadGuard: ev }),
+      // TODO(Task 10): call SdkBackend.suspendScope for claude SDK scopes so the chat resumes cleanly.
+      onAgentKilled: (tag) => devlog('loadguard', 'agent_killed', { ...tag }),
+      devlog: devlogFor('loadguard'),
+      fake: fake === 'warning' || fake === 'critical' ? fake : undefined,
+      instance: process.pid,
+      bootTimeSec: readBootTimeSec() ?? Math.floor(Date.now() / 1000 - os.uptime()),
+    });
+  }
   registerClaudeHandlers(mainWindow);
   initSudoService(emitChatMessage);
   registerJiraHandlers();
@@ -859,6 +892,17 @@ function createWindow() {
     }
   }
 
+  /** Missing settings mean on. */
+  function applyLoadGuardSettings() {
+    const s = readSettings();
+    loadGuard?.applySettings({ enabled: s.loadGuardEnabled !== false, autoKill: s.loadGuardAutoKill !== false });
+  }
+
+  // Registered on every platform; without a guard (non-linux) they report an inactive normal state.
+  ipcMain.handle('loadGuard:getState', () => loadGuard?.state() ?? inactiveState());
+  ipcMain.handle('loadGuard:topUsers', () => loadGuard?.topUsers() ?? []);
+  ipcMain.handle('loadGuard:resume', () => { loadGuard?.resumeOverride(); });
+
   ipcMain.handle('settings:get', (_event, key: string, defaultValue?: any) => {
     const settings = readSettings();
     return key in settings ? settings[key] : defaultValue;
@@ -868,6 +912,9 @@ function createWindow() {
     writeSetting(key, value);
     if (key === 'subprocessMemoryCapMB') {
       setSubprocessMemoryCapMB(typeof value === 'number' ? value : 0);
+    }
+    if (key === 'loadGuardEnabled' || key === 'loadGuardAutoKill') {
+      applyLoadGuardSettings();
     }
     if (key === 'overlayEnabled') {
       overlayManager?.setEnabled(value === true);
@@ -896,6 +943,9 @@ function createWindow() {
       ? readSettings().subprocessMemoryCapMB
       : 4096,
   );
+
+  applyLoadGuardSettings();
+  loadGuard?.start();
 
   ipcMain.handle('titlebar:setOverlay', (_event, color: string, symbolColor: string) => {
     if (mainWindow && !useFramelessRounded && !isMac) {
@@ -1418,6 +1468,8 @@ app.on('before-quit', (e) => {
   try { cleanupSwarmMcpConfigs(); } catch { /* noop */ }
   // The sudo pw file holds the user's password — never leave it behind.
   try { lockSudo(); } catch { /* noop */ }
+  // Never leave SAI's processes SIGSTOPped behind us.
+  try { loadGuard?.stop(); } catch { /* noop */ }
   // Synchronously release the remote bridge port before Electron exits.
   if (remote && !_quitInProgress) {
     _quitInProgress = true;

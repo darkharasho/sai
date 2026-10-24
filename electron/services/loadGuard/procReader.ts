@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import { execFile } from 'node:child_process';
 import type { ProcInfo, SystemSample } from './types';
 import { SCOPE_ENV, parseScopeTag } from './scopeTag';
@@ -49,6 +50,16 @@ export async function readSystemSample(
     psiMemFull10: psiAvg10(psiMem, 'full'),
     psiCpuSome10: psiAvg10(psiCpu, 'some'),
   };
+}
+
+/** Boot time (epoch seconds) from the `btime` line of /proc/stat; null when unreadable. Read once at boot. */
+export function readBootTimeSec(procRoot = '/proc'): number | null {
+  try {
+    const m = /^btime\s+(\d+)/m.exec(readFileSync(`${procRoot}/stat`, 'utf8'));
+    return m ? Number(m[1]) : null;
+  } catch {
+    return null;
+  }
 }
 
 async function readProc(procRoot: string, pid: number): Promise<ProcInfo | null> {

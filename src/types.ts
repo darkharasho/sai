@@ -487,6 +487,11 @@ declare global {
     devlogInfo?: () => Promise<{ enabled: boolean; path: string | null }>;
     /** Canonical home directory plus every alias spelling (symlinked homes). */
     homeDir?: () => Promise<{ path: string; aliases: string[] }>;
+    /** System load guard (linux; elsewhere getState reports enabled:false) — see electron/services/loadGuard. */
+    loadGuardGetState?: () => Promise<import('../electron/services/loadGuard').LoadGuardPublicState>;
+    loadGuardTopUsers?: () => Promise<import('../electron/services/loadGuard/types').TopUser[]>;
+    loadGuardResume?: () => Promise<void>;
+    loadGuardOnState?: (cb: (s: import('../electron/services/loadGuard').LoadGuardPublicState) => void) => () => void;
     metaWorkspaceList?: () => Promise<any[]>;
     metaWorkspaceCreate?: (input: any) => Promise<any>;
     metaWorkspaceUpdate?: (id: string, patch: any) => Promise<any>;
