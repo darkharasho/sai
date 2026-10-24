@@ -35,8 +35,11 @@ describe('LoadGuardEventCard', () => {
   });
 
   it('agent: title line and the resume sentence', () => {
-    render(<LoadGuardEventCard event={killed({ unitKind: 'agent', label: 'claude' })} />);
+    const { container } = render(<LoadGuardEventCard event={killed({ unitKind: 'agent', label: 'claude' })} />);
     expect(screen.getByText('Stopped to save your PC')).toBeTruthy();
+    const label = container.querySelector('.lg-card-label')!;
+    expect(label.tagName).toBe('S');
+    expect(label.textContent).toBe('claude');
     expect(screen.getByText(
       'SAI stopped this to keep your PC from freezing. It was using 7.2 GB while RAM hit 97%. This chat will pick up where it left off when you send your next message.',
     )).toBeTruthy();
@@ -47,6 +50,12 @@ describe('LoadGuardEventCard', () => {
     expect(screen.getByText('System load:')).toBeTruthy();
     expect(container.textContent).toContain('RAM 85% used (4.1 GB free of 31.2 GB).');
     expect(container.textContent).not.toContain('[SAI system load');
+  });
+
+  it('renders nothing for an unknown or kind-less persisted event', () => {
+    expect(render(<LoadGuardEventCard event={{ kind: 'future_thing', label: 'x' } as any} />).container.firstChild).toBeNull();
+    expect(render(<LoadGuardEventCard event={{} as any} />).container.firstChild).toBeNull();
+    expect(render(<LoadGuardEventCard event={null as any} />).container.firstChild).toBeNull();
   });
 
   it('survives malformed persisted values without throwing', () => {

@@ -638,7 +638,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
   const followBtnTransition = useReducedMotionTransition(SPRING.flick);
   const turnSeqRef = useRef(0); // tracks the active turn's sequence number
   // Open after the load guard killed this panel's agent (see LOAD_GUARD_ERROR_QUIET_MS).
-  const loadGuardKillRef = useRef<{ scope: string; until: number; ended: boolean } | null>(null);
+  const loadGuardKillRef = useRef<{ until: number; ended: boolean } | null>(null);
   useEffect(() => {
     // Incoming events are scoped by project/scope, not session. Retire the
     // old sequence so late child activity cannot revive a selected new chat.
@@ -882,7 +882,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
         // A killed agent's process dies mid-turn: its crash error is expected
         // noise. Swallow errors for a while and end the turn as a normal done.
         if (ev.kind === 'killed' && ev.unitKind === 'agent') {
-          loadGuardKillRef.current = { scope: expectedScope, until: Date.now() + LOAD_GUARD_ERROR_QUIET_MS, ended: false };
+          loadGuardKillRef.current = { until: Date.now() + LOAD_GUARD_ERROR_QUIET_MS, ended: false };
         }
         const ts = Date.now();
         setMessages(prev => [...prev, { id: `load-guard-${ts}-${prev.length}`, role: 'system', content: '', timestamp: ts, loadGuard: ev }]);
@@ -1030,7 +1030,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
 
       if (msg.type === 'error') {
         const kill = loadGuardKillRef.current;
-        if (kill && kill.scope === expectedScope && Date.now() < kill.until) {
+        if (kill && Date.now() < kill.until) {
           // Deliberate load-guard stop, not a crash. End the turn once through
           // the normal done path: turnSeq null is never stale-dropped, and the
           // dead process can't send trailing child events.
@@ -1691,6 +1691,8 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
     }
 
     return () => {
+      // The window belongs to this subscription's scope; a scope switch drops it.
+      loadGuardKillRef.current = null;
       flushStreamingText();
       if (streamIdleTimerRef.current != null) {
         clearTimeout(streamIdleTimerRef.current);
@@ -2321,6 +2323,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
     if (text === '/compact' && aiProvider === 'claude') {
       // /compact needs the live agent, so it waits out a pause like any send.
       if (queueWhilePaused(text)) return;
+      loadGuardKillRef.current = null;
       window.sai.claudeCompact(projectPath, permissionMode, effortLevel, modelChoice, claudeScope);
       pendingComposerRectRef.current = null;
       return;
@@ -2381,6 +2384,9 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
       );
     }
 
+    // Our own send starts a fresh turn: its errors (even before streaming_start,
+    // e.g. a failed resume) are real, not the killed agent's.
+    loadGuardKillRef.current = null;
     const prompt = activeFilePath && fileContextEnabled ? `[File: ${activeFilePath}]\n\n${text}` : text;
     if (aiProvider === 'gemini') {
       (window.sai as any).geminiSend(projectPath, prompt, imagePaths, geminiApprovalMode, geminiConversationMode, geminiModel, 'chat');

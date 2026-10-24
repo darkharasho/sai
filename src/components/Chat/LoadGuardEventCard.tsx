@@ -17,7 +17,9 @@ export default function LoadGuardEventCard({ event }: { event: LoadGuardChatEven
     );
   }
 
-  const ev = event as Extract<LoadGuardChatEvent, { kind: 'killed' }>;
+  // Unknown or future kinds (persisted history) render nothing, never a fake Stopped card.
+  if (event?.kind !== 'killed') return null;
+  const ev = event;
   const isAgent = ev?.unitKind === 'agent';
   const top: LoadGuardTopUser[] = Array.isArray(ev?.top) ? ev.top : [];
   const body = `SAI stopped this to keep your PC from freezing. It was using ${gb(ev?.sizeKb)} GB while RAM hit ${Math.round(num(ev?.memUsedPct))}%.`
@@ -27,9 +29,8 @@ export default function LoadGuardEventCard({ event }: { event: LoadGuardChatEven
     <div className="lg-card lg-card-killed" data-testid="load-guard-card">
       <div className="lg-card-title">
         <span className="lg-card-tag">Stopped</span>
-        {isAgent
-          ? <span className="lg-card-title-text">Stopped to save your PC</span>
-          : <s className="lg-card-label">{str(ev?.label)}</s>}
+        {isAgent && <span className="lg-card-title-text">Stopped to save your PC</span>}
+        <s className="lg-card-label">{str(ev?.label)}</s>
       </div>
       <div className="lg-card-body">{body}</div>
       {top.length > 0 && (

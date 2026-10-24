@@ -2502,6 +2502,25 @@ describe('ChatPanel', () => {
       expect(msgs[1].getAttribute('data-msg-content')).toContain('Later failure');
     });
 
+    it("the panel's own send closes the quiet window (pre-streaming_start errors show)", async () => {
+      const props = lgProps();
+      const { container } = render(<ChatPanel {...props} />);
+      await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+      const handler = mockSai.claudeOnMessage.mock.calls[0][0] as (msg: any) => void;
+      await act(async () => {
+        handler({ type: 'load_guard', projectPath: '/project', scope: 's1', provider: 'claude', loadGuard: killedEv });
+      });
+      await act(async () => { fireEvent.click(screen.getByTestId('chat-input')); });
+      await waitFor(() => expect(mockSai.claudeSend).toHaveBeenCalled());
+      now += 1_000;
+      await act(async () => {
+        handler({ type: 'error', text: 'Resume failed', projectPath: '/project', scope: 's1' });
+      });
+      const contents = [...container.querySelectorAll('[data-testid="chat-message"]')].map(m => m.getAttribute('data-msg-content'));
+      expect(contents.some(c => c?.includes('Resume failed'))).toBe(true);
+      expect(props.onTurnComplete).not.toHaveBeenCalled();
+    });
+
     it('a killed command (agent still running) opens no quiet window', async () => {
       const props = lgProps();
       const { container } = render(<ChatPanel {...props} />);
