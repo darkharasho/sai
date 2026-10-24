@@ -17,7 +17,7 @@ export function isSaiFault(
   unitSizeKb60sAgo: (rootPid: number, startTicks: number) => number | null,
 ): boolean {
   const used = (s.memTotalKb - s.memAvailableKb) + (s.swapTotalKb - s.swapFreeKb);
-  if (used > 0 && ((c.saiAiKb + c.saiAppKb) / used) * 100 >= FAULT.sharePct) return true;
+  if (used > 0 && (c.saiAiKb / used) * 100 >= FAULT.sharePct) return true;
   for (const u of c.units) {
     if (u.sizeKb >= FAULT.singleUnitKb) return true;
     const before = unitSizeKb60sAgo(u.rootPid, u.startTicks);

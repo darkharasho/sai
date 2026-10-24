@@ -34,6 +34,20 @@ describe('isSaiFault', () => {
   });
 });
 
+describe('isSaiFault boundaries and R8', () => {
+  it('a fat app renderer without AI share is not a fault', () => {
+    const c: Classified = { units: [], saiAiKb: 10 * GiB, saiAppKb: 30 * GiB, top: [], game: null };
+    expect(isSaiFault(sample, c, noHist)).toBe(false);
+  });
+  it('growth of exactly 2 GiB is a fault', () => {
+    const u = unit('command', 3);
+    expect(isSaiFault(sample, cls(3, [u]), () => u.sizeKb - 2 * GiB)).toBe(true);
+  });
+  it('a unit of exactly 4 GiB is a fault', () => {
+    expect(isSaiFault(sample, cls(4, [unit('command', 4)]), noHist)).toBe(true);
+  });
+});
+
 describe('pickKillTarget', () => {
   it('largest wins when not tied', () => {
     expect(pickKillTarget([unit('agent', 2, 1), unit('command', 7, 2)])?.rootPid).toBe(2);

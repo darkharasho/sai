@@ -17,6 +17,10 @@ describe('rawLevel', () => {
     expect(rawLevel(s, 0)).toBe('normal');
     expect(rawLevel(sample({ swapFreeKb: 1_000_000 - THRESHOLDS.warnSwapGrowthKb30s - 1 }), 0)).toBe('warning');
   });
+  it('PSI some boundary is strict', () => {
+    expect(rawLevel(sample({ psiMemSome10: 5.1 }), null)).toBe('warning');
+    expect(rawLevel(sample({ psiMemSome10: 5 }), null)).toBe('normal');
+  });
   it('null swap history ignores swap growth', () => {
     expect(rawLevel(sample({ swapFreeKb: 0 }), null)).toBe('normal');
   });
