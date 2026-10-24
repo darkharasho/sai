@@ -6,6 +6,7 @@ import { getOrCreate, get, touchActivity } from './workspace';
 import type { Workspace } from './workspace';
 import { notifyCompletion } from './notify';
 import { createAcpClient, type AcpClient } from './acp';
+import { withScopeTag } from './loadGuard/scopeTag';
 
 export interface AcpProviderConfig {
   key: 'kimi';                   // IPC channel prefix AND Workspace slot name
@@ -459,7 +460,7 @@ export async function ensureAcpTransport(win: BrowserWindow, ws: Workspace, conf
 
   const client = createAcpClient({
     cwd: state(ws).cwd || ws.projectPath,
-    env: getEnrichedEnv(),
+    env: withScopeTag(getEnrichedEnv(), { provider: config.key, projectPath: ws.projectPath, scope: '*' }),
     clientInfo: { name: 'sai', version: '1.0' },
     command: config.command,
     args: config.args,

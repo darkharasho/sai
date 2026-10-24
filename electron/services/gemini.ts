@@ -4,6 +4,7 @@ import { getOrCreate, get, touchActivity } from './workspace';
 import type { Workspace } from './workspace';
 import { notifyCompletion } from './notify';
 import { enrichedEnv } from './shellEnv';
+import { withScopeTag } from './loadGuard/scopeTag';
 
 /**
  * Compatibility module for the provider that used to be backed by Gemini CLI.
@@ -137,7 +138,7 @@ export async function promptAntigravityText(
   return new Promise((resolve, reject) => {
     const child = spawn(COMMAND, args, {
       cwd: scopeCwd(ws, scope),
-      env: enrichedEnv(),
+      env: withScopeTag(enrichedEnv(), { provider: 'gemini', projectPath: ws.projectPath, scope }),
       stdio: ['ignore', 'pipe', 'pipe'],
       shell: process.platform === 'win32',
     });

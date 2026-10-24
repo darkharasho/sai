@@ -77,6 +77,7 @@ vi.mock('../../../electron/services/notify', () => ({
 }));
 
 // Import after mocks are set up
+import { parseScopeTag } from '../../../electron/services/loadGuard/scopeTag';
 import { SdkBackend } from '../../../electron/services/claudeBackend/sdkBackend';
 import { BACKGROUND_WAIT_SETTLE_MS, BACKGROUND_WAIT_IDLE_MS } from '../../../electron/services/waitClassifier';
 import {
@@ -1750,7 +1751,9 @@ describe('SdkBackend', () => {
     await new Promise<void>((r) => { const c = () => capturedOptions ? r() : setTimeout(c, 5); setTimeout(c, 5); });
 
     expect(mockSpawnEnv).toHaveBeenCalled();
-    expect(capturedOptions.env).toEqual({ PATH: '/enriched/bin', NODE_OPTIONS: '--max-old-space-size=1024' });
+    const { SAI_LOAD_SCOPE, ...restEnv } = capturedOptions.env;
+    expect(restEnv).toEqual({ PATH: '/enriched/bin', NODE_OPTIONS: '--max-old-space-size=1024' });
+    expect(parseScopeTag(SAI_LOAD_SCOPE)).toMatchObject({ provider: 'claude', projectPath: PROJECT, scope: SCOPE });
     expect(typeof capturedOptions.stderr).toBe('function');
     capturedOptions.stderr('not logged in\n');
     expect(emits.find(e => e.type === 'error' && String(e.text).includes('not logged in'))).toBeDefined();

@@ -10,6 +10,7 @@
  */
 
 import * as fs from 'fs';
+import { withScopeTag } from '../loadGuard/scopeTag';
 import * as path from 'path';
 import * as os from 'os';
 import type { query as QueryFn, SDKUserMessage, PermissionResult, McpSdkServerConfigWithInstance, McpServerConfig, SdkPluginConfig } from '@anthropic-ai/claude-agent-sdk';
@@ -1171,7 +1172,7 @@ export class SdkBackend implements ClaudeBackend {
       canUseTool,
       mcpServers,
       plugins,
-      env: spawnEnv() as Record<string, string | undefined>,
+      env: withScopeTag(spawnEnv() as Record<string, string | undefined>, { provider: 'claude', projectPath, scope: effectiveScope }),
       stderr: (data: string) => {
         const text = data.toString().trim();
         if (text) {

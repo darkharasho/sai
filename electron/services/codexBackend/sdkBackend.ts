@@ -9,6 +9,7 @@ import {
 } from '@openai/codex-sdk';
 import path from 'node:path';
 import { enrichedEnv } from '../shellEnv';
+import { withScopeTag } from '../loadGuard/scopeTag';
 import { getOrCreate as getOrCreateWorkspace } from '../workspace';
 import { mapCodexSdkEvent, type SaiEnvelope } from './sdkEventMap';
 import { buildCodexInput, buildCodexSdkOptions } from './sdkOptions';
@@ -208,7 +209,7 @@ export class SdkCodexBackend implements CodexBackend {
       if (!runtime.client || !runtime.thread || runtime.configIdentity !== configIdentity) {
         this.clearConfiguredSdk(runtime);
         runtime.client = this.createClient({
-          env: stringEnv(this.getEnv()),
+          env: withScopeTag(stringEnv(this.getEnv()), { provider: 'codex', projectPath: args.projectPath, scope }),
           config: built.clientConfig,
         });
         runtime.thread = runtime.sessionId

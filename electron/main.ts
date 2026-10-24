@@ -23,6 +23,7 @@ import { listKdotoolWindows, activateKdotoolWindow, kdotoolActiveWindowTitle, kd
 import { activeWindowTitle, raiseWindowByTitle } from './capture/windowControl';
 import { gitStatusImpl, gitDiffImpl, gitStageImpl, gitUnstageImpl, gitCommitImpl, gitPushImpl, gitPullImpl } from './services/git';
 import { enrichedEnv, patchProcessPath } from './services/shellEnv';
+import { stripInheritedScopeTag } from './services/loadGuard/scopeTag';
 import {
   createRenderProtocolStore,
   resolveRenderAsset,
@@ -36,6 +37,10 @@ import {
 import { execFile as _execFile, execFileSync } from 'node:child_process';
 import { promisify as _promisify } from 'node:util';
 const _execFileP = _promisify(_execFile);
+
+// A dev SAI launched by a parent SAI's AI inherits that instance's load-guard
+// tag; drop it so this instance's own terminals and spawns stay untagged.
+stripInheritedScopeTag(process.env);
 
 // Widen the process-global PATH immediately (heuristic dirs) so early spawns —
 // including the claude-agent-sdk, which spawns the CLI with a plain

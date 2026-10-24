@@ -37,6 +37,7 @@ import { CHAT_RENDER_NUDGE, CHAT_GITHUB_WATCH_NUDGE, CHAT_TASKS_NUDGE } from './
 import { classifyTurnEnd, isSchedulingTool, isBackgroundLaunch, isAsyncLaunchResult, WAKEUP_GRACE_MS, type WaitMeta, countLiveBackgroundTasks } from './waitClassifier';
 import { getSudoAskpassHelperPath, getSudoBroker, getSudoSession, lockSudo } from './sudo';
 import { readCachedSlashCommands, writeCachedSlashCommands, type SlashCommandInfo } from './slashCommands';
+import { withScopeTag } from './loadGuard/scopeTag';
 export { CHAT_RENDER_NUDGE, CHAT_GITHUB_WATCH_NUDGE };
 
 
@@ -379,7 +380,7 @@ function ensureProcess(
 
   const proc = spawn('claude', args, {
     cwd: claude.cwd || projectPath,
-    env: spawnEnv(),
+    env: withScopeTag(spawnEnv(), { provider: 'claude', projectPath, scope }),
     stdio: ['pipe', 'pipe', 'pipe'],
     shell: IS_WIN,
   });
@@ -1189,7 +1190,7 @@ export async function approveImpl(
           cwd,
           timeout: 120_000,
           maxBuffer: 10 * 1024 * 1024,
-          env: spawnEnv(),
+          env: withScopeTag(spawnEnv(), { provider: 'claude', projectPath: ws.projectPath, scope: effectiveScope }),
           windowsVerbatimArguments: IS_WIN,
         }, (err, stdout, stderr) => {
           if (err && !stdout && !stderr) {
