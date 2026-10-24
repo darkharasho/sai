@@ -145,6 +145,8 @@ export class Signaller {
   private frozen = new Map<number, { startTicks: number; ppid?: number }>();
   /** `pid:startTicks` whose SIGSTOP was refused on the previous freeze() call */
   private refusedLast = new Set<string>();
+  /** `pid:startTicks` of parents that never read as stopped on the previous freeze() call */
+  private unsettledLast = new Set<string>();
 
   constructor(private deps: SignalDeps) {}
 
@@ -196,11 +198,13 @@ export class Signaller {
   }
 
   /**
-   * SIGSTOPs ancestors before descendants, confirming each tree level is stopped before
-   * signalling the next: a non-interactive `bash -c` waits with WUNTRACED, so seeing its
+   * SIGSTOPs ancestors before descendants, confirming each parent is stopped before
+   * signalling its children: a non-interactive `bash -c` waits with WUNTRACED, so seeing its
    * child stop first makes it exit 147 and fail the command. A parent whose SIGSTOP is
-   * refused keeps its descendants running until the next call; refused twice in a row,
-   * they are frozen anyway (saving the machine wins).
+   * refused, or that never reads as stopped within the budget (and isn't in D state, where
+   * it can't be in wait4), keeps its descendants running until the next call; the same
+   * parent twice in a row, they are frozen anyway (saving the machine wins). Parents stopped
+   * by an earlier call are checked the same way.
    */
   freeze(procs: FreezeTarget[]): number {
     // Persist intent before SIGSTOP so a crash mid-freeze still gets recovered.
@@ -211,70 +215,93 @@ export class Signaller {
         return false;
       }
     });
+    /** tracked before this call: those are already stopped and must stay tracked */
+    const prior = new Map(this.frozen);
     const levels = treeLevels(candidates);
     for (const level of levels) {
       for (const p of level) this.frozen.set(p.pid, { startTicks: p.startTicks, ppid: p.ppid });
     }
     if (candidates.length) this.persist();
+    const keepsPrior = (p: FreezeTarget) => prior.get(p.pid)?.startTicks === p.startTicks;
     let count = 0;
     let changed = false;
-    const sent = new Set<number>();
+    /** stopped by this call or an earlier one: a child of one waits for it to read T */
+    const stopped = new Set(prior.keys());
     /** refused or deferred: still running, so its descendants must not be stopped yet */
     const running = new Set<number>();
     const refused = new Set<string>();
+    const unsettled = new Set<string>();
     const budget = { polls: STOP_POLLS };
     const unconfirmed: number[] = [];
+    const untrack = (p: FreezeTarget) => {
+      if (keepsPrior(p)) return;
+      this.frozen.delete(p.pid);
+      stopped.delete(p.pid);
+      changed = true;
+    };
     for (const level of levels) {
-      const parents = [...new Set(level.flatMap(p => (p.ppid !== undefined && sent.has(p.ppid) ? [p.ppid] : [])))];
-      if (budget.polls > 0) unconfirmed.push(...this.waitStopped(parents, budget));
-      else unconfirmed.push(...parents); // budget spent: freeze the rest without waiting
+      const parents = [...new Set(level.flatMap(p =>
+        (p.ppid !== undefined && stopped.has(p.ppid) && !running.has(p.ppid) ? [p.ppid] : [])))];
+      // Once the budget is spent this is a single unpolled state check.
+      const { dState, pending } = this.waitStopped(parents, budget);
+      unconfirmed.push(...dState, ...pending);
+      for (const pid of pending) {
+        const key = `${pid}:${this.frozen.get(pid)?.startTicks}`;
+        unsettled.add(key);
+        if (!this.unsettledLast.has(key)) running.add(pid);
+      }
       for (const p of level) {
         if (p.ppid !== undefined && running.has(p.ppid)) {
-          // Deferred: untracked, so the guard offers it again next tick.
-          running.add(p.pid);
-          this.frozen.delete(p.pid);
-          changed = true;
+          // Deferred: untracked (unless an earlier call already stopped it), so the guard
+          // offers it again next tick.
+          if (!keepsPrior(p)) running.add(p.pid);
+          untrack(p);
           continue;
         }
         const r = this.send(p.pid, p.startTicks, 'SIGSTOP');
         if (r === 'sent') {
           count++;
-          sent.add(p.pid);
+          stopped.add(p.pid);
           continue;
         }
-        // Gone, or the stop was refused: it is not stopped, so don't track it.
-        this.frozen.delete(p.pid);
-        changed = true;
-        if (r === 'failed') {
-          const key = `${p.pid}:${p.startTicks}`;
-          refused.add(key);
-          if (!this.refusedLast.has(key)) running.add(p.pid);
+        // Gone, or the stop was refused: not stopped by this call, so don't track it
+        // (a refused re-stop of a pid an earlier call stopped stays tracked).
+        if (r === 'gone') {
+          this.frozen.delete(p.pid);
+          stopped.delete(p.pid);
+          changed = true;
+          continue;
         }
+        const key = `${p.pid}:${p.startTicks}`;
+        refused.add(key);
+        if (!this.refusedLast.has(key) && !keepsPrior(p)) running.add(p.pid);
+        untrack(p);
       }
     }
     this.refusedLast = refused;
+    this.unsettledLast = unsettled;
     if (changed) this.persist();
     if (unconfirmed.length) this.deps.log?.('freeze_parent_unconfirmed', { pids: unconfirmed, budgetSpent: budget.polls <= 0 });
     return count;
   }
 
   /**
-   * Polls until every pid reads as stopped (or gone), spending from the call-wide budget;
-   * a D-state pid won't confirm, so it isn't waited on. Returns the ones that never confirmed.
+   * Polls until every pid reads as stopped (or gone), spending from the call-wide budget
+   * (a spent budget still checks once). A D-state pid won't confirm, so it isn't waited on.
    */
-  private waitStopped(pids: number[], budget: { polls: number }): number[] {
+  private waitStopped(pids: number[], budget: { polls: number }): { dState: number[]; pending: number[] } {
     const { stateOf, sleepMs } = this.deps;
-    if (!stateOf || pids.length === 0) return [];
-    const stuck: number[] = [];
+    if (!stateOf || pids.length === 0) return { dState: [], pending: [] };
+    const dState: number[] = [];
     let pending = pids;
     for (;;) {
       pending = pending.filter(pid => {
         let st: string | null;
         try { st = stateOf(pid); } catch { return false; }
-        if (st === UNWAITABLE) { stuck.push(pid); return false; }
+        if (st === UNWAITABLE) { dState.push(pid); return false; }
         return st !== null && !SETTLED.has(st);
       });
-      if (pending.length === 0 || budget.polls <= 0) return [...stuck, ...pending];
+      if (pending.length === 0 || budget.polls <= 0) return { dState, pending };
       budget.polls--;
       try { sleepMs?.(STOP_POLL_MS); } catch { /* keep polling */ }
     }
@@ -293,6 +320,7 @@ export class Signaller {
       if (r !== 'failed') this.frozen.delete(pid);
     }
     this.refusedLast.clear();
+    this.unsettledLast.clear();
     this.persist();
     return count;
   }

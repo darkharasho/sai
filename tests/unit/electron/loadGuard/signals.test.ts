@@ -124,6 +124,21 @@ describe('Signaller failure handling', () => {
     expect(saved(files)).toEqual([]);
   });
 
+  it('#16: EPERM on SIGCONT then EPERM on the re-SIGSTOP keeps the pid tracked; a later thawAll continues it', () => {
+    const { s, calls, files, setKill } = setup({ 101: 10 });
+    s.freeze([{ pid: 101, startTicks: 10 }]);
+    setKill(eperm);
+    expect(s.thawAll()).toBe(0);
+    expect(s.freeze([{ pid: 101, startTicks: 10 }])).toBe(0);
+    expect(s.isFrozen(101)).toBe(true);
+    expect(saved(files)).toEqual([{ pid: 101, startTicks: 10 }]);
+    setKill(() => {});
+    calls.length = 0;
+    expect(s.thawAll()).toBe(1);
+    expect(calls).toEqual([[101, 'SIGCONT']]);
+    expect(s.frozenCount()).toBe(0);
+  });
+
   it('keeps a pid whose SIGKILL was refused', () => {
     const { s, files, setKill } = setup({ 101: 10 });
     s.freeze([{ pid: 101, startTicks: 10 }]);
@@ -210,7 +225,12 @@ describe('Signaller freeze/thaw tree order', () => {
       events.push(`${sig}:${pid}`);
       if (sig === 'SIGSTOP') stoppedAt.set(pid, polls);
     });
-    return { ...r, log, events, polls: () => polls };
+    /** a replacement kill that still lets SIGSTOPped pids read T */
+    const killWith = (refuse: (pid: number, sig: string) => boolean) => r.setKill((pid, sig) => {
+      if (refuse(pid, sig)) throw Object.assign(new Error('x'), { code: 'EPERM' });
+      if (sig === 'SIGSTOP') stoppedAt.set(pid, polls);
+    });
+    return { ...r, log, events, polls: () => polls, killWith };
   }
 
   it('freezes ancestor-first and waits for each parent to read T before signalling its children', () => {
@@ -240,25 +260,58 @@ describe('Signaller freeze/thaw tree order', () => {
     expect(saved(files).map((p: { pid: number }) => p.pid)).toEqual([300, 200, 201, 202]);
   });
 
-  it('a parent that never reads T still gets its children frozen, bounded, with a devlog', () => {
+  it('I3: a parent that never reads T defers its children (bounded, devlog); unconfirmed twice in a row, they freeze', () => {
     const { s, events, log, polls } = withState(0, [200]);
-    expect(s.freeze(chain)).toBe(4);
-    expect(events.filter(e => e.startsWith('SIG'))).toEqual(['SIGSTOP:300', 'SIGSTOP:200', 'SIGSTOP:201', 'SIGSTOP:202']);
-    expect(log).toEqual([['freeze_parent_unconfirmed', { pids: [200, 201], budgetSpent: true }]]);
+    expect(s.freeze(chain)).toBe(2);
+    expect(events.filter(e => e.startsWith('SIG'))).toEqual(['SIGSTOP:300', 'SIGSTOP:200']);
+    expect([200, 201, 202].map(p => s.isFrozen(p))).toEqual([true, false, false]);
+    expect(log).toEqual([['freeze_parent_unconfirmed', { pids: [200], budgetSpent: true }]]);
     expect(polls()).toBe(60);
+    events.length = 0;
+    // next tick: the guard re-offers only the unfrozen pids; 200 (stopped earlier) still isn't T
+    expect(s.freeze(chain.filter(p => p.pid === 201 || p.pid === 202))).toBe(2);
+    expect(events.filter(e => e.startsWith('SIG'))).toEqual(['SIGSTOP:201', 'SIGSTOP:202']);
+    expect(events.indexOf('state:200')).toBeLessThan(events.indexOf('SIGSTOP:201'));
   });
 
-  it('one confirm budget per call: three never-confirming levels stay within it, then freeze unpolled, one devlog', () => {
+  it('I3: stateOf reading S for the whole budget: the child is deferred on call 1 and stopped by call 3', () => {
+    let polls = 0;
+    const { s, calls } = setup({ 200: 20, 201: 21 }, undefined, { stateOf: () => 'S', sleepMs: () => { polls++; } });
+    const parent = { pid: 200, startTicks: 20, ppid: 100 };
+    const child = { pid: 201, startTicks: 21, ppid: 200 };
+    expect(s.freeze([child, parent])).toBe(1);
+    expect(calls).toEqual([[200, 'SIGSTOP']]);
+    expect(s.isFrozen(201)).toBe(false);
+    for (let call = 2; call <= 3 && !s.isFrozen(201); call++) s.freeze([child]);
+    expect(s.isFrozen(201)).toBe(true);
+    expect(calls).toEqual([[200, 'SIGSTOP'], [201, 'SIGSTOP']]);
+  });
+
+  it('I3: a parent stopped on an earlier call that now reads T lets its child freeze at once', () => {
+    let parentState = 'S';
+    const { s, calls } = setup({ 200: 20, 201: 21 }, undefined, { stateOf: pid => (pid === 200 ? parentState : 'S'), sleepMs: () => {} });
+    s.freeze([{ pid: 201, startTicks: 21, ppid: 200 }, { pid: 200, startTicks: 20, ppid: 100 }]);
+    parentState = 'T';
+    calls.length = 0;
+    expect(s.freeze([{ pid: 201, startTicks: 21, ppid: 200 }])).toBe(1);
+    expect(calls).toEqual([[201, 'SIGSTOP']]);
+  });
+
+  it('one confirm budget per call: a never-confirming chain spends it once, defers the rest, one devlog', () => {
     const deep = [500, 501, 502, 503].map((pid, i) => ({ pid, startTicks: pid, ppid: i === 0 ? 1 : pid - 1 }));
     const log: Array<[string, unknown]> = [];
     let polls = 0;
     const { s, calls } = setup({ 500: 500, 501: 501, 502: 502, 503: 503 }, undefined, {
       stateOf: () => 'S', sleepMs: () => { polls++; }, log: (e, d) => { log.push([e, d]); },
     });
-    expect(s.freeze(deep)).toBe(4);
-    expect(calls.map(c => c[0])).toEqual([500, 501, 502, 503]);
+    expect(s.freeze(deep)).toBe(1);
+    expect(calls.map(c => c[0])).toEqual([500]);
     expect(polls).toBe(60);
-    expect(log).toEqual([['freeze_parent_unconfirmed', { pids: [500, 501, 502], budgetSpent: true }]]);
+    expect(log).toEqual([['freeze_parent_unconfirmed', { pids: [500], budgetSpent: true }]]);
+    // each later call gets one level further; nothing waits past one budget per call
+    for (let i = 0; i < 3; i++) s.freeze(deep.filter(p => !s.isFrozen(p.pid)));
+    expect(calls.map(c => c[0])).toEqual([500, 501, 502, 503]);
+    expect(polls).toBe(60 * 4);
   });
 
   it('a D-state parent is not waited on', () => {
@@ -273,10 +326,8 @@ describe('Signaller freeze/thaw tree order', () => {
   });
 
   it('a refused parent defers its descendants to the next call; refused twice in a row, they freeze anyway', () => {
-    const { s, calls, setKill } = withState(0);
-    setKill((pid, sig) => {
-      if (pid === 200 && sig === 'SIGSTOP') throw Object.assign(new Error('x'), { code: 'EPERM' });
-    });
+    const { s, calls, killWith } = withState(0);
+    killWith((pid, sig) => pid === 200 && sig === 'SIGSTOP');
     expect(s.freeze(chain)).toBe(1);
     expect(calls).toEqual([[300, 'SIGSTOP'], [200, 'SIGSTOP']]);
     expect([200, 201, 202].map(p => s.isFrozen(p))).toEqual([false, false, false]);
