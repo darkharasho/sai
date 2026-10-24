@@ -78,8 +78,8 @@ The user approved three mockups during brainstorming:
    across every chat. The banner says "AI paused: your PC is under heavy load",
    says whether SAI caused it, shows RAM and swap meters, and says it resumes
    automatically. It has two buttons:
-   - ~~Resume anyway~~: removed. Critical always saves the computer, so there's
-     no manual override while it lasts.
+   - **Resume anyway**: a manual override for the current critical episode
+     only. It doesn't turn the feature off.
    - **What's using memory?**: opens the top-users list from the rolling
      record.
 
@@ -194,9 +194,9 @@ shape. Use SAI's existing theme tokens (`--accent`, `--red`, `--orange`,
   processes per sample, in memory only. A snapshot is written to the devlog
   when the state turns critical. That snapshot survives a hard reset, so the next
   freeze can be explained.
-- **Settings:** a single on/off switch for the whole feature (default on). There's
-  no separate auto-kill switch, because critical always saves the computer.
-  Threshold sliders aren't needed for v1.
+- **Settings:** separate on/off switches for the whole feature and for
+  automatic kills, both on by default (confirmed by the user). Threshold sliders
+  aren't needed for v1.
 
 ## Left to the builder
 
