@@ -180,6 +180,17 @@ export class LoadGuard {
     };
   }
 
+  /** True while any of the provider's units has a pid this guard holds SIGSTOPped. Never throws. */
+  isFrozen(provider: Provider): boolean {
+    try {
+      const sig = this.deps.signaller;
+      if (sig.frozenCount() === 0) return false;
+      return (this.classified?.units ?? []).some(u => u.tag.provider === provider && u.pids.some(pid => sig.isFrozen(pid)));
+    } catch {
+      return false;
+    }
+  }
+
   topUsers(): TopUser[] {
     return this.classified?.top ?? [];
   }

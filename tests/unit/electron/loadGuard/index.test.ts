@@ -420,6 +420,23 @@ describe('LoadGuard', () => {
     g.stop();
   });
 
+  it('I4: isFrozen(provider) is true only while a unit of that provider has a frozen pid', async () => {
+    const { g, at } = setup();
+    const procs = [
+      proc(1, 0),
+      proc(100, 1, { cmd: 'claude', tag: tag() }),
+      proc(200, 1, { cmd: 'kimi', tag: tag({ provider: 'kimi', scope: '*' }) }),
+      proc(201, 200, { cmd: 'npm test' }),
+    ];
+    await at(0, NORMAL(), procs);
+    expect(g.isFrozen('kimi')).toBe(false);
+    await at(2000, CRITICAL(), procs);
+    expect(g.isFrozen('kimi')).toBe(true);
+    expect(g.isFrozen('codex')).toBe(false);
+    g.resumeOverride();
+    expect(g.isFrozen('kimi')).toBe(false);
+  });
+
   it('marks saiAppHeavy when a SAI app process is in the top 3 and reports the game', async () => {
     const { g, at } = setup({ appPids: () => new Set([300]) });
     await at(0, NORMAL(), [
