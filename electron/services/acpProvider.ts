@@ -9,6 +9,7 @@ import { createAcpClient, type AcpClient } from './acp';
 import { withScopeTag } from './loadGuard/scopeTag';
 import { withLoadNote } from './loadGuard/hook';
 import { getLoadGuard } from './loadGuard';
+import { externalizeToolResultImages } from './toolResultImageStore';
 
 export interface AcpProviderConfig {
   key: 'kimi';                   // IPC channel prefix AND Workspace slot name
@@ -531,7 +532,7 @@ export async function ensureAcpTransport(win: BrowserWindow, ws: Workspace, conf
 
     const translated = translateAcpEvent(event, ws.projectPath, scope);
     if (translated) {
-      safeSend(win, 'claude:message', translated);
+      safeSend(win, 'claude:message', externalizeToolResultImages(translated));
     }
   });
 

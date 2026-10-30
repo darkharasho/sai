@@ -79,6 +79,7 @@ vi.mock('../../src/chatDb', () => ({
   dbSaveSession: vi.fn().mockResolvedValue(undefined),
   dbPatchSessionMeta: vi.fn().mockResolvedValue(undefined),
   dbPurgeExpired: vi.fn().mockResolvedValue(undefined),
+  dbExternalizeStoredImages: vi.fn().mockResolvedValue(0),
   dbDeleteSession: vi.fn().mockResolvedValue(undefined),
   migrateFromLocalStorage: vi.fn().mockResolvedValue(undefined),
 }));

@@ -27,7 +27,7 @@ import { computeUnmountFlushes, computeQuitFlushes } from './workspaceFlush';
 import { buildOverlayPayload, truncateSnippet, updateRecentDone, type OverlayRow, type OverlayTailItem } from './lib/overlayFeed';
 import { toolCallDetail } from './lib/toolCallDetail';
 import { findLatestTodos } from './components/Chat/TodoProgress';
-import { dbGetSessions, dbGetAllSessions, dbGetMessages, dbGetMessagesTail, dbPatchSessionMeta, dbPurgeExpired, migrateFromLocalStorage } from './chatDb';
+import { dbGetSessions, dbGetAllSessions, dbGetMessages, dbGetMessagesTail, dbPatchSessionMeta, dbPurgeExpired, dbExternalizeStoredImages, migrateFromLocalStorage } from './chatDb';
 import { queueSaveSession } from './lib/sessionSaveQueue';
 import type { ChatSession, ChatMessage, GitFile, OpenFile, WorkspaceContext, QueuedMessage, TerminalTab, PendingApproval, SwarmTask, ApprovalPolicy, SwarmApproval, EffortLevel, CodexEffort, CodexModelOption, ModelChoice, ClaudeModelOption, AIProvider } from './types';
 import type { MetaWorkspaceListItem, MetaWorkspaceRuntime } from './types';
@@ -103,6 +103,24 @@ import { normalizeCodexEffort } from './lib/codexEffort';
 interface ScopeReconcileBridge {
   claudeReconcileScope?: (projectPath: string, scope?: string) => void;
   codexReconcileScope?: (projectPath: string, scope?: string) => void;
+}
+
+// One-time rewrite of inline tool-result images in stored transcripts; awaited
+// before the first session load so no save can race it.
+const IMAGES_EXTERNALIZED_KEY = 'sai-tool-images-externalized-v1';
+let externalizeStoredImagesPromise: Promise<void> | null = null;
+function externalizeStoredImagesOnce(): Promise<void> {
+  if (localStorage.getItem(IMAGES_EXTERNALIZED_KEY)) return Promise.resolve();
+  externalizeStoredImagesPromise ??= dbExternalizeStoredImages()
+    .then(count => {
+      localStorage.setItem(IMAGES_EXTERNALIZED_KEY, '1');
+      if (count) console.info(`[persist] moved inline tool images to disk in ${count} transcripts`);
+    })
+    .catch(err => {
+      console.warn('[persist] tool image externalization failed:', err);
+      externalizeStoredImagesPromise = null;
+    });
+  return externalizeStoredImagesPromise;
 }
 
 function stopSwarmTaskProvider(task: SwarmTask): void {
@@ -2489,6 +2507,7 @@ export default function App() {
       await migrateFromLocalStorage();
       const retentionDays = await window.sai.settingsGet('historyRetention', 14);
       await dbPurgeExpired(retentionDays);
+      await externalizeStoredImagesOnce();
       const sessions = await dbGetSessions(activeProjectPath);
       // Normalize lastViewedAt on load. Two cases:
       //   1. Legacy rows with no lastViewedAt field at all.

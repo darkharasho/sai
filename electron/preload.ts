@@ -240,6 +240,7 @@ contextBridge.exposeInMainWorld('sai', {
   fsReadDir: (dirPath: string) => ipcRenderer.invoke('fs:readDir', dirPath),
   fsReadFile: (filePath: string) => ipcRenderer.invoke('fs:readFile', filePath),
   fsReadFileBase64: (filePath: string) => ipcRenderer.invoke('fs:readFileBase64', filePath),
+  storeToolResultImage: (dataUrl: string): Promise<string> => ipcRenderer.invoke('toolResultImage:store', dataUrl),
   captureRegion: (rect: { x: number; y: number; width: number; height: number }): Promise<string | null> =>
     ipcRenderer.invoke('sai:capture-region', rect),
   captureWindow: (opts: { target?: string; workspace?: string; display?: boolean }): Promise<{ ok: boolean; [k: string]: unknown }> =>

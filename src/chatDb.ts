@@ -1,4 +1,5 @@
 import type { ChatSession, ChatMessage } from './types';
+import { externalizeMessageImages, type StoreImageFn } from './lib/externalizeImages';
 
 const DB_NAME = 'sai-chat';
 const DB_VERSION = 2;
@@ -302,6 +303,36 @@ export async function migrateFromLocalStorage(): Promise<void> {
     console.warn('migrateFromLocalStorage failed:', error);
     migrated = false;
   }
+}
+
+/**
+ * One-shot rewrite of stored transcripts that still carry inline `dataUrl`
+ * tool-result images (see lib/externalizeImages). Records are converted one
+ * at a time — the conversion awaits IPC, which can't happen inside an IDB
+ * transaction. Run before sessions load so no save can race the rewrite.
+ * Returns how many records were rewritten.
+ */
+export async function dbExternalizeStoredImages(store?: StoreImageFn): Promise<number> {
+  const db = await openDb();
+  const keys = await new Promise<IDBValidKey[]>((resolve, reject) => {
+    const req = db.transaction('messages', 'readonly').objectStore('messages').getAllKeys();
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+  let rewritten = 0;
+  for (const key of keys) {
+    const messages = await dbGetMessages(key as string);
+    const next = await externalizeMessageImages(messages, store);
+    if (next === messages) continue;
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction('messages', 'readwrite');
+      tx.objectStore('messages').put({ sessionId: key, messages: next });
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    rewritten++;
+  }
+  return rewritten;
 }
 
 export async function clearDb(): Promise<void> {

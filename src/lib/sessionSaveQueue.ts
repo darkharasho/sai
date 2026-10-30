@@ -1,4 +1,5 @@
 import { dbSaveSession } from '../chatDb';
+import { externalizeSessionImages } from './externalizeImages';
 import type { ChatSession } from '../types';
 
 type SaveFn = (projectPath: string, session: ChatSession, fromIdx?: number) => Promise<void>;
@@ -39,4 +40,6 @@ export function createSaveQueue(saveFn: SaveFn = dbSaveSession): SaveFn {
   };
 }
 
-export const queueSaveSession = createSaveQueue();
+export const queueSaveSession = createSaveQueue(
+  async (projectPath, session, fromIdx) => dbSaveSession(projectPath, await externalizeSessionImages(session), fromIdx),
+);

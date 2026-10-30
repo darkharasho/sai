@@ -23,6 +23,7 @@ import type { SessionBus } from './remote/session-bus';
 import { clamp, type PermMode } from './remote/clamp';
 import { exitTerminalEvents } from './claudeExit';
 import { imageReadResult } from './imageFiles';
+import { externalizeToolResultImages } from './toolResultImageStore';
 import type { StartArgs, CompactArgs } from './claudeBackend/types';
 import { getClaudeBackend, getClaudeBackendSetting } from './claudeBackend';
 export { touchActivity, getOrCreate as getOrCreateWorkspace } from './workspace';
@@ -105,7 +106,8 @@ function safeSend(win: BrowserWindow, channel: string, ...args: unknown[]) {
   }
 }
 
-export function emitChatMessage(msg: Record<string, unknown>): void {
+export function emitChatMessage(raw: Record<string, unknown>): void {
+  const msg = externalizeToolResultImages(raw);
   if (mainWin) safeSend(mainWin, 'claude:message', msg);
   const topic = `chat:${msg.projectPath}:${msg.scope ?? 'chat'}`;
   remoteBus?.publish(topic, msg);

@@ -6,6 +6,7 @@ import { createHash } from 'node:crypto';
 import { listMetaWorkspaces } from './metaWorkspace';
 import { syntheticRootFor } from './metaSyntheticRoot';
 import { safeJoin } from './remote/safe-join';
+import { storeImageBase64 } from './toolResultImageStore';
 
 function fileSha(content: string): string {
   return createHash('sha256').update(content, 'utf8').digest('hex').slice(0, 16);
@@ -135,6 +136,12 @@ export function registerFsHandlers(mainWindow: BrowserWindow) {
     };
     const mime = mimeTypes[ext] || 'application/octet-stream';
     return `data:${mime};base64,${buffer.toString('base64')}`;
+  });
+
+  ipcMain.handle('toolResultImage:store', async (_e, dataUrl: string) => {
+    const m = /^data:([^;,]+);base64,(.*)$/s.exec(String(dataUrl));
+    if (!m) throw new Error('not a base64 data URL');
+    return storeImageBase64(m[2], m[1]);
   });
 
   ipcMain.handle('fs:mtime', async (_e, filePath: string) => {

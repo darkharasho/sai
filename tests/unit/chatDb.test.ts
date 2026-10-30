@@ -12,6 +12,7 @@ import {
   clearDb,
   migrateFromLocalStorage,
   _resetMigrationFlag,
+  dbExternalizeStoredImages,
 } from '@/chatDb';
 import type { ChatSession, ChatMessage } from '@/types';
 
@@ -504,5 +505,39 @@ describe('dbPatchSessionMeta', () => {
     const [updated] = await dbGetSessions('/owner');
     expect(updated.projectPath).toBe('/owner');
     expect(updated.lastViewedAt).toBe(42);
+  });
+});
+
+describe('dbExternalizeStoredImages', () => {
+  beforeEach(async () => { await clearDb(); });
+
+  it('rewrites inline dataUrl tool images to filePath refs and leaves clean records alone', async () => {
+    const withImg = makeSession({
+      messages: [makeMessage({
+        role: 'assistant',
+        toolCalls: [{ type: 'mcp', name: 'shot', input: '{}', resultImages: [{ dataUrl: 'data:image/png;base64,AAAA', mimeType: 'image/png' }] }],
+      })],
+    });
+    const clean = makeSession();
+    await dbSaveSession('/p', withImg);
+    await dbSaveSession('/p', clean);
+
+    const stored: string[] = [];
+    const n = await dbExternalizeStoredImages(async (url) => { stored.push(url); return '/imgs/a.png'; });
+
+    expect(n).toBe(1);
+    expect(stored).toEqual(['data:image/png;base64,AAAA']);
+    const msgs = await dbGetMessages(withImg.id);
+    expect(msgs[0].toolCalls![0].resultImages).toEqual([{ filePath: '/imgs/a.png', mimeType: 'image/png' }]);
+    expect(await dbGetMessages(clean.id)).toHaveLength(1);
+  });
+
+  it('keeps the inline image when storing fails', async () => {
+    const s = makeSession({
+      messages: [makeMessage({ toolCalls: [{ type: 'mcp', name: 'x', input: '', resultImages: [{ dataUrl: 'data:image/png;base64,BB' }] }] })],
+    });
+    await dbSaveSession('/p', s);
+    await dbExternalizeStoredImages(async () => { throw new Error('disk full'); });
+    expect((await dbGetMessages(s.id))[0].toolCalls![0].resultImages![0].dataUrl).toBe('data:image/png;base64,BB');
   });
 });
