@@ -15,3 +15,7 @@ test-results/
 graphify-out/
 GRAPH_REPORT.md
 .codex
+.DS_Store
+# File-sync duplicates ("manifest 2.json" next to "manifest.json") — never ours.
+* 2.*
+

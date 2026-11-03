@@ -279,6 +279,52 @@ export const SAI_TOOL_SCHEMA: SaiToolDef[] = [
     },
   },
   {
+    name: 'browser_tabs',
+    description:
+      "List the browser tabs the user has shared with SAI. Only tabs they explicitly attached (by " +
+      "clicking the SAI Browser Bridge toolbar button) are visible — everything else in their browser " +
+      'is invisible to you. CALL THIS FIRST when a browser task could involve more than one tab, to get ' +
+      'the tabId the other browser tools take. Read-only.',
+    toolset: 'chat',
+    input_schema: {
+      type: 'object',
+      properties: {},
+    },
+  },
+  {
+    name: 'browser_snapshot',
+    description:
+      'See a shared browser tab: returns a screenshot plus a structured list of the interactive and ' +
+      'labelled elements on screen, each with a stable `ref`. USE THIS instead of walking the user ' +
+      'through "now look at the top right" — look yourself, then describe what you actually see. ' +
+      'Requires the user to have attached the tab first. Read-only: cannot click or type.',
+    toolset: 'chat',
+    input_schema: {
+      type: 'object',
+      properties: {
+        tabId: { type: 'number', description: 'Which shared tab (from browser_tabs). Omit when only one is attached.' },
+        screenshot: { type: 'boolean', description: 'Set false to skip the image and return only the element list (much cheaper).' },
+        maxElements: { type: 'number', description: 'Cap on elements returned (default 200).' },
+      },
+    },
+  },
+  {
+    name: 'browser_read',
+    description:
+      'Read the visible text of a shared browser tab, or of one element in it via `selector`. USE THIS ' +
+      'when you need the page\'s words — an error message, docs, a table — rather than its layout; ' +
+      'prefer it over browser_snapshot for text-heavy pages. Read-only.',
+    toolset: 'chat',
+    input_schema: {
+      type: 'object',
+      properties: {
+        tabId: { type: 'number', description: 'Which shared tab (from browser_tabs). Omit when only one is attached.' },
+        selector: { type: 'string', description: 'Optional CSS selector to read just one region.' },
+        maxChars: { type: 'number', description: 'Truncation cap (default 20000).' },
+      },
+    },
+  },
+  {
     name: 'watch_github_run',
     description:
       'Show a live GitHub Actions watcher card for a workflow run. USE THIS right after you push, tag, or ' +

@@ -104,6 +104,8 @@ import { registerBrainstormHandlers } from './services/brainstorm';
 import { registerSearchHandlers } from './services/search';
 import { registerSwarmHandlers } from './services/swarm';
 import * as swarmMcpHost from './services/swarmMcpHost';
+import * as browserBridge from './services/browserBridge';
+import * as browserDeploy from './services/browserDeploy';
 import { cleanupSwarmMcpConfigs } from './services/swarmMcpConfig';
 import { setSaiToolDispatch } from './services/saiToolBridge';
 import {
@@ -602,6 +604,79 @@ function createWindow() {
   try {
     const mcpHandle = swarmMcpHost.start();
     console.log('[swarm-mcp] socket listening at', mcpHandle.socketPath);
+
+    // Browser bridge: listens for the native-messaging relay that Chrome
+    // spawns when the SAI Browser Bridge extension has a tab attached. Nothing
+    // connects until the user clicks the extension's toolbar button.
+    try {
+      const bridgeHandle = browserBridge.start();
+      console.log('[browser-bridge] socket listening at', bridgeHandle.socketPath);
+    } catch (err) {
+      console.error('[browser-bridge] failed to start:', err);
+    }
+    // Deploying the extension: SAI automates everything except the "Load
+    // unpacked" click, which Chromium reserves for a human. The extension ID is
+    // then read back out of the browser's own profile, so the user never has to
+    // copy it.
+    // Chromium has to read the extension folder off disk and exec the relay,
+    // so both are in asarUnpack and must be addressed through the unpacked
+    // mirror rather than the archive path app.getAppPath() reports.
+    const unpacked = (p: string) => p.replace(/app\.asar([/\\])/, 'app.asar.unpacked$1');
+    const extensionDir = () => unpacked(app.isPackaged
+      ? path.join(app.getAppPath(), 'extension', 'chrome')
+      : path.join(__dirname, '..', 'extension', 'chrome'));
+    const relayScript = () => unpacked(path.join(__dirname, 'browser-bridge-host.js'));
+
+    const browsersById = (ids: string[]): browserDeploy.BrowserDef[] => {
+      const detected = browserDeploy.detectBrowsers({ extensionDir: extensionDir() });
+      const picked = detected.filter((b) => ids.includes(b.id));
+      if (!picked.length) throw new Error('no matching installed browser');
+      return picked;
+    };
+
+    ipcMain.handle('browser:deploy:info', () => ({
+      extensionDir: extensionDir(),
+      relayScript: relayScript(),
+      relayBuilt: fs.existsSync(relayScript()),
+      // Non-null because the manifest pins a `key`: the id is known up front,
+      // so the native host can be registered before the extension is loaded.
+      expectedExtensionId: browserDeploy.expectedExtensionId(extensionDir()),
+      browsers: browserDeploy.detectBrowsers({ extensionDir: extensionDir() }),
+    }));
+
+    ipcMain.handle('browser:deploy:install', async (_evt, ids: string[], extensionId: string) => {
+      const browsers = browsersById(ids);
+      const results = browserDeploy.installNativeHost({
+        browsers,
+        extensionId,
+        relayScript: relayScript(),
+      });
+      if (process.platform === 'win32' && results[0]) {
+        await browserDeploy.registerWindowsHost(results[0].manifestPath);
+      }
+      return results;
+    });
+
+    ipcMain.handle('browser:deploy:uninstall', (_evt, ids: string[]) =>
+      browserDeploy.uninstallNativeHost(browsersById(ids)));
+
+    ipcMain.handle('browser:deploy:open-extensions', async (_evt, id: string) => {
+      await browserDeploy.openExtensionsPage(browsersById([id])[0]);
+    });
+
+    ipcMain.handle('browser:deploy:reveal', () => {
+      shell.showItemInFolder(extensionDir());
+    });
+
+    ipcMain.handle('browser:status', () => browserBridge.status());
+    ipcMain.handle('browser:call', async (_evt, method: string, params: unknown) => {
+      // Read-only slice: refuse anything the extension shouldn't be asked for,
+      // so a compromised renderer can't reach past the implemented surface.
+      if (!browserBridge.BRIDGE_METHODS.has(method)) {
+        throw new Error(`unsupported browser bridge method: ${method}`);
+      }
+      return browserBridge.call(method, params);
+    });
 
     // Bridge MCP tool calls (from socket) into the renderer over IPC.
     const pendingMcpCalls = new Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void; toolUseId: string; workspace: string; orchSessionId: string | undefined }>();
@@ -1479,6 +1554,8 @@ app.on('before-quit', (e) => {
   try { destroyCodexBackendIfActive(); } catch { /* backend already down */ }
   try { destroyCodexTelemetry(); } catch { /* telemetry already down */ }
   try { swarmMcpHost.stop(); } catch { /* noop */ }
+  // The bridge token authenticates any local process to the browser — drop it.
+  try { browserBridge.stop(); } catch { /* noop */ }
   // Config tmp files carry the swarm-host auth secret — don't leave them behind.
   try { cleanupSwarmMcpConfigs(); } catch { /* noop */ }
   // The sudo pw file holds the user's password — never leave it behind.
@@ -1502,5 +1579,6 @@ app.on('window-all-closed', () => {
   terminalStore.destroyAll();
   if (mainWindow) destroyAll(mainWindow);
   try { swarmMcpHost.stop(); } catch { /* noop */ }
+  try { browserBridge.stop(); } catch { /* noop */ }
   app.quit();
 });
