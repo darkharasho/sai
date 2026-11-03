@@ -67,6 +67,7 @@ import { resolveWatchRun } from './components/Chat/githubRunResolver';
 import { registeredComponentKeys } from './render/componentRegistry';
 import { renderMermaidToSvg } from './render/renderMermaid';
 import { handleSaiQueryToolRequest } from './render/saiQueryTools';
+import { isBrowserTool, handleBrowserToolRequest } from './lib/browserTools';
 import { handleSaiNativeToolRequest, type PickFileOpts } from './render/saiNativeTools';
 import { buildChartHtml, buildDiffHtml, type ChartInput, type DiffInput } from './render/builtinRenderers';
 import { registerPendingForm } from './render/formBridge';
@@ -1640,6 +1641,15 @@ export default function App() {
             result === null
               ? sai.respondSwarmToolError(req.id, `unhandled query tool: ${req.tool}`)
               : sai.respondSwarmTool(req.id, result),
+          (err) => sai.respondSwarmToolError(req.id, err instanceof Error ? err.message : String(err)),
+        );
+        return;
+      }
+
+      if (isBrowserTool(req.tool)) {
+        const saiAny = sai as { browserCall?: (method: string, params?: unknown) => Promise<unknown> };
+        void handleBrowserToolRequest(req, { browserCall: saiAny.browserCall }).then(
+          (result) => sai.respondSwarmTool(req.id, result),
           (err) => sai.respondSwarmToolError(req.id, err instanceof Error ? err.message : String(err)),
         );
         return;

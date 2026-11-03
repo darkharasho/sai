@@ -475,6 +475,17 @@ contextBridge.exposeInMainWorld('sai', {
     ipcRenderer.on('swarm:tool-request', listener);
     return () => ipcRenderer.removeListener('swarm:tool-request', listener);
   },
+  browserStatus: () => ipcRenderer.invoke('browser:status'),
+  browserCall: (method: string, params?: unknown) => ipcRenderer.invoke('browser:call', method, params),
+  browserDeploy: {
+    info: () => ipcRenderer.invoke('browser:deploy:info'),
+    install: (browserIds: string[], extensionId: string) =>
+      ipcRenderer.invoke('browser:deploy:install', browserIds, extensionId),
+    uninstall: (browserIds: string[]) => ipcRenderer.invoke('browser:deploy:uninstall', browserIds),
+    openExtensionsPage: (browserId: string) =>
+      ipcRenderer.invoke('browser:deploy:open-extensions', browserId),
+    revealExtensionFolder: () => ipcRenderer.invoke('browser:deploy:reveal'),
+  },
   respondSwarmTool: (id: string, result: unknown) => ipcRenderer.send('swarm:tool-response', id, result),
   respondSwarmToolError: (id: string, error: string) => ipcRenderer.send('swarm:tool-response-error', id, error),
   swarmSetOrchestratorSession: (workspace: string, sessionId: string) =>

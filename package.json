@@ -33,7 +33,9 @@
       "dist/**/*",
       "dist-electron/**/*",
       "node_modules/**/*",
-      "package.json"
+      "package.json",
+      "extension/**/*",
+      "!**/* 2.*"
     ],
     "linux": {
       "target": "AppImage",
@@ -69,7 +71,9 @@
     },
     "asarUnpack": [
       "node_modules/node-pty/**/*",
-      "node_modules/@openai/codex-*/**/*"
+      "node_modules/@openai/codex-*/**/*",
+      "extension/**/*",
+      "dist-electron/browser-bridge-host.js"
     ]
   },
   "dependencies": {
