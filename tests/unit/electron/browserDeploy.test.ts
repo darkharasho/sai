@@ -24,7 +24,13 @@ import {
   uninstallNativeHost,
   isHostInstalled,
   writeLauncher,
+  writeFlatpakLauncher,
+  grantFlatpakAccess,
+  syncExtensionCopy,
+  FLATPAK_RELAY_SOURCE,
 } from '@electron/services/browserDeploy';
+import { execFileSync, spawn } from 'node:child_process';
+import * as net from 'node:net';
 
 const EXT_ID = 'a'.repeat(32);
 const EXT_DIR_NAME = path.join('extension', 'chrome');
@@ -375,5 +381,174 @@ describe('launcher shim', () => {
     // binaries need ELECTRON_RUN_AS_NODE to behave as a plain Node.
     expect(body).toContain('ELECTRON_RUN_AS_NODE=1');
     expect(fs.statSync(launcher).mode & 0o111).toBeTruthy();
+  });
+});
+
+describe('flatpak browsers', () => {
+  it('lists Flathub Chromium builds under ~/.var/app, ignoring host XDG config', () => {
+    const linux = browserCandidates('/home/u', 'linux', { XDG_CONFIG_HOME: '/home/u/.conf' });
+    const chrome = linux.find((b) => b.id === 'chrome-flatpak')!;
+    expect(chrome.flatpakAppId).toBe('com.google.Chrome');
+    expect(chrome.userDataDir).toBe('/home/u/.var/app/com.google.Chrome/config/google-chrome');
+    expect(nativeHostDirFor(chrome))
+      .toBe('/home/u/.var/app/com.google.Chrome/config/google-chrome/NativeMessagingHosts');
+    // Native Chrome stays a separate entry; both can be installed side by side.
+    expect(linux.find((b) => b.id === 'chrome')!.flatpakAppId).toBeUndefined();
+  });
+
+  it('finds an extension loaded through the document portal by its pinned id', () => {
+    const ud = makeBrowser(path.join(home, '.var/app/com.google.Chrome/config/google-chrome'));
+    writeProfile(ud, 'Default', { [EXT_ID]: { location: 4, path: '/run/flatpak/doc/Rg/chrome' } }, 'Preferences');
+    expect(findExtensionId(ud, extensionDir)).toBeNull();
+    expect(findExtensionId(ud, extensionDir, EXT_ID)).toBe(EXT_ID);
+    // A store install with the same id is still not ours.
+    writeProfile(ud, 'Default', { [EXT_ID]: { location: 1, path: 'rel' } }, 'Preferences');
+    expect(findExtensionId(ud, extensionDir, EXT_ID)).toBeNull();
+  });
+
+  function fakeFlatpak(show = '') {
+    const calls: string[][] = [];
+    const run = (args: string[]) => {
+      calls.push(args);
+      return args.includes('--show') ? show : '';
+    };
+    return { calls, run };
+  }
+
+  it('grants the sandbox the bridge dir once, and reports that a restart is due', () => {
+    const fresh = fakeFlatpak('[Context]\nfilesystems=xdg-download;\n');
+    expect(grantFlatpakAccess('com.google.Chrome', home, fresh.run)).toBe(true);
+    expect(fresh.calls[1]).toEqual(['override', '--user', '--filesystem=~/.sai/browser-bridge', 'com.google.Chrome']);
+
+    const already = fakeFlatpak('[Context]\nfilesystems=xdg-download;~/.sai/browser-bridge;\n');
+    expect(grantFlatpakAccess('com.google.Chrome', home, already.run)).toBe(false);
+    expect(already.calls).toHaveLength(1);
+  });
+
+  it('turns a failed grant into an error with the manual command', () => {
+    const run = (args: string[]) => {
+      if (args.includes('--show')) return '';
+      throw new Error('flatpak: not found');
+    };
+    expect(() => grantFlatpakAccess('com.google.Chrome', home, run))
+      .toThrow(/flatpak override --user --filesystem=~\/.sai\/browser-bridge com.google.Chrome/);
+  });
+
+  it('points Flatpak manifests at the python relay and native ones at the shim', () => {
+    const native = makeBrowser(path.join(home, '.config', 'google-chrome'));
+    const sandboxed = makeBrowser(path.join(home, '.var/app/com.google.Chrome/config/google-chrome'));
+    const { run } = fakeFlatpak();
+    const results = installNativeHost({
+      browsers: [
+        { id: 'chrome', label: 'Chrome', userDataDir: native },
+        { id: 'chrome-flatpak', label: 'Chrome (Flatpak)', userDataDir: sandboxed, flatpakAppId: 'com.google.Chrome' },
+      ],
+      extensionId: EXT_ID,
+      relayScript,
+      home,
+      flatpak: run,
+    });
+
+    const [nat, fp] = results.map((r) => JSON.parse(fs.readFileSync(r.manifestPath, 'utf8')));
+    expect(nat.path).toMatch(/bridge-host\.sh$/);
+    expect(fp.path).toMatch(/bridge-host-flatpak\.py$/);
+    expect(fs.statSync(fp.path).mode & 0o111).toBeTruthy();
+    expect(results[0].restartRequired).toBeUndefined();
+    expect(results[1].restartRequired).toBe(true);
+  });
+
+  it('does not write the Electron shim when only Flatpak browsers are deployed', () => {
+    const sandboxed = makeBrowser(path.join(home, '.var/app/com.google.Chrome/config/google-chrome'));
+    installNativeHost({
+      browsers: [{ id: 'c', label: 'C', userDataDir: sandboxed, flatpakAppId: 'com.google.Chrome' }],
+      extensionId: EXT_ID,
+      relayScript,
+      home,
+      flatpak: fakeFlatpak().run,
+    });
+    expect(fs.existsSync(path.join(home, '.sai', 'browser-bridge', 'bridge-host.sh'))).toBe(false);
+  });
+});
+
+describe('stable extension copy', () => {
+  it('mirrors the bundle and drops files the bundle no longer has', () => {
+    fs.writeFileSync(path.join(extensionDir, 'manifest.json'), '{"v":1}');
+    fs.writeFileSync(path.join(extensionDir, 'old.js'), '');
+    const dest = syncExtensionCopy(extensionDir, home);
+    expect(dest).toBe(path.join(home, '.sai', 'browser-bridge', 'extension'));
+    expect(fs.existsSync(path.join(dest, 'old.js'))).toBe(true);
+
+    fs.rmSync(path.join(extensionDir, 'old.js'));
+    fs.writeFileSync(path.join(extensionDir, 'manifest.json'), '{"v":2}');
+    syncExtensionCopy(extensionDir, home);
+    expect(fs.existsSync(path.join(dest, 'old.js'))).toBe(false);
+    expect(fs.readFileSync(path.join(dest, 'manifest.json'), 'utf8')).toBe('{"v":2}');
+  });
+});
+
+function hasPython(): boolean {
+  try { execFileSync('python3', ['--version']); return true; } catch { return false; }
+}
+
+describe.skipIf(process.platform === 'win32' || !hasPython())('python relay', () => {
+  function frame(obj: unknown): Buffer {
+    const body = Buffer.from(JSON.stringify(obj));
+    const h = Buffer.alloc(4);
+    h.writeUInt32LE(body.length, 0);
+    return Buffer.concat([h, body]);
+  }
+
+  it('authenticates, queues pre-welcome frames, and relays both ways', async () => {
+    const script = writeFlatpakLauncher(home);
+    expect(fs.readFileSync(script, 'utf8')).toBe(FLATPAK_RELAY_SOURCE);
+    const dir = path.join(home, '.sai', 'browser-bridge');
+    fs.writeFileSync(path.join(dir, 'token'), 'tok\n');
+
+    const seen: any[] = [];
+    let sock: net.Socket | null = null;
+    const server = net.createServer((s) => {
+      sock = s;
+      let buf = '';
+      s.on('data', (c) => {
+        buf += c.toString();
+        let i;
+        while ((i = buf.indexOf('\n')) !== -1) {
+          const msg = JSON.parse(buf.slice(0, i));
+          buf = buf.slice(i + 1);
+          seen.push(msg);
+          if (msg.type === 'hello') {
+            // Delay the welcome so the extension's first frame has to queue.
+            setTimeout(() => {
+              s.write(JSON.stringify({ type: 'welcome' }) + '\n');
+              s.write(JSON.stringify({ type: 'request', id: '1' }) + '\n');
+            }, 100);
+          }
+        }
+      });
+    });
+    await new Promise<void>((r) => server.listen(path.join(dir, 'bridge.sock'), r));
+
+    const child = spawn('python3', ['-I', script], { env: { ...process.env, HOME: home } });
+    child.stdin.write(frame({ type: 'hello', role: 'extension', attachedTabIds: [7] }));
+
+    const fromRelay = await new Promise<any>((resolve, reject) => {
+      let out = Buffer.alloc(0);
+      child.stdout.on('data', (c: Buffer) => {
+        out = Buffer.concat([out, c]);
+        if (out.length >= 4 && out.length >= 4 + out.readUInt32LE(0)) {
+          resolve(JSON.parse(out.subarray(4, 4 + out.readUInt32LE(0)).toString()));
+        }
+      });
+      child.on('error', reject);
+      setTimeout(() => reject(new Error('relay timed out')), 5000);
+    });
+
+    expect(fromRelay).toEqual({ type: 'request', id: '1' });
+    expect(seen[0]).toEqual({ type: 'hello', role: 'relay', token: 'tok' });
+    expect(seen[1]).toEqual({ type: 'hello', role: 'extension', attachedTabIds: [7] });
+
+    child.kill();
+    (sock as net.Socket | null)?.destroy();
+    await new Promise<void>((r) => server.close(() => r()));
   });
 });

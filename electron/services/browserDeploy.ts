@@ -20,7 +20,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import * as crypto from 'node:crypto';
-import { execFile } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import { bridgeDir } from './browserBridgePaths';
 
 export const HOST_NAME = 'com.sai.browser_bridge';
@@ -41,6 +41,13 @@ export interface BrowserDef {
   nativeHostDir?: string;
   /** macOS app name for `open -a`, when we can open its extensions page. */
   macAppName?: string;
+  /**
+   * Flatpak application id, for a browser installed from Flathub. Such a
+   * browser runs in a bubblewrap sandbox: it reads manifests from its own
+   * `~/.var/app/<id>/config`, can't see `~/.sai` unless granted, and can't
+   * exec SAI's Electron binary at all. See `installNativeHost`.
+   */
+  flatpakAppId?: string;
 }
 
 export interface DetectedBrowser extends BrowserDef {
@@ -94,12 +101,26 @@ export function browserCandidates(
 
   if (platform === 'linux') {
     const config = env.XDG_CONFIG_HOME || path.join(home, '.config');
+    // Flatpak gives each app its own XDG_CONFIG_HOME under ~/.var/app, and the
+    // host's XDG_CONFIG_HOME doesn't leak in, so these are always home-relative.
+    const flatpak = (id: string, label: string, appId: string, ...sub: string[]): BrowserDef => ({
+      id: `${id}-flatpak`,
+      label: `${label} (Flatpak)`,
+      userDataDir: path.join(home, '.var', 'app', appId, 'config', ...sub),
+      flatpakAppId: appId,
+    });
     return [
       { id: 'chrome', label: 'Google Chrome', userDataDir: path.join(config, 'google-chrome') },
       { id: 'chromium', label: 'Chromium', userDataDir: path.join(config, 'chromium') },
       { id: 'edge', label: 'Microsoft Edge', userDataDir: path.join(config, 'microsoft-edge') },
       { id: 'brave', label: 'Brave', userDataDir: path.join(config, 'BraveSoftware', 'Brave-Browser') },
       { id: 'vivaldi', label: 'Vivaldi', userDataDir: path.join(config, 'vivaldi') },
+      flatpak('chrome', 'Google Chrome', 'com.google.Chrome', 'google-chrome'),
+      flatpak('chromium', 'Chromium', 'org.chromium.Chromium', 'chromium'),
+      flatpak('ungoogled', 'Ungoogled Chromium', 'io.github.ungoogled_software.ungoogled_chromium', 'chromium'),
+      flatpak('edge', 'Microsoft Edge', 'com.microsoft.Edge', 'microsoft-edge'),
+      flatpak('brave', 'Brave', 'com.brave.Browser', 'BraveSoftware', 'Brave-Browser'),
+      flatpak('vivaldi', 'Vivaldi', 'com.vivaldi.Vivaldi', 'vivaldi'),
     ];
   }
 
@@ -196,11 +217,21 @@ function samePath(a: string, b: string): boolean {
  * Finds the ID Chromium assigned to our unpacked extension by looking for a
  * profile entry whose source path is `extensionDir`.
  *
+ * With a pinned id (the manifest `key`), an unpacked entry carrying that id
+ * counts too, wherever it was loaded from. Path matching alone misses two real
+ * cases: a Flatpak browser records the document-portal path
+ * (`/run/flatpak/doc/<hash>/chrome`) its file chooser handed it, and an
+ * AppImage build's folder moves with every launch.
+ *
  * Both preference files are checked: unpacked extensions normally land in
  * `Secure Preferences`, but the plain file is read as a fallback because the
  * split has moved between Chromium versions.
  */
-export function findExtensionId(userDataDir: string, extensionDir: string): string | null {
+export function findExtensionId(
+  userDataDir: string,
+  extensionDir: string,
+  pinnedId: string | null = null,
+): string | null {
   for (const profile of profileDirs(userDataDir)) {
     for (const file of ['Secure Preferences', 'Preferences']) {
       let parsed: any;
@@ -214,6 +245,7 @@ export function findExtensionId(userDataDir: string, extensionDir: string): stri
 
       for (const [id, raw] of Object.entries<any>(settings)) {
         if (raw?.location !== LOCATION_UNPACKED) continue;
+        if (pinnedId && id === pinnedId) return id;
         if (typeof raw?.path !== 'string') continue;
         // Unpacked paths are absolute; store-installed ones are relative.
         if (samePath(raw.path, extensionDir)) return id;
@@ -244,7 +276,7 @@ export function detectBrowsers(opts: DetectOptions): DetectedBrowser[] {
     ...browser,
     nativeHostDir: nativeHostDirFor(browser),
     hostInstalled: isHostInstalled(browser),
-    extensionId: findExtensionId(browser.userDataDir, opts.extensionDir),
+    extensionId: findExtensionId(browser.userDataDir, opts.extensionDir, expectedExtensionId(opts.extensionDir)),
   }));
 }
 
@@ -278,6 +310,183 @@ export function writeLauncher(
   return sh;
 }
 
+/**
+ * Relay for sandboxed (Flatpak) browsers. Inside bubblewrap the Electron
+ * binary isn't on the filesystem and couldn't run if it were, but every
+ * freedesktop runtime ships python3 — so this is a stdlib-only port of
+ * electron/browser-bridge-host.ts. Same framing, same handshake, same errors;
+ * keep the two in step.
+ */
+export const FLATPAK_RELAY_SOURCE = String.raw`#!/usr/bin/env python3
+# SAI Browser Bridge relay for Flatpak browsers. Written by SAI — do not edit.
+# Python port of browser-bridge-host.ts: Chrome native messages (4-byte LE
+# length + UTF-8 JSON) on stdio <-> NDJSON on ~/.sai/browser-bridge/bridge.sock.
+import json, os, socket, struct, sys, threading
+
+MAX = 1024 * 1024
+BASE = os.path.join(os.path.expanduser("~"), ".sai", "browser-bridge")
+out = sys.stdout.buffer
+out_lock = threading.Lock()
+
+
+def send(obj):
+    body = json.dumps(obj).encode("utf-8")
+    if len(body) > MAX:
+        body = json.dumps({"type": "bridge-error", "error": "native message too large: %d bytes" % len(body)}).encode("utf-8")
+    with out_lock:
+        out.write(struct.pack("<I", len(body)) + body)
+        out.flush()
+
+
+try:
+    with open(os.path.join(BASE, "token")) as f:
+        token = f.read().strip()
+except OSError:
+    token = ""
+if not token:
+    send({"type": "bridge-error", "error": "SAI is not running (no bridge token found)"})
+    sys.exit(1)
+
+sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+try:
+    sock.connect(os.path.join(BASE, "bridge.sock"))
+except OSError as e:
+    send({"type": "bridge-error", "error": "cannot reach SAI: %s" % e})
+    sys.exit(1)
+
+sock_lock = threading.Lock()
+state_lock = threading.Lock()
+authed = False
+queued = []
+
+
+def to_sai(obj):
+    with sock_lock:
+        sock.sendall((json.dumps(obj) + "\n").encode("utf-8"))
+
+
+def from_sai():
+    global authed
+    buf = b""
+    while True:
+        try:
+            chunk = sock.recv(65536)
+        except OSError:
+            chunk = b""
+        if not chunk:
+            os._exit(0)
+        buf += chunk
+        while b"\n" in buf:
+            line, buf = buf.split(b"\n", 1)
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                msg = json.loads(line)
+            except ValueError:
+                continue
+            with state_lock:
+                if not authed:
+                    if isinstance(msg, dict) and msg.get("type") == "welcome":
+                        authed = True
+                        for q in queued:
+                            to_sai(q)
+                        del queued[:]
+                        continue
+                    err = msg.get("error") if isinstance(msg, dict) else None
+                    send({"type": "bridge-error", "error": err or "bridge handshake rejected"})
+                    os._exit(1)
+            send(msg)
+
+
+to_sai({"type": "hello", "role": "relay", "token": token})
+threading.Thread(target=from_sai, daemon=True).start()
+
+inp = sys.stdin.buffer
+while True:
+    header = inp.read(4)
+    if len(header) < 4:
+        # Chrome closes stdin when the extension disconnects the port.
+        os._exit(0)
+    (length,) = struct.unpack("<I", header)
+    if length > MAX:
+        send({"type": "bridge-error", "error": "native message length %d exceeds limit" % length})
+        os._exit(1)
+    data = inp.read(length)
+    if len(data) < length:
+        os._exit(0)
+    try:
+        msg = json.loads(data)
+    except ValueError:
+        continue
+    with state_lock:
+        if authed:
+            to_sai(msg)
+        else:
+            queued.append(msg)
+`;
+
+export function writeFlatpakLauncher(home: string = os.homedir()): string {
+  const dir = bridgeDir(home);
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const py = path.join(dir, 'bridge-host-flatpak.py');
+  fs.writeFileSync(py, FLATPAK_RELAY_SOURCE, { mode: 0o755 });
+  // writeFileSync's mode only applies on create; an older copy keeps its own.
+  fs.chmodSync(py, 0o755);
+  return py;
+}
+
+/** Runs the `flatpak` CLI and returns stdout. Injectable for tests. */
+export type FlatpakRunner = (args: string[]) => string;
+
+const defaultFlatpakRunner: FlatpakRunner = (args) =>
+  execFileSync('flatpak', args, { encoding: 'utf8', timeout: 10_000 });
+
+/**
+ * Home-relative form of the bridge dir for `flatpak override`. `~/` is
+ * resolved by flatpak itself, which sidesteps /home → /var/home symlinks on
+ * image-based distros (Silverblue, Bazzite).
+ */
+function flatpakBridgePath(home: string): string {
+  return `~/${path.relative(home, bridgeDir(home)).split(path.sep).join('/')}`;
+}
+
+/**
+ * Lets a Flatpak browser see ~/.sai/browser-bridge (relay script, socket,
+ * token, stable extension copy). A per-user override needs no elevation.
+ *
+ * Returns true when the grant is new: a running browser keeps its old sandbox
+ * until it is fully quit, so the caller has to say so.
+ */
+export function grantFlatpakAccess(
+  appId: string,
+  home: string = os.homedir(),
+  run: FlatpakRunner = defaultFlatpakRunner,
+): boolean {
+  const want = flatpakBridgePath(home);
+  const abs = bridgeDir(home);
+  let current = '';
+  try {
+    current = run(['override', '--user', '--show', appId]);
+  } catch {
+    /* no overrides yet, or an old flatpak without --show: just grant */
+  }
+  const line = current.split('\n').find((l) => l.startsWith('filesystems='));
+  const granted = (line?.slice('filesystems='.length).split(';') ?? [])
+    .some((fsEntry) => fsEntry === want || fsEntry === abs || fsEntry === `${want}:rw` || fsEntry === `${abs}:rw`);
+  if (granted) return false;
+  try {
+    run(['override', '--user', `--filesystem=${want}`, appId]);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(
+      `couldn't give ${appId} access to ${want}: ${message}. `
+      + `Run: flatpak override --user --filesystem=${want} ${appId}`,
+    );
+  }
+  return true;
+}
+
 export function buildHostManifest(extensionId: string, launcher: string) {
   return {
     name: HOST_NAME,
@@ -296,6 +505,11 @@ export function isValidExtensionId(id: string): boolean {
 export interface InstallResult {
   browser: string;
   manifestPath: string;
+  /**
+   * The browser needs a full quit and relaunch before the bridge can work —
+   * set when a Flatpak sandbox permission was just granted.
+   */
+  restartRequired?: boolean;
 }
 
 export function installNativeHost(opts: {
@@ -304,6 +518,7 @@ export function installNativeHost(opts: {
   relayScript: string;
   nodeBinary?: string;
   home?: string;
+  flatpak?: FlatpakRunner;
 }): InstallResult[] {
   if (!isValidExtensionId(opts.extensionId)) {
     throw new Error(`"${opts.extensionId}" is not a Chromium extension id (32 chars, a-p)`);
@@ -312,19 +527,58 @@ export function installNativeHost(opts: {
     throw new Error(`relay script not found at ${opts.relayScript} — build SAI first`);
   }
 
-  const launcher = writeLauncher(opts.relayScript, opts.nodeBinary, opts.home);
-  const manifest = buildHostManifest(opts.extensionId, launcher);
+  const home = opts.home ?? os.homedir();
+  // Each launcher is written only if some browser needs it, so a Flatpak-only
+  // machine doesn't get a shim pointing at a binary nothing can use.
+  let nativeLauncher: string | null = null;
+  let flatpakLauncher: string | null = null;
   const results: InstallResult[] = [];
 
   for (const browser of opts.browsers) {
+    let launcher: string;
+    let restartRequired = false;
+    if (browser.flatpakAppId) {
+      flatpakLauncher ??= writeFlatpakLauncher(home);
+      launcher = flatpakLauncher;
+      restartRequired = grantFlatpakAccess(browser.flatpakAppId, home, opts.flatpak);
+    } else {
+      nativeLauncher ??= writeLauncher(opts.relayScript, opts.nodeBinary, home);
+      launcher = nativeLauncher;
+    }
     const dir = nativeHostDirFor(browser);
     fs.mkdirSync(dir, { recursive: true });
     const manifestPath = path.join(dir, `${HOST_NAME}.json`);
-    fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
-    results.push({ browser: browser.id, manifestPath });
+    fs.writeFileSync(manifestPath, JSON.stringify(buildHostManifest(opts.extensionId, launcher), null, 2));
+    results.push(restartRequired
+      ? { browser: browser.id, manifestPath, restartRequired }
+      : { browser: browser.id, manifestPath });
   }
 
   return results;
+}
+
+/**
+ * Copies the bundled extension to a stable folder and returns it.
+ *
+ * Chromium remembers an unpacked extension by its folder and reloads from it
+ * on every start. An AppImage mounts at a fresh /tmp/.mount_* path each
+ * launch, so loading straight from the bundle breaks the extension the next
+ * time SAI restarts; a Flatpak browser can't read the bundle at all. The copy
+ * lives in the bridge dir, which Flatpak browsers are granted anyway.
+ *
+ * The old copy is replaced wholesale so files dropped from the bundle don't
+ * linger. Chromium only rereads the folder on reload, so this is safe while
+ * the extension is running.
+ */
+export function syncExtensionCopy(sourceDir: string, home: string = os.homedir()): string {
+  const dest = path.join(bridgeDir(home), 'extension');
+  fs.mkdirSync(bridgeDir(home), { recursive: true, mode: 0o700 });
+  const staging = `${dest}.tmp-${process.pid}`;
+  fs.rmSync(staging, { recursive: true, force: true });
+  fs.cpSync(sourceDir, staging, { recursive: true });
+  fs.rmSync(dest, { recursive: true, force: true });
+  fs.renameSync(staging, dest);
+  return dest;
 }
 
 /**

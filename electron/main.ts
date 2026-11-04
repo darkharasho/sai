@@ -623,9 +623,26 @@ function createWindow() {
     // so both are in asarUnpack and must be addressed through the unpacked
     // mirror rather than the archive path app.getAppPath() reports.
     const unpacked = (p: string) => p.replace(/app\.asar([/\\])/, 'app.asar.unpacked$1');
-    const extensionDir = () => unpacked(app.isPackaged
+    const bundledExtensionDir = () => unpacked(app.isPackaged
       ? path.join(app.getAppPath(), 'extension', 'chrome')
       : path.join(__dirname, '..', 'extension', 'chrome'));
+    // Packaged Linux builds hand the browser a stable copy instead: an
+    // AppImage's mount path changes every launch (Chromium would lose the
+    // unpacked extension on SAI's next restart), and a Flatpak browser can't
+    // read the bundle at all. Synced once per launch so updates land.
+    let stableExtensionDir: string | null = null;
+    const extensionDir = () => {
+      if (!app.isPackaged || process.platform !== 'linux') return bundledExtensionDir();
+      if (!stableExtensionDir) {
+        try {
+          stableExtensionDir = browserDeploy.syncExtensionCopy(bundledExtensionDir());
+        } catch (err) {
+          console.error('[browser-bridge] could not copy extension, using bundle:', err);
+          return bundledExtensionDir();
+        }
+      }
+      return stableExtensionDir;
+    };
     const relayScript = () => unpacked(path.join(__dirname, 'browser-bridge-host.js'));
 
     const browsersById = (ids: string[]): browserDeploy.BrowserDef[] => {

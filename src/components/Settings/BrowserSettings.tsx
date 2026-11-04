@@ -9,6 +9,14 @@ interface DetectedBrowser {
   hostInstalled: boolean;
   extensionId: string | null;
   macAppName?: string;
+  flatpakAppId?: string;
+}
+
+interface InstallResult {
+  browser: string;
+  manifestPath: string;
+  /** A Flatpak sandbox grant was just added; the browser must be fully restarted. */
+  restartRequired?: boolean;
 }
 
 interface DeployInfo {
@@ -86,6 +94,8 @@ export default function BrowserSettings() {
   const [phase, setPhase] = useState<Phase>({ kind: 'idle' });
   const [manualId, setManualId] = useState('');
   const [unavailable, setUnavailable] = useState(false);
+  /** Browsers that must be fully quit and reopened before the bridge works. */
+  const [restartNeeded, setRestartNeeded] = useState<Set<string>>(() => new Set());
   const phaseRef = useRef<Phase>(phase);
   phaseRef.current = phase;
 
@@ -120,17 +130,22 @@ export default function BrowserSettings() {
     return () => clearInterval(t);
   }, []);
 
+  const noteRestarts = useCallback((results: InstallResult[] | undefined) => {
+    const ids = (results ?? []).filter((r) => r.restartRequired).map((r) => r.browser);
+    if (ids.length) setRestartNeeded((prev) => new Set([...prev, ...ids]));
+  }, []);
+
   const installMany = useCallback(async (browserIds: string[], extensionId: string) => {
     if (!browserIds.length) return;
     setPhase({ kind: 'installing', browserId: browserIds[0] });
     try {
-      await deploy.install(browserIds, extensionId);
+      noteRestarts(await deploy.install(browserIds, extensionId));
       await refresh();
       setPhase({ kind: 'done', browserId: browserIds[0], extensionId });
     } catch (err) {
       setPhase({ kind: 'error', message: err instanceof Error ? err.message : String(err) });
     }
-  }, [deploy, refresh]);
+  }, [deploy, refresh, noteRestarts]);
 
   const install = useCallback(
     (browserId: string, extensionId: string) => installMany([browserId], extensionId),
@@ -167,7 +182,7 @@ export default function BrowserSettings() {
     if (knownId) {
       setPhase({ kind: 'installing', browserId: browser.id });
       try {
-        await deploy.install([browser.id], knownId);
+        noteRestarts(await deploy.install([browser.id], knownId));
         const next = await refresh();
         if (next?.browsers.find((b) => b.id === browser.id)?.extensionId) {
           setPhase({ kind: 'done', browserId: browser.id, extensionId: knownId });
@@ -324,7 +339,12 @@ export default function BrowserSettings() {
                       : `One click left — ${browser.label} can't be made to do this part itself.`}
                   </div>
                   1. Turn on <strong>Developer mode</strong> (top right of the extensions page).<br />
-                  2. Click <strong>Load unpacked</strong> and pick the folder revealed in Finder.<br />
+                  2. Click <strong>Load unpacked</strong> and pick the folder revealed in your file manager.<br />
+                  {browser.flatpakAppId && (
+                    <>
+                      &nbsp;&nbsp;&nbsp;It's <span style={codeStyle}>{info?.extensionDir}</span> — press <strong>Ctrl+H</strong> in the picker to show hidden folders.<br />
+                    </>
+                  )}
                   3. That's it — SAI will spot it and finish up automatically.
                   <div style={{ marginTop: 8, display: 'flex', gap: 6 }}>
                     <button style={buttonStyle} onClick={() => void deploy.revealExtensionFolder()}>
@@ -333,6 +353,16 @@ export default function BrowserSettings() {
                     </button>
                     <button style={buttonStyle} onClick={() => setPhase({ kind: 'idle' })}>Cancel</button>
                   </div>
+                </div>
+              )}
+
+              {restartNeeded.has(browser.id) && !status?.connected && (
+                <div style={{ fontSize: 11, color: 'var(--text)', lineHeight: 1.6, borderTop: '1px solid var(--border-hairline)', paddingTop: 8, display: 'flex', gap: 6 }}>
+                  <TriangleAlert size={13} style={{ color: 'var(--orange, var(--red))', flexShrink: 0, marginTop: 2 }} />
+                  <span>
+                    {browser.label} was just given access to SAI's bridge folder. Fully quit it (close every
+                    window) and reopen it — the sandbox only picks up the new permission on a fresh start.
+                  </span>
                 </div>
               )}
 
