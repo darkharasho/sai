@@ -93,6 +93,20 @@ async function waitForConnection(timeoutMs = 5000): Promise<void> {
   throw new Error('relay never authenticated');
 }
 
+/**
+ * The relay's exit and the bridge noticing its socket close are independent
+ * events — under load the child can be reaped before the close handler runs,
+ * so the disconnect has to be awaited rather than asserted inline.
+ */
+async function waitForDisconnect(timeoutMs = 5000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!bridge.status().connected) return;
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  throw new Error('bridge still reports a connected browser');
+}
+
 describe.skipIf(!built)('browser bridge relay (real process)', () => {
   it('authenticates with the token file and round-trips a call', async () => {
     await bridge.whenListening();
@@ -148,6 +162,6 @@ describe.skipIf(!built)('browser bridge relay (real process)', () => {
     const exited = new Promise<number | null>((resolve) => child.once('exit', (code) => resolve(code)));
     child.stdin.end();
     expect(await exited).toBe(0);
-    expect(bridge.status().connected).toBe(false);
+    await waitForDisconnect();
   });
 });

@@ -341,7 +341,13 @@ describe('App: persistence on session swap', () => {
       return Promise.resolve(def ?? null);
     });
     render(<App />);
-    await waitFor(() => expect(mockSai.settingsGet).toHaveBeenCalledWith('codexModel', null));
+    // Waiting only on the settingsGet call races the first ChatPanel render:
+    // the read happens in an App effect, so on a slower runner the props log
+    // is still empty here and .at(-1) is undefined. Wait for the render too.
+    await waitFor(() => {
+      expect(mockSai.settingsGet).toHaveBeenCalledWith('codexModel', null);
+      expect(chatPanelPropsLog.at(-1)).toBeDefined();
+    });
     act(() => { chatPanelPropsLog.at(-1).onCodexPermissionChange('full-access'); });
     await act(async () => { resolveNested({ permission: 'auto', effort: 'xhigh' }); await delayedNested; });
     await waitFor(() => expect(mockSai.settingsSet).toHaveBeenLastCalledWith('codex', {
