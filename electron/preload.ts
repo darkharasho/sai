@@ -251,6 +251,8 @@ contextBridge.exposeInMainWorld('sai', {
     ipcRenderer.invoke('sai:notify', args),
   clipboardWrite: (text: string): Promise<boolean> =>
     ipcRenderer.invoke('sai:clipboard-write', text),
+  clipboardReadImage: (): Promise<string | null> =>
+    ipcRenderer.invoke('sai:clipboard-read-image'),
   fsMtime: (filePath: string) => ipcRenderer.invoke('fs:mtime', filePath),
   fsWriteFile: (filePath: string, content: string) => ipcRenderer.invoke('fs:writeFile', filePath, content),
   fsRename: (oldPath: string, newPath: string) => ipcRenderer.invoke('fs:rename', oldPath, newPath),

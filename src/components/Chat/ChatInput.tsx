@@ -5,6 +5,7 @@ import MessageQueue from './MessageQueue';
 import LoadGuardPill from './LoadGuardPill';
 import type { LoadGuardPublicState } from '../../../electron/services/loadGuard';
 import { basename } from '../../utils/pathUtils';
+import { isIntactPng } from '../../lib/pngIntegrity';
 import { fileBadge, shortDir } from './userAttachments';
 import ApprovalPanel from './ApprovalPanel';
 import { SudoPromptCard } from './SudoPromptCard';
@@ -310,6 +311,7 @@ export default function ChatInput({ projectPath, onSend, overlayControl, onBefor
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [showAddMenu, setShowAddMenu] = useState(false);
   const [contextItems, setContextItems] = useState<ContextItem[]>(initialContextItems);
+  const [pasteError, setPasteError] = useState<string | null>(null);
   const [history, setHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [tickerDir, setTickerDir] = useState<'up' | 'down' | null>(null);
@@ -876,21 +878,42 @@ export default function ChatInput({ projectPath, onSend, overlayControl, onBefor
       if (item.type.startsWith('image/')) {
         e.preventDefault();
         const blob = item.getAsFile();
-        if (blob) {
-          const reader = new FileReader();
-          reader.onload = () => {
-            const base64 = reader.result as string;
-            setContextItems(prev => [...prev, {
-              label: `Image (${Math.round(blob.size / 1024)}KB)`,
-              type: 'image',
-              data: base64,
-            }]);
-          };
-          reader.readAsDataURL(blob);
-        }
+        if (blob) void attachPastedImage(blob);
         return;
       }
     }
+  };
+
+  // On Wayland, Chromium's clipboard transfer intermittently hands us a corrupt
+  // PNG for large images (cut off, or with spliced-in runs) — it renders as
+  // "top of the image, then black" and the model can't read it. CRC-check the
+  // bytes and, if broken, re-read the clipboard from the main process.
+  const attachPastedImage = async (blob: Blob) => {
+    setPasteError(null);
+    let data: string | null = null;
+    let size = blob.size;
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    if (blob.type !== 'image/png' || isIntactPng(bytes)) {
+      data = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(blob);
+      });
+    } else {
+      data = await window.sai.clipboardReadImage?.().catch(() => null) ?? null;
+      if (data) size = Math.floor(((data.length - data.indexOf(',') - 1) * 3) / 4);
+    }
+    if (!data) {
+      setPasteError('The pasted image arrived corrupted — try pasting again.');
+      return;
+    }
+    const url = data;
+    setContextItems(prev => [...prev, {
+      label: `Image (${Math.round(size / 1024)}KB)`,
+      type: 'image',
+      data: url,
+    }]);
   };
 
   const buildMessage = (text: string): string => {
@@ -979,6 +1002,12 @@ export default function ChatInput({ projectPath, onSend, overlayControl, onBefor
 
       {pendingSudoPrompt && (
         <SudoPromptCard prompt={pendingSudoPrompt} />
+      )}
+
+      {pasteError && (
+        <div className="context-row" role="alert" onClick={() => setPasteError(null)}>
+          <span className="context-chip" style={{ color: 'var(--red, #e5534b)' }}>{pasteError}</span>
+        </div>
       )}
 
       {/* Context pills - tabs poking out above input-box */}
