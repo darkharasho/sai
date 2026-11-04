@@ -84,6 +84,7 @@ import { registerUsageHandlers, destroyUsagePolling } from './services/usage';
 import { destroyAll, startSuspendTimer, stopSuspendTimer, getAll, remove, suspend, getOrCreate as getOrCreateWorkspace, DEFAULT_SUSPEND_TIMEOUT } from './services/workspace';
 import { initFocusTracking, setActiveWorkspace } from './services/notify';
 import { devlog, devlogEnabled, devlogFor, devlogPath } from './services/devlog';
+import { readIntactClipboardPng } from './services/clipboardImage';
 import { LoadGuard, inactiveState } from './services/loadGuard';
 import { makeOnAgentKilled, type ScopeSuspender } from './services/loadGuard/hook';
 import { Signaller, defaultSignalDeps, frozenFileName, readStartTicks, recoverOrphanedFrozenFiles } from './services/loadGuard/signals';
@@ -1227,6 +1228,20 @@ function createWindow() {
       return false;
     }
   });
+
+  // Renderer paste delivered a corrupt PNG (Wayland transfer bug) — re-read it.
+  ipcMain.handle('sai:clipboard-read-image', async (): Promise<string | null> => readIntactClipboardPng({
+    isWayland: process.platform === 'linux' && (process.env.XDG_SESSION_TYPE ?? '').toLowerCase() === 'wayland',
+    wlPaste: async () => {
+      try {
+        const r = await _execFileP('wl-paste', ['--no-newline', '--type', 'image/png'], { encoding: 'buffer', maxBuffer: 64 * 1024 * 1024, timeout: 5000 });
+        return r.stdout as Buffer;
+      } catch { return null; }
+    },
+    electronPng: () => { const b = clipboard.readBuffer('image/png'); return b.length ? b : null; },
+    sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+    log: (event, data) => devlog('clipboard', event, data),
+  }));
 
   ipcMain.handle('sai:clipboard-write', async (_evt, text: string): Promise<boolean> => {
     try {
