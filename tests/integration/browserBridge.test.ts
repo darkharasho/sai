@@ -233,7 +233,20 @@ describe('browserBridge', () => {
     relay.close();
   });
 
-  it('only allows the read-only method set', () => {
-    expect([...bridge.BRIDGE_METHODS].sort()).toEqual(['read', 'snapshot', 'tabs.list']);
+  it('allows exactly the read and control method sets, and nothing else', () => {
+    expect([...bridge.BRIDGE_READ_METHODS].sort()).toEqual(['read', 'snapshot', 'tabs.list']);
+    expect([...bridge.BRIDGE_WRITE_METHODS].sort())
+      .toEqual(['click', 'navigate', 'press', 'scroll', 'type']);
+    expect([...bridge.BRIDGE_METHODS].sort()).toEqual([
+      'click', 'navigate', 'press', 'read', 'scroll', 'snapshot', 'tabs.list', 'type',
+    ]);
+  });
+
+  it('exposes no method that could drive a tab without going through the extension', () => {
+    // The main process must never speak raw CDP: anything Input/Runtime-shaped
+    // would bypass the per-tab control grant the extension enforces.
+    for (const method of bridge.BRIDGE_METHODS) {
+      expect(method).not.toMatch(/^(Input|Runtime|Page|Network|Target)\./);
+    }
   });
 });

@@ -4,7 +4,12 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 // @ts-expect-error - plain JS module shared with the unpacked extension
-import { SNAPSHOT_FN_SOURCE, READ_FN_SOURCE } from '../../../extension/chrome/pageScripts.js';
+import {
+  SNAPSHOT_FN_SOURCE,
+  READ_FN_SOURCE,
+  RESOLVE_FN_SOURCE,
+  SCROLL_FN_SOURCE,
+} from '../../../extension/chrome/pageScripts.js';
 
 type Snapshot = {
   url: string;
@@ -26,6 +31,16 @@ function read(opts: Record<string, unknown> = {}): Record<string, any> {
 
 function byRole(snap: Snapshot, role: string) {
   return snap.elements.filter((e) => e.role === role);
+}
+
+function resolve(opts: Record<string, unknown> = {}): Record<string, any> {
+  // eslint-disable-next-line no-eval
+  return eval(`(${RESOLVE_FN_SOURCE})`)(opts);
+}
+
+function scrollPage(opts: Record<string, unknown> = {}): Record<string, any> {
+  // eslint-disable-next-line no-eval
+  return eval(`(${SCROLL_FN_SOURCE})`)(opts);
 }
 
 let restore: Array<() => void> = [];
@@ -214,5 +229,119 @@ describe('page read', () => {
     const res = read({ maxChars: 100 });
     expect(res.text).toHaveLength(100);
     expect(res.truncated).toBe(true);
+  });
+});
+
+describe('ref resolution', () => {
+  // These are the tests that matter most: every bug here means acting on the
+  // wrong element, which is worse than not acting at all.
+  it('resolves a ref to the centre of its box', () => {
+    document.body.innerHTML = '<button id="a">A</button>';
+    const snap = snapshot();
+    const res = resolve({ ref: 'e1', refGen: snap.refGen });
+
+    // The stubbed rect is left:10 top:20 width:100 height:20.
+    expect(res.error).toBeUndefined();
+    expect(res).toMatchObject({ x: 60, y: 30, tag: 'BUTTON' });
+  });
+
+  it('refuses a ref from an older snapshot generation', () => {
+    document.body.innerHTML = '<button>A</button>';
+    const first = snapshot();
+    document.body.innerHTML = '<button>Totally different</button>';
+    const second = snapshot();
+
+    expect(second.refGen).toBe(first.refGen + 1);
+    expect(resolve({ ref: 'e1', refGen: first.refGen }).error).toMatch(/stale/);
+    expect(resolve({ ref: 'e1', refGen: second.refGen }).error).toBeUndefined();
+  });
+
+  it('refuses a ref whose element left the document', () => {
+    document.body.innerHTML = '<button id="a">A</button>';
+    const snap = snapshot();
+    document.getElementById('a')!.remove();
+
+    expect(resolve({ ref: 'e1', refGen: snap.refGen }).error).toMatch(/no longer in the page/);
+  });
+
+  it('refuses a disabled element', () => {
+    document.body.innerHTML = '<button disabled>A</button>';
+    const snap = snapshot();
+    expect(resolve({ ref: 'e1', refGen: snap.refGen }).error).toMatch(/disabled/);
+  });
+
+  it('refuses malformed and unknown refs', () => {
+    document.body.innerHTML = '<button>A</button>';
+    const snap = snapshot();
+    expect(resolve({ ref: 'button', refGen: snap.refGen }).error).toMatch(/bad ref/);
+    expect(resolve({ ref: 'e99', refGen: snap.refGen }).error).toMatch(/unknown ref/);
+  });
+
+  it('refuses when no snapshot has been taken', () => {
+    delete (window as any).__saiRefs;
+    expect(resolve({ ref: 'e1' }).error).toMatch(/no snapshot refs/);
+  });
+
+  it('refuses an element whose centre is outside the viewport', () => {
+    document.body.innerHTML = '<button>A</button>';
+    const snap = snapshot();
+    Element.prototype.getBoundingClientRect = function () {
+      return { left: -500, top: -500, width: 100, height: 20 } as DOMRect;
+    };
+    expect(resolve({ ref: 'e1', refGen: snap.refGen }).error).toMatch(/outside the viewport/);
+  });
+
+  it('clears a field only when asked', () => {
+    document.body.innerHTML = '<input id="f" value="old">';
+    const snap = snapshot();
+    const field = document.getElementById('f') as HTMLInputElement;
+
+    resolve({ ref: 'e1', refGen: snap.refGen, focus: true });
+    expect(field.value).toBe('old');
+
+    resolve({ ref: 'e1', refGen: snap.refGen, clear: true });
+    expect(field.value).toBe('');
+  });
+
+  // `'value' in el` is true for buttons, selects and checkboxes, so it cannot
+  // be used to decide "can I type here" — these cases pin that down.
+  it('treats only real text inputs as editable', () => {
+    document.body.innerHTML = `
+      <input type="text" aria-label="t">
+      <input type="search" aria-label="s">
+      <textarea aria-label="ta"></textarea>
+      <div contenteditable="true" role="textbox" aria-label="ce">x</div>
+      <button aria-label="b">B</button>
+      <input type="checkbox" aria-label="c">
+      <input type="submit" aria-label="sub">
+      <select aria-label="sel"><option>a</option></select>
+    `;
+    const snap = snapshot();
+    const editableByName: Record<string, boolean> = {};
+    for (const el of snap.elements) {
+      editableByName[el.name] = resolve({ ref: el.ref, refGen: snap.refGen }).editable;
+    }
+
+    expect(editableByName).toMatchObject({
+      t: true, s: true, ta: true, ce: true,
+      b: false, c: false, sub: false, sel: false,
+    });
+  });
+
+  it('does not clear a non-editable element', () => {
+    document.body.innerHTML = '<input type="checkbox" aria-label="c" checked>';
+    const snap = snapshot();
+    resolve({ ref: 'e1', refGen: snap.refGen, clear: true });
+    expect((document.querySelector('input') as HTMLInputElement).checked).toBe(true);
+  });
+});
+
+describe('page scroll', () => {
+  it('reports whether the page actually moved', () => {
+    const res = scrollPage({ dy: 400 });
+    // jsdom does not implement scrolling, so nothing moves — the point is that
+    // we report that truthfully instead of claiming success.
+    expect(res).toMatchObject({ moved: false });
+    expect(res.scroll).toEqual({ x: 0, y: 0 });
   });
 });
