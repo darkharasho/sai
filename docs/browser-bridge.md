@@ -148,6 +148,24 @@ reimplementing any of this, so both paths behave identically.
 - `<user-data-dir>/NativeMessagingHosts/com.sai.browser_bridge.json` — the host
   manifest, with `allowed_origins` pinned to your extension ID. That pin is the
   trust boundary: no other extension can spawn the relay.
+
+  **Arc and Dia are the exception.** On macOS, Chromium resolves the
+  native-messaging directory from a *branded* constant, not from the profile.
+  Arc and Dia ship the same `ArcCore.framework` and never rebranded it, so both
+  read Chrome's directory:
+
+  ```
+  ~/Library/Application Support/Google/Chrome/NativeMessagingHosts/
+  ```
+
+  — even though their profiles live under `Arc/User Data` and `Dia/User Data`,
+  and even when Chrome isn't installed. Writing to their own user-data root
+  produces a bridge that fails silently: the extension loads, the debugger
+  attaches, the infobar appears, and `connectNative` never finds a host.
+
+  One consequence: Chrome, Arc and Dia share a single manifest, so removing it
+  for any one of them removes it for all three. There is no per-browser
+  manifest to remove instead.
 - `~/.sai/browser-bridge/bridge-host.sh` — a launcher shim. Chromium execs the
   host directly, so the manifest `path` can't be `node file.js`. The shim sets
   `ELECTRON_RUN_AS_NODE=1` so a packaged build's Electron binary runs the relay
@@ -176,6 +194,29 @@ All three take an optional `tabId`; omit it when exactly one tab is attached.
 Snapshot refs (`e1`, `e2`, …) are stashed on the page as `window.__saiRefs` so a
 later drive slice can resolve `e17` back to a live node without re-walking the
 DOM. Nothing reads them yet.
+
+## Debugging a bridge that won't connect
+
+The failure is quiet by design — nothing in the UI distinguishes "attached but
+no host" from "attached and working". Work down this list:
+
+1. `pgrep -f bridge-host` — if the relay isn't running, the browser never
+   launched it, and the problem is the manifest or its location.
+2. Open the extension's service worker console from the browser's extensions
+   page and look for `[sai-bridge]` lines. `Specified native messaging host not
+   found` means a manifest-location problem; `Native host has exited` means the
+   shim ran and died.
+3. Some forks (Dia among them) won't open that console reliably. Relaunch the
+   browser with logging instead and grep for `launch_context`, which names the
+   host it couldn't find:
+
+   ```sh
+   /Applications/<Browser>.app/Contents/MacOS/<Browser> \
+     --enable-logging=stderr --v=1 2>&1 | grep -i native
+   ```
+
+Note that the extension retries on its 30-second keepalive alarm while a tab is
+attached, so a fix can take up to 30s to take effect without re-clicking.
 
 ## Known limitations
 

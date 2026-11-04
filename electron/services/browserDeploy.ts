@@ -31,8 +31,14 @@ const LOCATION_UNPACKED = 4;
 export interface BrowserDef {
   id: string;
   label: string;
-  /** Path to the user-data root, which is where NativeMessagingHosts lives. */
+  /** Path to the user-data root. Profiles and preference files live here. */
   userDataDir: string;
+  /**
+   * Where this browser actually looks for native-messaging host manifests,
+   * when that isn't `<userDataDir>/NativeMessagingHosts`. See the Arc/Dia note
+   * in `browserCandidates`.
+   */
+  nativeHostDir?: string;
   /** macOS app name for `open -a`, when we can open its extensions page. */
   macAppName?: string;
 }
@@ -53,6 +59,14 @@ function macSupport(home: string): string {
  * Candidate browsers per platform. Chromium forks differ in whether the
  * user-data root is the support dir itself (Comet) or a `User Data` child
  * (Arc, Dia) — both were verified by inspecting real installs.
+ *
+ * The manifest directory is a separate question from the user-data root. On
+ * macOS, Chromium resolves `DIR_USER_NATIVE_MESSAGING` from a *branded*
+ * constant rather than from the profile, so a fork that never rebranded it
+ * keeps reading Chrome's directory. Arc and Dia both ship the same
+ * `ArcCore.framework` and do exactly that — verified on Dia by bisecting
+ * candidate directories against a live `connectNative`, and carried over to
+ * Arc because the binary is byte-for-byte the same engine.
  */
 export function browserCandidates(
   home: string = os.homedir(),
@@ -61,6 +75,8 @@ export function browserCandidates(
 ): BrowserDef[] {
   if (platform === 'darwin') {
     const s = macSupport(home);
+    // Unrebranded forks (Arc, Dia) read Chrome's manifest directory.
+    const chromeHostDir = path.join(s, 'Google', 'Chrome', 'NativeMessagingHosts');
     return [
       { id: 'chrome', label: 'Google Chrome', userDataDir: path.join(s, 'Google', 'Chrome'), macAppName: 'Google Chrome' },
       { id: 'chrome-beta', label: 'Chrome Beta', userDataDir: path.join(s, 'Google', 'Chrome Beta'), macAppName: 'Google Chrome Beta' },
@@ -70,8 +86,8 @@ export function browserCandidates(
       { id: 'brave', label: 'Brave', userDataDir: path.join(s, 'BraveSoftware', 'Brave-Browser'), macAppName: 'Brave Browser' },
       { id: 'vivaldi', label: 'Vivaldi', userDataDir: path.join(s, 'Vivaldi'), macAppName: 'Vivaldi' },
       { id: 'opera', label: 'Opera', userDataDir: path.join(s, 'com.operasoftware.Opera'), macAppName: 'Opera' },
-      { id: 'arc', label: 'Arc', userDataDir: path.join(s, 'Arc', 'User Data'), macAppName: 'Arc' },
-      { id: 'dia', label: 'Dia', userDataDir: path.join(s, 'Dia', 'User Data'), macAppName: 'Dia' },
+      { id: 'arc', label: 'Arc', userDataDir: path.join(s, 'Arc', 'User Data'), nativeHostDir: chromeHostDir, macAppName: 'Arc' },
+      { id: 'dia', label: 'Dia', userDataDir: path.join(s, 'Dia', 'User Data'), nativeHostDir: chromeHostDir, macAppName: 'Dia' },
       { id: 'comet', label: 'Comet', userDataDir: path.join(s, 'Comet'), macAppName: 'Comet' },
     ];
   }
@@ -139,7 +155,7 @@ export function expectedExtensionId(extensionDir: string): string | null {
 }
 
 export function nativeHostDirFor(browser: BrowserDef): string {
-  return path.join(browser.userDataDir, 'NativeMessagingHosts');
+  return browser.nativeHostDir ?? path.join(browser.userDataDir, 'NativeMessagingHosts');
 }
 
 /**
@@ -311,6 +327,12 @@ export function installNativeHost(opts: {
   return results;
 }
 
+/**
+ * Removing the manifest for Chrome, Arc or Dia on macOS removes it for all
+ * three — they share one directory (see `browserCandidates`), and there is no
+ * per-browser manifest to remove instead. The duplicate unlink is a harmless
+ * ENOENT, so `removed` still lists each path once.
+ */
 export function uninstallNativeHost(browsers: BrowserDef[]): string[] {
   const removed: string[] = [];
   for (const browser of browsers) {
