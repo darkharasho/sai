@@ -15,6 +15,11 @@ export const BROWSER_TOOL_METHODS: Record<string, string> = {
   browser_tabs: 'tabs.list',
   browser_snapshot: 'snapshot',
   browser_read: 'read',
+  browser_click: 'click',
+  browser_type: 'type',
+  browser_press: 'press',
+  browser_scroll: 'scroll',
+  browser_navigate: 'navigate',
 };
 
 export function isBrowserTool(tool: string): boolean {

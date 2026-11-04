@@ -146,16 +146,132 @@ export const SNAPSHOT_FN_SOURCE = `function (opts) {
   collect(INTERACTIVE, 'interactive');
   collect(STRUCTURAL, 'structural');
 
+  // The generation stamp is what makes acting on a ref safe. A navigation
+  // wipes these globals and a re-snapshot bumps the stamp, so an action
+  // carrying an older refGen can be rejected instead of silently landing on
+  // whatever element now happens to sit at that index.
   window.__saiRefs = refs;
+  window.__saiRefGen = (window.__saiRefGen || 0) + 1;
 
   return {
     url: location.href,
     title: document.title,
+    refGen: window.__saiRefGen,
     viewport: { w: window.innerWidth, h: window.innerHeight },
     scroll: { x: Math.round(window.scrollX), y: Math.round(window.scrollY) },
     elements: out,
     truncated: truncated
   };
+}`;
+
+/**
+ * Resolves a snapshot `ref` back to a live node and reports where it sits in
+ * the viewport, so the service worker can aim real CDP input events at it.
+ *
+ * Every failure mode here is a refusal rather than a guess. Acting on the
+ * wrong element is far worse than not acting: a stale ref after a re-render
+ * could mean clicking "Delete" when the model meant "Download". So a
+ * generation mismatch, a detached node, a zero-sized box, or an element
+ * scrolled off-screen all return `{ error }` and the caller re-snapshots.
+ */
+export const RESOLVE_FN_SOURCE = `function (opts) {
+  opts = opts || {};
+  var refs = window.__saiRefs;
+  var gen = window.__saiRefGen || 0;
+
+  if (!refs || !refs.length) {
+    return { error: 'no snapshot refs on this page — call browser_snapshot first' };
+  }
+  if (opts.refGen && opts.refGen !== gen) {
+    return { error: 'refs are stale (page changed since snapshot ' + opts.refGen + ', now ' + gen + ') — re-snapshot first' };
+  }
+
+  var m = /^e(\\d+)$/.exec(String(opts.ref || ''));
+  if (!m) return { error: 'bad ref: ' + opts.ref + ' (expected e1, e2, ...)' };
+
+  var el = refs[parseInt(m[1], 10) - 1];
+  if (!el) return { error: 'unknown ref: ' + opts.ref };
+  if (!el.isConnected) return { error: 'element ' + opts.ref + ' is no longer in the page — re-snapshot first' };
+  if (el.disabled === true) return { error: 'element ' + opts.ref + ' is disabled' };
+
+  if (opts.scrollIntoView !== false) {
+    try { el.scrollIntoView({ block: 'center', inline: 'center' }); } catch (err) { /* older engines */ }
+  }
+
+  var r = el.getBoundingClientRect();
+  if (!r || (r.width === 0 && r.height === 0)) {
+    return { error: 'element ' + opts.ref + ' has no size (hidden?) — re-snapshot first' };
+  }
+
+  var x = r.left + r.width / 2;
+  var y = r.top + r.height / 2;
+  // Input events are delivered by coordinate, so an off-screen centre would
+  // land on whatever is actually there instead.
+  if (x < 0 || y < 0 || x > window.innerWidth || y > window.innerHeight) {
+    return { error: 'element ' + opts.ref + ' is outside the viewport after scrolling — re-snapshot first' };
+  }
+
+  // 'value' in el is true for <button>, <select>, checkboxes and more, so it
+  // is useless as an "can I type here" test. Go by tag and input type.
+  var NON_TEXT_INPUT = {
+    checkbox: 1, radio: 1, submit: 1, button: 1, reset: 1,
+    file: 1, image: 1, range: 1, color: 1
+  };
+  var inputType = el.tagName === 'INPUT' ? (el.getAttribute('type') || 'text').toLowerCase() : '';
+  // isContentEditable is the real API (it accounts for inheritance), but the
+  // attribute is checked too so this works outside a full layout engine.
+  var ceAttr = el.getAttribute ? el.getAttribute('contenteditable') : null;
+  var isCE = el.isContentEditable === true || ceAttr === '' || ceAttr === 'true';
+  var editable = el.tagName === 'TEXTAREA' ||
+    isCE ||
+    (el.tagName === 'INPUT' && !NON_TEXT_INPUT[inputType]);
+
+  if (opts.focus) {
+    try { el.focus({ preventScroll: true }); } catch (err) { /* not focusable */ }
+  }
+  if (opts.clear && editable) {
+    try {
+      if (isCE) el.textContent = '';
+      else el.value = '';
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    } catch (err) { /* read-only field */ }
+  }
+
+  return {
+    x: Math.round(x),
+    y: Math.round(y),
+    tag: el.tagName,
+    editable: editable,
+    url: location.href,
+    title: document.title
+  };
+}`;
+
+/**
+ * Scrolls the window (or a ref'd element into view) and reports the result.
+ * Separate from RESOLVE so plain "scroll down the page" needs no snapshot.
+ */
+export const SCROLL_FN_SOURCE = `function (opts) {
+  opts = opts || {};
+  var before = Math.round(window.scrollY);
+
+  if (opts.to === 'top') window.scrollTo(0, 0);
+  else if (opts.to === 'bottom') window.scrollTo(0, document.body.scrollHeight);
+  else window.scrollBy(opts.dx || 0, opts.dy || 0);
+
+  var after = Math.round(window.scrollY);
+  return {
+    url: location.href,
+    title: document.title,
+    scroll: { x: Math.round(window.scrollX), y: after },
+    moved: after !== before,
+    atBottom: Math.ceil(after + window.innerHeight) >= document.body.scrollHeight
+  };
+}`;
+
+/** Current location, for same-origin checks and post-action reporting. */
+export const LOCATION_FN_SOURCE = `function () {
+  return { url: location.href, origin: location.origin, title: document.title, readyState: document.readyState };
 }`;
 
 /**

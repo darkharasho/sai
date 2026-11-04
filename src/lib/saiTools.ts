@@ -297,7 +297,8 @@ export const SAI_TOOL_SCHEMA: SaiToolDef[] = [
       'See a shared browser tab: returns a screenshot plus a structured list of the interactive and ' +
       'labelled elements on screen, each with a stable `ref`. USE THIS instead of walking the user ' +
       'through "now look at the top right" — look yourself, then describe what you actually see. ' +
-      'Requires the user to have attached the tab first. Read-only: cannot click or type.',
+      'Requires the user to have attached the tab first. Also returns `refGen`: pass it to the ' +
+      'control tools so a stale ref is rejected rather than acted on. Read-only itself.',
     toolset: 'chat',
     input_schema: {
       type: 'object',
@@ -322,6 +323,96 @@ export const SAI_TOOL_SCHEMA: SaiToolDef[] = [
         selector: { type: 'string', description: 'Optional CSS selector to read just one region.' },
         maxChars: { type: 'number', description: 'Truncation cap (default 20000).' },
       },
+    },
+  },
+  {
+    name: 'browser_click',
+    description:
+      'Click an element in a shared tab, by the `ref` from browser_snapshot. REQUIRES the user to ' +
+      'have enabled control on that tab (right-click the SAI toolbar button, "Let SAI control this ' +
+      'tab"); a read-only tab returns an error saying so — relay that rather than retrying. Always ' +
+      'browser_snapshot first to get a current ref, and pass the snapshot\'s `refGen` so a ref that ' +
+      'went stale is refused instead of clicking the wrong thing.',
+    toolset: 'chat',
+    input_schema: {
+      type: 'object',
+      properties: {
+        ref: { type: 'string', description: 'Element ref from browser_snapshot, e.g. "e17".' },
+        refGen: { type: 'number', description: 'The `refGen` from that same snapshot. Always pass it.' },
+        tabId: { type: 'number', description: 'Which shared tab (from browser_tabs). Omit when only one is attached.' },
+      },
+      required: ['ref'],
+    },
+  },
+  {
+    name: 'browser_type',
+    description:
+      'Type text into a field in a shared tab, by the `ref` from browser_snapshot. Requires control ' +
+      'on that tab (see browser_click). Set `submit` to press Enter afterwards — that is how you run ' +
+      'a search. Set `replace` to clear the field first; otherwise text is inserted at the cursor.',
+    toolset: 'chat',
+    input_schema: {
+      type: 'object',
+      properties: {
+        ref: { type: 'string', description: 'Element ref of the text field, e.g. "e4".' },
+        text: { type: 'string', description: 'Text to type.' },
+        refGen: { type: 'number', description: 'The `refGen` from that same snapshot. Always pass it.' },
+        replace: { type: 'boolean', description: 'Clear the field before typing (default false).' },
+        submit: { type: 'boolean', description: 'Press Enter after typing (default false).' },
+        tabId: { type: 'number', description: 'Which shared tab. Omit when only one is attached.' },
+      },
+      required: ['ref', 'text'],
+    },
+  },
+  {
+    name: 'browser_press',
+    description:
+      'Press a single key in a shared tab, sent to whatever is focused. Requires control on that tab. ' +
+      'USE THIS for Escape to dismiss a dialog, Tab to move between fields, or arrow keys in a menu.',
+    toolset: 'chat',
+    input_schema: {
+      type: 'object',
+      properties: {
+        key: {
+          type: 'string',
+          description: 'One of: Enter, Tab, Escape, Backspace, Delete, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Home, End, PageUp, PageDown.',
+        },
+        tabId: { type: 'number', description: 'Which shared tab. Omit when only one is attached.' },
+      },
+      required: ['key'],
+    },
+  },
+  {
+    name: 'browser_scroll',
+    description:
+      'Scroll a shared tab. Requires control on that tab. USE THIS when browser_snapshot reports an ' +
+      'element outside the viewport, or to page through a long list. Re-snapshot afterwards: scrolling ' +
+      'changes which elements are reachable.',
+    toolset: 'chat',
+    input_schema: {
+      type: 'object',
+      properties: {
+        dy: { type: 'number', description: 'Pixels to scroll vertically; negative scrolls up. Defaults to 600.' },
+        dx: { type: 'number', description: 'Pixels to scroll horizontally.' },
+        to: { type: 'string', enum: ['top', 'bottom'], description: 'Jump to the top or bottom instead of a relative scroll.' },
+        tabId: { type: 'number', description: 'Which shared tab. Omit when only one is attached.' },
+      },
+    },
+  },
+  {
+    name: 'browser_navigate',
+    description:
+      'Navigate a shared tab to another URL on the SAME ORIGIN it is already on. Requires control on ' +
+      'that tab. Cross-origin navigation is refused by design — ask the user to open a different site ' +
+      'themselves rather than trying to work around it.',
+    toolset: 'chat',
+    input_schema: {
+      type: 'object',
+      properties: {
+        url: { type: 'string', description: 'Absolute or relative URL on the current origin, e.g. "/settings".' },
+        tabId: { type: 'number', description: 'Which shared tab. Omit when only one is attached.' },
+      },
+      required: ['url'],
     },
   },
   {

@@ -1,20 +1,20 @@
-# Browser bridge (read-only slice)
+# Browser bridge
 
-Lets SAI *see* a browser tab you explicitly share, so it can look at what you're
-looking at instead of narrating steps for you to follow.
+Lets SAI *see* a browser tab you explicitly share — and, if you separately say
+so, *act* in it — so it can look at what you're looking at instead of narrating
+steps for you to follow.
 
-This is the read-only slice. It can snapshot, screenshot, and read text. It
-cannot click, type, or navigate — no CDP `Input` commands are implemented
-anywhere in the path, and the main process rejects any bridge method outside
-the three below.
+Sharing and control are two different decisions, and the second is never
+implied by the first.
 
 ## Consent model
 
 Nothing is shared until you click the extension's toolbar button on a tab.
 
-- Clicking attaches a `chrome.debugger` (CDP) session to **that tab only**.
-  Chrome shows its own *"DevTools is debugging this tab"* infobar for as long as
-  the attachment lasts, and the extension badge shows how many tabs are shared.
+- Clicking attaches a `chrome.debugger` (CDP) session to **that tab only**, for
+  reading. Chrome shows its own *"DevTools is debugging this tab"* infobar for
+  as long as the attachment lasts, and the extension badge shows how many tabs
+  are shared.
 - Clicking again detaches. Closing the tab detaches.
 - Tabs you never attached are not enumerated — `sai_browser_tabs` lists only
   attached tabs, so SAI can't see that your other tabs exist. The extension
@@ -24,6 +24,52 @@ Nothing is shared until you click the extension's toolbar button on a tab.
 Things to know before attaching a tab you care about: a snapshot includes the
 values of ordinary (non-password) form fields, and a screenshot captures
 whatever is on screen. Don't attach a tab mid-2FA.
+
+### Granting control
+
+A shared tab is **read-only until you grant control on it specifically**:
+right-click the SAI toolbar button and tick **"Let SAI control this tab"**.
+
+- The grant is **per tab**, not global. Other shared tabs stay read-only.
+- The badge turns **amber** whenever any tab can be driven, so "SAI can act
+  here" never looks like "SAI can look here".
+- Detaching drops the grant. Re-attaching starts read-only again.
+- Grants live in `chrome.storage.session`, so they survive the service worker
+  being torn down (which happens constantly) but **never a browser restart**.
+- Control is not a left-click modifier because `action.onClicked` reports no
+  modifier keys, and a popup would replace the one-click share that works.
+
+Without a grant, every control method fails with a message naming the exact
+menu item — so the model tells you how to enable it rather than silently
+failing or retrying.
+
+### What control can and cannot do
+
+Allowed: `click`, `type`, `press` (a fixed key list), `scroll`, and `navigate`.
+
+Deliberately absent:
+
+- **No arbitrary script execution.** There is no eval/inject tool. The page
+  scripts that *are* evaluated are a fixed set shipped with the extension.
+- **No cross-origin navigation.** `navigate` resolves the target against the
+  current page and refuses anything that changes origin, or any non-http(s)
+  scheme. Clicking a link that happens to leave the origin is still fine — that
+  is the page behaving normally, not SAI choosing a destination.
+- **No raw CDP.** The main process speaks only the method names below; nothing
+  in the path can send an `Input.*` command directly, so the per-tab grant
+  can't be bypassed from the SAI side.
+
+### Acting on a stale ref
+
+`browser_snapshot` returns a `refGen` alongside the elements. Control tools take
+it and refuse if the page has re-snapshotted or navigated since.
+
+This matters more than it sounds: `e17` is an index into a list captured at a
+moment in time. After a re-render, that index may point at a different control
+entirely — so an unguarded click could hit *Delete* where the model meant
+*Download*. Every resolution failure (stale generation, detached node,
+zero-sized box, element scrolled out of view) is a refusal telling the caller to
+re-snapshot, never a best guess.
 
 ## Architecture
 
@@ -183,17 +229,31 @@ invasive, for a local developer tool.
 
 ## Tools
 
+Read tools — available on any attached tab:
+
 | Tool | What it returns |
 | --- | --- |
 | `sai_browser_tabs` | The attached tabs, with `tabId`, URL, title |
-| `sai_browser_snapshot` | Screenshot (JPEG) + interactive/labelled elements with `ref`, `role`, `name`, `box` |
+| `sai_browser_snapshot` | Screenshot (JPEG) + interactive/labelled elements with `ref`, `role`, `name`, `box`, plus `refGen` |
 | `sai_browser_read` | Visible text of the page, or of one `selector` |
 
-All three take an optional `tabId`; omit it when exactly one tab is attached.
+Control tools — additionally require **"Let SAI control this tab"** on that tab:
 
-Snapshot refs (`e1`, `e2`, …) are stashed on the page as `window.__saiRefs` so a
-later drive slice can resolve `e17` back to a live node without re-walking the
-DOM. Nothing reads them yet.
+| Tool | What it does |
+| --- | --- |
+| `sai_browser_click` | Clicks the element at `ref` (real CDP mouse events at its centre) |
+| `sai_browser_type` | Types into `ref`; `replace` clears first, `submit` presses Enter |
+| `sai_browser_press` | Sends one key from a fixed list to whatever is focused |
+| `sai_browser_scroll` | Scrolls by `dy`/`dx`, or jumps `to` top/bottom |
+| `sai_browser_navigate` | Navigates to a **same-origin** URL |
+
+Every tool takes an optional `tabId`; omit it when exactly one tab is attached.
+Control tools take `ref` plus the `refGen` from the snapshot that produced it.
+
+Snapshot refs (`e1`, `e2`, …) are stashed on the page as `window.__saiRefs`,
+with a generation counter in `window.__saiRefGen`, so a control call can
+resolve `e17` back to a live node without re-walking the DOM — and can tell
+when that node is no longer the one it meant.
 
 ## Debugging a bridge that won't connect
 

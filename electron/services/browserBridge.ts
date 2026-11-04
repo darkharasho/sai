@@ -49,11 +49,19 @@ let instance: Instance | null = null;
 
 const CALL_TIMEOUT_MS = 20_000;
 
+/** Methods that only observe. Available on any attached tab. */
+export const BRIDGE_READ_METHODS = ['tabs.list', 'snapshot', 'read'] as const;
+
 /**
- * Everything the extension implements today. This is the read-only slice — no
- * Input-domain methods exist, so the allowlist is also the safety boundary.
+ * Methods that act on the page. Listing one here only means SAI is *allowed to
+ * ask*; whether it actually happens is decided in the extension, which refuses
+ * unless the user ticked "Let SAI control this tab" on that specific tab. The
+ * extension holds the debugger session, so it — not this list — is the real
+ * consent boundary.
  */
-export const BRIDGE_METHODS = new Set(['tabs.list', 'snapshot', 'read']);
+export const BRIDGE_WRITE_METHODS = ['click', 'type', 'press', 'scroll', 'navigate'] as const;
+
+export const BRIDGE_METHODS = new Set<string>([...BRIDGE_READ_METHODS, ...BRIDGE_WRITE_METHODS]);
 
 function writeToken(tokenPath: string, token: string): void {
   fs.mkdirSync(bridgeDir(), { recursive: true, mode: 0o700 });
