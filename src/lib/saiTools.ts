@@ -298,14 +298,35 @@ export const SAI_TOOL_SCHEMA: SaiToolDef[] = [
       'labelled elements on screen, each with a stable `ref`. USE THIS instead of walking the user ' +
       'through "now look at the top right" — look yourself, then describe what you actually see. ' +
       'Requires the user to have attached the tab first. Also returns `refGen`: pass it to the ' +
-      'control tools so a stale ref is rejected rather than acted on. Read-only itself.',
+      'control tools so a stale ref is rejected rather than acted on. Read-only itself. ' +
+      'If the control you want is not in the list, DO NOT just raise `maxElements` — use `match` to ' +
+      'search by name, `root` to scope to a region, or `offset` to page. An open dialog is listed ' +
+      'first automatically and reported as `modal`. Check `total` vs `returned` to see what was left out.',
     toolset: 'chat',
     input_schema: {
       type: 'object',
       properties: {
         tabId: { type: 'number', description: 'Which shared tab (from browser_tabs). Omit when only one is attached.' },
         screenshot: { type: 'boolean', description: 'Set false to skip the image and return only the element list (much cheaper).' },
-        maxElements: { type: 'number', description: 'Cap on elements returned (default 200).' },
+        maxElements: { type: 'number', description: 'Cap on elements returned (default 200). Prefer match/root over raising this.' },
+        match: {
+          type: 'string',
+          description:
+            'Only list elements whose role or name contains this (case-insensitive). BEST WAY to reach ' +
+            'a named control on a busy page, e.g. "skip the inbox" or "checkbox".',
+        },
+        root: {
+          type: 'string',
+          description:
+            'CSS selector to snapshot just one region, e.g. "[role=dialog]" or "#sidebar". Errors if ' +
+            'nothing matches, rather than falling back to the whole page.',
+        },
+        offset: {
+          type: 'number',
+          description:
+            'Skip this many elements before listing — pages through a long list. Ref labels number the ' +
+            'whole list, so they stay consistent across pages of one snapshot.',
+        },
       },
     },
   },
@@ -368,14 +389,18 @@ export const SAI_TOOL_SCHEMA: SaiToolDef[] = [
     name: 'browser_press',
     description:
       'Press a single key in a shared tab, sent to whatever is focused. Requires control on that tab. ' +
-      'USE THIS for Escape to dismiss a dialog, Tab to move between fields, or arrow keys in a menu.',
+      'USE THIS for Escape to dismiss a dialog, Tab to move between fields, arrow keys in a menu, or ' +
+      'Space to toggle a focused checkbox, radio or switch — Enter does NOT activate those, and on an ' +
+      'app with keyboard shortcuts it can fall through to the page behind a dialog and trigger ' +
+      'something else. Returns `focusBefore`/`focusAfter` (with their `checked` state): check them to ' +
+      'confirm the key did what you meant instead of assuming it did.',
     toolset: 'chat',
     input_schema: {
       type: 'object',
       properties: {
         key: {
           type: 'string',
-          description: 'One of: Enter, Tab, Escape, Backspace, Delete, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Home, End, PageUp, PageDown.',
+          description: 'One of: Enter, Space, Tab, Escape, Backspace, Delete, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Home, End, PageUp, PageDown.',
         },
         tabId: { type: 'number', description: 'Which shared tab. Omit when only one is attached.' },
       },

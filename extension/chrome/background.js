@@ -23,6 +23,7 @@ import {
   RESOLVE_FN_SOURCE,
   SCROLL_FN_SOURCE,
   LOCATION_FN_SOURCE,
+  FOCUS_FN_SOURCE,
 } from './pageScripts.js';
 
 const NATIVE_HOST = 'com.sai.browser_bridge';
@@ -414,6 +415,10 @@ async function settle(tabId, timeoutMs = SETTLE_TIMEOUT_MS) {
 const KEYS = {
   Enter: { key: 'Enter', code: 'Enter', keyCode: 13, text: '\r' },
   Tab: { key: 'Tab', code: 'Tab', keyCode: 9 },
+  // Space is how a focused checkbox, radio or switch is toggled — Enter does
+  // not activate them, and on an app with global shortcuts it falls through to
+  // the page behind instead, which is worse than doing nothing.
+  Space: { key: ' ', code: 'Space', keyCode: 32, text: ' ' },
   Escape: { key: 'Escape', code: 'Escape', keyCode: 27 },
   Backspace: { key: 'Backspace', code: 'Backspace', keyCode: 8 },
   Delete: { key: 'Delete', code: 'Delete', keyCode: 46 },
@@ -427,8 +432,16 @@ const KEYS = {
   PageDown: { key: 'PageDown', code: 'PageDown', keyCode: 34 },
 };
 
+/**
+ * The DOM name for the space key is a single space, and models reach for
+ * "Spacebar" too, so both resolve to Space rather than being refused for a
+ * naming mismatch. Everything else must match a key in KEYS exactly.
+ */
+const KEY_ALIASES = { ' ': 'Space', Spacebar: 'Space', space: 'Space', Esc: 'Escape' };
+
 async function dispatchKey(tabId, name) {
-  const def = KEYS[name];
+  const resolved = KEY_ALIASES[name] || name;
+  const def = KEYS[resolved];
   if (!def) {
     throw new Error(`unsupported key: ${name} (supported: ${Object.keys(KEYS).join(', ')})`);
   }
@@ -508,8 +521,13 @@ const HANDLERS = {
     const tabId = resolveTabId(params);
     const snap = await evaluateFn(tabId, SNAPSHOT_FN_SOURCE, {
       maxElements: params?.maxElements,
+      offset: params?.offset,
+      match: params?.match,
+      root: params?.root,
     });
     if (!snap) throw new Error('snapshot returned nothing (page may still be loading)');
+    // A bad root selector is the caller's mistake, not an empty page.
+    if (snap.error) throw new Error(snap.error);
 
     const out = { tabId, ...snap };
     if (params?.screenshot !== false) {
@@ -576,9 +594,26 @@ const HANDLERS = {
 
   async press(params) {
     const tabId = resolveControlledTabId(params);
+    // Focus before and after, so a key that was swallowed (or that activated
+    // something behind a modal) shows up in the result instead of reading as
+    // a success. Best-effort: a page that won't evaluate still gets the key.
+    let before = null;
+    try { before = await evaluateFn(tabId, FOCUS_FN_SOURCE, {}); } catch { /* not fatal */ }
+
     await dispatchKey(tabId, String(params?.key ?? ''));
     const after = await settle(tabId, 1500);
-    return { tabId, pressed: params?.key, url: after?.url ?? null, title: after?.title ?? null };
+
+    let focus = null;
+    try { focus = await evaluateFn(tabId, FOCUS_FN_SOURCE, {}); } catch { /* not fatal */ }
+
+    return {
+      tabId,
+      pressed: params?.key,
+      focusBefore: before?.focus ?? null,
+      focusAfter: focus?.focus ?? null,
+      url: after?.url ?? null,
+      title: after?.title ?? null,
+    };
   },
 
   async scroll(params) {

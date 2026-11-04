@@ -216,8 +216,52 @@ describe('key dispatch', () => {
   it('supports the documented keys and nothing surprising', () => {
     expect(Object.keys(mod.KEYS).sort()).toEqual([
       'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'Backspace', 'Delete',
-      'End', 'Enter', 'Escape', 'Home', 'PageDown', 'PageUp', 'Tab',
+      'End', 'Enter', 'Escape', 'Home', 'PageDown', 'PageUp', 'Space', 'Tab',
     ]);
+  });
+
+  /**
+   * Space is the only way to toggle a focused checkbox. Without it the model
+   * reaches for Enter, which does not activate a checkbox at all — on an app
+   * with global shortcuts it falls through to the page behind the dialog and
+   * activates something else entirely.
+   */
+  it('sends Space as a real space keypress, with text so the page sees it', async () => {
+    await mod.handleRequest({ method: 'press', params: { key: 'Space' } });
+
+    const keys = cdpCalls.filter((c) => c.method === 'Input.dispatchKeyEvent');
+    expect(keys).toHaveLength(2);
+    expect(keys[0].params).toMatchObject({
+      type: 'keyDown', key: ' ', code: 'Space', text: ' ', windowsVirtualKeyCode: 32,
+    });
+    expect(keys[1].params).toMatchObject({ type: 'keyUp', key: ' ', code: 'Space' });
+  });
+
+  it.each([' ', 'Spacebar', 'space'])('accepts %j as Space', async (alias) => {
+    await mod.handleRequest({ method: 'press', params: { key: alias } });
+    const down = cdpCalls.find((c) => c.method === 'Input.dispatchKeyEvent');
+    expect(down?.params).toMatchObject({ code: 'Space' });
+  });
+
+  /**
+   * press is the one control action with no ref behind it, so without this the
+   * caller cannot tell "toggled the checkbox" from "key went to the page
+   * behind the modal" — both return success.
+   */
+  it('reports the focused element before and after, so a no-op press is visible', async () => {
+    evaluateReturns({ focus: { tag: 'INPUT', role: 'checkbox', name: 'Skip the Inbox', checked: false } });
+
+    const res: any = await mod.handleRequest({ method: 'press', params: { key: 'Space' } });
+    expect(res.focusBefore).toMatchObject({ role: 'checkbox', checked: false });
+    expect(res.focusAfter).toMatchObject({ role: 'checkbox' });
+  });
+
+  it('still presses the key when the page will not report focus', async () => {
+    cdpReplies['Runtime.evaluate'] = () => { throw new Error('context destroyed'); };
+
+    const res: any = await mod.handleRequest({ method: 'press', params: { key: 'Escape' } });
+    expect(res.focusBefore).toBeNull();
+    expect(cdpCalls.some((c) => c.method === 'Input.dispatchKeyEvent')).toBe(true);
   });
 });
 

@@ -189,12 +189,167 @@ describe('page snapshot', () => {
     expect(snap.truncated).toBe(true);
   });
 
+  it('reports how much it left out, not just that it did', () => {
+    document.body.innerHTML = Array.from({ length: 10 }, (_, i) => `<button>B${i}</button>`).join('');
+    const snap = snapshot({ maxElements: 4 }) as any;
+    expect(snap).toMatchObject({ total: 10, offset: 0, returned: 4, truncated: true });
+    expect(snap.hint).toContain('offset:4');
+  });
+
   it('collapses whitespace and truncates long names', () => {
     document.body.innerHTML = `<button>  lots\n   of\tspace  </button><button>${'x'.repeat(300)}</button>`;
     const snap = snapshot();
     expect(snap.elements[0].name).toBe('lots of space');
     expect(snap.elements[1].name).toHaveLength(120);
     expect(snap.elements[1].name.endsWith('…')).toBe(true);
+  });
+});
+
+/**
+ * The reason this block exists: an element the caller was never shown is an
+ * element it cannot click. On a real app (Gmail's filter panel) the controls
+ * render *after* a 50-row result grid, so a 300-element snapshot was still
+ * inside the rows and the panel's checkbox had no reachable ref at all.
+ * Keyboard focus could reach it; the snapshot could not address it.
+ */
+describe('reaching elements that render late in the DOM', () => {
+  /** A long result list, then the panel you actually came for. */
+  function gridThenDialog() {
+    const rows = Array.from(
+      { length: 50 },
+      (_, i) => `<a href="/msg/${i}">Message ${i} from someone</a>`,
+    ).join('');
+    document.body.innerHTML = `
+      ${rows}
+      <div role="dialog" aria-modal="true" aria-label="Create a filter">
+        <input type="checkbox" id="skip" aria-label="Skip the Inbox (Archive it)">
+        <button id="create">Create filter</button>
+      </div>
+    `;
+  }
+
+  it('lists an open modal first, even though it is last in the DOM', () => {
+    gridThenDialog();
+    const snap = snapshot({ maxElements: 10 });
+    const names = snap.elements.map((e) => e.name);
+
+    // Without modal-first ordering this whole window would be rows 0-9 and
+    // the checkbox would have no ref at all.
+    expect(names).toContain('Skip the Inbox (Archive it)');
+    expect(names).toContain('Create filter');
+
+    // The invariant, rather than exact positions: every modal element comes
+    // before every non-modal one.
+    const lastModal = snap.elements.findLastIndex((e) => e.inModal);
+    const firstOutside = snap.elements.findIndex((e) => !e.inModal);
+    expect(lastModal).toBeLessThan(firstOutside);
+    expect(snap.elements[firstOutside].name).toContain('Message 0');
+  });
+
+  it('keeps refs pointing at what it actually showed after reordering', () => {
+    gridThenDialog();
+    const snap = snapshot({ maxElements: 10 });
+
+    // The ref->element mapping must follow the emitted order, or a ref would
+    // resolve to a message row while the caller thinks it is the checkbox.
+    const checkbox = snap.elements.find((e) => e.role === 'checkbox')!;
+    const refs = (window as any).__saiRefs as HTMLElement[];
+    expect(refs[Number(checkbox.ref.slice(1)) - 1].id).toBe('skip');
+
+    const hit = resolve({ ref: checkbox.ref, refGen: snap.refGen });
+    expect(hit.tag).toBe('INPUT');
+    expect(hit.error).toBeUndefined();
+  });
+
+  it('says a modal is open, so a click aimed behind it is not a blind failure', () => {
+    gridThenDialog();
+    const snap = snapshot({ maxElements: 5 }) as any;
+    expect(snap.modal.name).toBe('Create a filter');
+  });
+
+  it('finds a named control by substring instead of paging to it', () => {
+    gridThenDialog();
+    const snap = snapshot({ match: 'skip the inbox' }) as any;
+
+    expect(snap.elements).toHaveLength(1);
+    expect(snap.elements[0].name).toBe('Skip the Inbox (Archive it)');
+    expect(snap.total).toBe(1);
+    // Filtering narrows what is addressable to what was shown, and that ref
+    // still has to resolve.
+    expect(resolve({ ref: 'e1', refGen: snap.refGen }).tag).toBe('INPUT');
+  });
+
+  it('matches on role as well as name', () => {
+    gridThenDialog();
+    expect(snapshot({ match: 'checkbox' }).elements).toHaveLength(1);
+  });
+
+  it('still excludes hidden elements that match', () => {
+    // match is tested before visible() for cost reasons, so the visibility
+    // filter has to survive that reordering.
+    document.body.innerHTML = `
+      <button style="display:none">Save draft</button>
+      <button>Save</button>
+    `;
+    const names = snapshot({ match: 'save' }).elements.map((e) => e.name);
+    expect(names).toEqual(['Save']);
+  });
+
+  it('pages past the cap with offset', () => {
+    document.body.innerHTML = Array.from({ length: 12 }, (_, i) => `<button>B${i}</button>`).join('');
+
+    const page2 = snapshot({ maxElements: 5, offset: 5 }) as any;
+    expect(page2.elements.map((e: any) => e.name)).toEqual(['B5', 'B6', 'B7', 'B8', 'B9']);
+    // Ref labels number the whole list, not the window, so they stay stable
+    // across pages of the same snapshot.
+    expect(page2.elements[0].ref).toBe('e6');
+    expect(page2).toMatchObject({ total: 12, offset: 5, returned: 5, truncated: true });
+
+    const page3 = snapshot({ maxElements: 5, offset: 10 }) as any;
+    expect(page3.returned).toBe(2);
+    expect(page3.truncated).toBe(false);
+  });
+
+  it('scopes to a region with root', () => {
+    gridThenDialog();
+    const snap = snapshot({ root: '[role="dialog"]' }) as any;
+    expect(snap.elements.map((e: any) => e.name)).toEqual([
+      'Skip the Inbox (Archive it)', 'Create filter',
+    ]);
+    expect(snap.root).toBe('[role="dialog"]');
+  });
+
+  it('refuses a bad or unmatched root rather than silently snapshotting everything', () => {
+    gridThenDialog();
+    expect((snapshot({ root: '[[[' }) as any).error).toMatch(/invalid root selector/);
+    expect((snapshot({ root: '#nope' }) as any).error).toMatch(/no element matched/);
+  });
+
+  it('reports checked state as an explicit boolean, including aria-checked', () => {
+    document.body.innerHTML = `
+      <input type="checkbox" id="on" aria-label="On" checked>
+      <input type="checkbox" aria-label="Off">
+      <div role="switch" aria-checked="true" aria-label="Custom">s</div>
+      <button>Plain</button>
+    `;
+    const snap = snapshot();
+    const by = (name: string) => snap.elements.find((e) => e.name === name);
+
+    // Absent would be ambiguous: the caller needs to know whether a toggle
+    // still needs toggling before it presses Space on it.
+    expect(by('On')!.checked).toBe(true);
+    expect(by('Off')!.checked).toBe(false);
+    expect(by('Custom')!.checked).toBe(true);
+    expect(by('Plain')).not.toHaveProperty('checked');
+  });
+
+  it('flags which element has focus', () => {
+    document.body.innerHTML = '<button id="a">A</button><button id="b">B</button>';
+    document.getElementById('b')!.focus();
+
+    const snap = snapshot();
+    expect(snap.elements.find((e) => e.name === 'B')!.focused).toBe(true);
+    expect(snap.elements.find((e) => e.name === 'A')).not.toHaveProperty('focused');
   });
 });
 

@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAwqR5SUWe9mOexge0igvte2HqkqTO5PdbJHLJpM0H8iNLDbcMZWmXq6cYA5Xv6kGZGbn9gLAMh0mhkcTceUhxFOZBgYe4GAEh4mYMxKLRDZAnU/jwVPn4iPF4qA60vjcLsbdWom1mWccQ4fLWBjGoDMDjd4ilnSb8CCsz8J4EvBLI9XFwJPs+y7KSJ2HcFoIPLFRex2yAJKPFzpybkmb11KPF/lmQNkigK29WUXiB353tWHLl4gKU8MVHGbdcFm1mvEr/BYNm/OpuP6h5+Kp4Vp98HhsBgGFwk+LnXAbvsnttczi2LG8DiYdmOLFcS38rpYPpLwItu2jVXTYcTmh6mQIDAQAB",
   "name": "SAI Browser Bridge",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Lets SAI see the tabs you explicitly attach. Read-only by default; control is a separate per-tab opt-in.",
   "minimum_chrome_version": "116",
   "permissions": [

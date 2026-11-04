@@ -12,14 +12,48 @@
 
 /**
  * Builds a compact accessibility-flavoured snapshot of the page: one entry per
- * element worth talking about, each with a stable `ref` the (future) drive
- * slice can act on. Refs are stashed on window.__saiRefs so a later
- * click/type call can resolve e17 back to a live node without re-walking.
+ * element worth talking about, each with a stable `ref` the drive slice can act
+ * on. Refs are stashed on window.__saiRefs so a later click/type call can
+ * resolve e17 back to a live node without re-walking.
+ *
+ * Reaching what matters is the hard part, not listing elements. The walk is
+ * document order, so on an app that renders a 50-row result grid before the
+ * panel you care about, the panel's controls sit past any sane element cap —
+ * and an element the caller was never shown is an element it cannot click.
+ * Raising the cap is the wrong answer: it costs context linearly to reach one
+ * checkbox. So the walk collects everything (up to a hard ceiling) and the
+ * *output* is narrowed four ways:
+ *
+ *   - modal first — an open dialog makes the rest of the page inert, so its
+ *     controls lead regardless of where they sit in the DOM. This alone fixes
+ *     the common case with no parameters at all.
+ *   - `match`     — substring on role/name, for when you know what you want.
+ *   - `root`      — CSS selector to scope to one region.
+ *   - `offset`    — window into the full list, so a big page is pageable
+ *                   rather than truncated.
+ *
+ * Refs are assigned after ordering and filtering, over the whole narrowed
+ * list, so every ref the caller can see resolves — including ones beyond the
+ * returned window.
  */
 export const SNAPSHOT_FN_SOURCE = `function (opts) {
   opts = opts || {};
   var maxElements = opts.maxElements || 200;
+  var offset = Math.max(0, Math.floor(opts.offset || 0));
   var maxNameLen = opts.maxNameLen || 120;
+  // Backstop for pathological pages: the walk is cheap, but neither the refs
+  // array nor the ordering work should grow without bound.
+  var REF_CEILING = opts.refCeiling || 3000;
+
+  var scope = document;
+  if (opts.root) {
+    try {
+      scope = document.querySelector(opts.root);
+    } catch (err) {
+      return { error: 'invalid root selector: ' + opts.root };
+    }
+    if (!scope) return { error: 'no element matched root selector: ' + opts.root };
+  }
 
   var INTERACTIVE = 'a[href],button,input,select,textarea,summary,[role],[onclick],[contenteditable=""],[contenteditable="true"],[tabindex]:not([tabindex="-1"])';
   var STRUCTURAL = 'h1,h2,h3,h4,h5,h6,label,[aria-live]';
@@ -104,15 +138,34 @@ export const SNAPSHOT_FN_SOURCE = `function (opts) {
     return { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) };
   }
 
-  var refs = [];
-  var out = [];
+  // An open modal makes everything behind it inert, so its controls are the
+  // only ones worth leading with. The last one in the DOM wins: stacked
+  // dialogs append, so the newest is the one on top.
+  var MODAL_SEL = '[aria-modal="true"],[role="dialog"],[role="alertdialog"],dialog[open]';
+  function findModal() {
+    var found = null;
+    var nodes;
+    try {
+      nodes = scope.querySelectorAll(MODAL_SEL);
+    } catch (err) {
+      return null;
+    }
+    for (var i = 0; i < nodes.length; i++) {
+      if (visible(nodes[i])) found = nodes[i];
+    }
+    return found;
+  }
+  var modalEl = findModal();
+
+  var items = [];
   var seen = new Set();
-  var truncated = false;
+  var ceilingHit = false;
+  var needle = opts.match ? String(opts.match).toLowerCase() : null;
 
   function collect(selector, kind) {
     var nodes;
     try {
-      nodes = document.querySelectorAll(selector);
+      nodes = scope.querySelectorAll(selector);
     } catch (err) {
       return;
     }
@@ -120,31 +173,69 @@ export const SNAPSHOT_FN_SOURCE = `function (opts) {
       var el = nodes[i];
       if (seen.has(el)) continue;
       seen.add(el);
-      if (out.length >= maxElements) { truncated = true; return; }
-      if (!visible(el)) continue;
+      if (items.length >= REF_CEILING) { ceilingHit = true; return; }
 
       var role = roleOf(el);
       var name = nameOf(el);
       // A structural element with no accessible name tells the model nothing.
       if (!name && kind === 'structural') continue;
 
-      refs.push(el);
-      var entry = { ref: 'e' + refs.length, role: role, name: name, box: boxOf(el) };
+      // Match before visibility on purpose: role/name are attribute and text
+      // reads, while visible() forces style resolution. Since the walk no
+      // longer stops at the output cap, doing the cheap test first is what
+      // keeps a match query from costing a layout query per element on a page
+      // with thousands of them.
+      if (needle && (role + ' ' + name).toLowerCase().indexOf(needle) === -1) continue;
+      if (!visible(el)) continue;
+
+      // ref is filled in after ordering; declared here so it leads the entry.
+      var entry = { ref: null, role: role, name: name, box: boxOf(el) };
       if (kind === 'interactive') entry.interactive = true;
       if (el.disabled === true) entry.disabled = true;
-      if (el.checked === true) entry.checked = true;
+
+      // Checked state decides whether a toggle still needs toggling, so it is
+      // reported as an explicit false too — absent would be ambiguous. Custom
+      // widgets carry it on aria-checked rather than as a property.
+      var ariaChecked = el.getAttribute ? el.getAttribute('aria-checked') : null;
+      if (typeof el.checked === 'boolean') entry.checked = el.checked;
+      else if (ariaChecked === 'true' || ariaChecked === 'false') entry.checked = ariaChecked === 'true';
+
+      if (el === document.activeElement) entry.focused = true;
+      if (modalEl && modalEl.contains(el)) entry.inModal = true;
       if (el.tagName === 'A' && el.getAttribute('href')) entry.href = clip(el.getAttribute('href'));
       if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {
         var type = (el.getAttribute('type') || '').toLowerCase();
         // Never exfiltrate what the user typed into a credential field.
         entry.value = type === 'password' ? '\\u2022\\u2022\\u2022' : clip(el.value);
       }
-      out.push(entry);
+      items.push({ el: el, entry: entry });
     }
   }
 
   collect(INTERACTIVE, 'interactive');
   collect(STRUCTURAL, 'structural');
+
+  if (opts.match) {
+    var needle = String(opts.match).toLowerCase();
+    items = items.filter(function (it) {
+      return (it.entry.role + ' ' + it.entry.name).toLowerCase().indexOf(needle) !== -1;
+    });
+  }
+
+  // Stable partition: modal entries first, each group still in document order.
+  if (modalEl) {
+    var inModal = [];
+    var rest = [];
+    items.forEach(function (it) { (it.entry.inModal ? inModal : rest).push(it); });
+    items = inModal.concat(rest);
+  }
+
+  // Refs number the narrowed list, not the raw walk, so e1 is the first thing
+  // the caller is shown and every ref it can see resolves.
+  var refs = items.map(function (it) { return it.el; });
+  items.forEach(function (it, i) { it.entry.ref = 'e' + (i + 1); });
+
+  var out = items.slice(offset, offset + maxElements).map(function (it) { return it.entry; });
 
   // The generation stamp is what makes acting on a ref safe. A navigation
   // wipes these globals and a re-snapshot bumps the stamp, so an action
@@ -153,15 +244,39 @@ export const SNAPSHOT_FN_SOURCE = `function (opts) {
   window.__saiRefs = refs;
   window.__saiRefGen = (window.__saiRefGen || 0) + 1;
 
-  return {
+  var res = {
     url: location.href,
     title: document.title,
     refGen: window.__saiRefGen,
     viewport: { w: window.innerWidth, h: window.innerHeight },
     scroll: { x: Math.round(window.scrollX), y: Math.round(window.scrollY) },
     elements: out,
-    truncated: truncated
+    // total vs returned is the whole point: "truncated: true" never said how
+    // much was missing or how to get at it. These say both.
+    total: items.length,
+    offset: offset,
+    returned: out.length,
+    truncated: offset + out.length < items.length
   };
+
+  if (opts.match) res.match = String(opts.match);
+  if (opts.root) res.root = String(opts.root);
+  if (ceilingHit) res.refCeilingHit = REF_CEILING;
+  if (modalEl) {
+    // Say so explicitly: if a dialog is open, a click aimed at the page behind
+    // it will not land, and that is a confusing failure to debug blind.
+    res.modal = {
+      name: nameOf(modalEl),
+      note: 'A modal is open; its controls are listed first and the rest of the page is inert.'
+    };
+  }
+  if (res.truncated) {
+    res.hint = 'Showing ' + (offset + 1) + '-' + (offset + out.length) + ' of ' + items.length +
+      '. Narrow with match:"text" or root:"css", or page with offset:' + (offset + out.length) +
+      ' — do not just raise maxElements.';
+  }
+
+  return res;
 }`;
 
 /**
@@ -267,6 +382,41 @@ export const SCROLL_FN_SOURCE = `function (opts) {
     moved: after !== before,
     atBottom: Math.ceil(after + window.innerHeight) >= document.body.scrollHeight
   };
+}`;
+
+/**
+ * Describes whatever currently has focus, including its checked state.
+ *
+ * `press` sends a key to the focused element without a ref, so it is the one
+ * control action with no snapshot behind it to say what it hit. Reporting
+ * focus before and after turns "the key did nothing" into something the caller
+ * can see — a key that leaves a checkbox unchecked, or moves focus somewhere
+ * unexpected, is otherwise indistinguishable from success.
+ */
+export const FOCUS_FN_SOURCE = `function () {
+  var el = document.activeElement;
+  if (!el || el === document.body || el === document.documentElement) return { focus: null };
+
+  function clip(s) {
+    s = String(s == null ? '' : s).replace(/\\s+/g, ' ').trim();
+    return s.length > 80 ? s.slice(0, 79) + '\\u2026' : s;
+  }
+
+  var role = (el.getAttribute && el.getAttribute('role')) || '';
+  if (!role && el.tagName === 'INPUT') role = (el.getAttribute('type') || 'text').toLowerCase();
+  if (!role) role = el.tagName.toLowerCase();
+
+  var out = {
+    tag: el.tagName,
+    role: clip(role),
+    name: clip((el.getAttribute && el.getAttribute('aria-label')) || el.textContent || ''),
+  };
+
+  var ariaChecked = el.getAttribute ? el.getAttribute('aria-checked') : null;
+  if (typeof el.checked === 'boolean') out.checked = el.checked;
+  else if (ariaChecked === 'true' || ariaChecked === 'false') out.checked = ariaChecked === 'true';
+
+  return { focus: out };
 }`;
 
 /** Current location, for same-origin checks and post-action reporting. */

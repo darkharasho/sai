@@ -47,6 +47,15 @@ failing or retrying.
 
 Allowed: `click`, `type`, `press` (a fixed key list), `scroll`, and `navigate`.
 
+`press` takes `Enter, Space, Tab, Escape, Backspace, Delete, Arrow*, Home, End,
+PageUp, PageDown` — `Space` because it is the only way to toggle a focused
+checkbox, radio or switch. Enter doesn't activate those at all; on an app with
+global keyboard shortcuts it falls through to the page behind the dialog and
+activates something else, which is worse than doing nothing. Since `press` is
+the one action with no ref behind it, it reports the focused element's role,
+name and checked state before and after, so a key that was swallowed is
+visible instead of reading as success.
+
 Deliberately absent:
 
 - **No arbitrary script execution.** There is no eval/inject tool. The page
@@ -70,6 +79,38 @@ entirely — so an unguarded click could hit *Delete* where the model meant
 *Download*. Every resolution failure (stale generation, detached node,
 zero-sized box, element scrolled out of view) is a refusal telling the caller to
 re-snapshot, never a best guess.
+
+### Reaching the element you want
+
+An element the model was never shown is an element it cannot click — refs are
+the only way to address anything. The snapshot walk is document order, so on an
+app that renders a long result list *before* the panel you came for (Gmail's
+filter dialog, say), the panel's controls sit past any sane element cap. The
+checkbox was focusable by keyboard and un-addressable by snapshot at the same
+time.
+
+Raising the cap is the wrong fix — it spends context linearly to reach one
+checkbox. So the walk collects everything (hard ceiling 3000) and the *output*
+narrows instead:
+
+| | |
+|---|---|
+| modal first | An open dialog makes the rest of the page inert, so its controls lead regardless of DOM position, and `modal` is reported. Needs no parameters — it just works. |
+| `match` | Substring on role/name, e.g. `match: "skip the inbox"`. The best tool when you know what you're looking for. |
+| `root` | CSS selector scoping the snapshot to one region. Refuses an unmatched selector rather than quietly snapshotting everything. |
+| `offset` | Window into the full list, so a big page is pageable rather than truncated. |
+
+Refs are assigned *after* ordering and filtering, over the whole narrowed list
+— so `e1` is the first thing you were shown, every visible ref resolves, and
+labels stay consistent across pages of one snapshot. Getting this backwards
+would be the bad kind of bug: a ref that resolves to a message row while the
+caller believes it is the checkbox.
+
+The reply carries `total`, `returned` and `offset` rather than a bare
+`truncated` flag, which never said how much was missing or how to get at it.
+Snapshots also report `checked` as an explicit `true`/`false` (including
+`aria-checked`) and flag which element has `focused`, so a toggle's state is
+checkable before and after acting on it.
 
 ## Architecture
 
