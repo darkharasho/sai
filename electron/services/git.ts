@@ -211,7 +211,17 @@ export async function gitWorktreeAdd(repoCwd: string, worktreePath: string, bran
   // the task row never learned its path, or a retry after a crash) must be
   // able to re-run this without tripping over its own leftovers.
   const existing = await git(repoCwd).raw(['worktree', 'list', '--porcelain']).catch(() => '');
-  if (existing.split('\n').some(l => l === `worktree ${worktreePath}`)) return;
+  // git reports canonical paths, so compare canonically or the check misses a
+  // worktree reached through a symlink (macOS /var -> /private/var) and we fall
+  // through to `worktree add`, which then fails with "already exists".
+  // Canonicalize via the parent, which mkdir above guarantees exists, so this
+  // still works when the worktree itself does not yet.
+  const parent = await fs.promises.realpath(path.dirname(worktreePath)).catch(() => path.dirname(worktreePath));
+  const canonicalPath = path.join(parent, path.basename(worktreePath));
+  const registered = existing.split('\n')
+    .filter(l => l.startsWith('worktree '))
+    .map(l => l.slice('worktree '.length));
+  if (registered.some(p => p === worktreePath || p === canonicalPath)) return;
   // NB: no --quiet — simple-git only rejects when stderr is non-empty, and
   // --quiet suppresses the "not a valid ref" message a missing branch writes.
   const branchExists = await git(repoCwd)

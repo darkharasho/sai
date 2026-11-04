@@ -17,5 +17,7 @@ GRAPH_REPORT.md
 .codex
 .DS_Store
 # File-sync duplicates ("manifest 2.json" next to "manifest.json") — never ours.
-* 2.*
+# The counter keeps climbing, so match any " <n>." suffix, not just " 2.".
+* [0-9].*
+* [0-9][0-9].*
 

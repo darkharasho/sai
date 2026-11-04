@@ -35,7 +35,8 @@
       "node_modules/**/*",
       "package.json",
       "extension/**/*",
-      "!**/* 2.*"
+      "!**/* [0-9].*",
+      "!**/* [0-9][0-9].*"
     ],
     "linux": {
       "target": "AppImage",

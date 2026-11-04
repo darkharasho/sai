@@ -14,8 +14,12 @@ const write = (p: string, data: unknown) => { fs.mkdirSync(path.dirname(p), { re
 const read = (p: string) => JSON.parse(fs.readFileSync(p, 'utf-8'));
 
 beforeEach(() => {
-  home = fs.mkdtempSync(path.join(os.tmpdir(), 'mcpcfg-home-'));
-  proj = fs.mkdtempSync(path.join(os.tmpdir(), 'mcpcfg-proj-'));
+  // realpath, because mcpConfig keys `projects` by the canonical path and
+  // macOS hands out /var/folders/... temp dirs that resolve to /private/var/...
+  // Without this the assertions below look up a key the code never wrote, and
+  // the suite passes only on Linux, where /tmp isn't a symlink.
+  home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'mcpcfg-home-')));
+  proj = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'mcpcfg-proj-')));
 });
 afterEach(() => {
   fs.rmSync(home, { recursive: true, force: true });
@@ -90,6 +94,22 @@ describe('mcpConfig', () => {
     expect(cfg.projects[proj].disabledMcpjsonServers).toBeUndefined();
     setMcpServerDisabled({ home, projectPath: proj }, 'gh', 'user', false);
     expect(read(path.join(home, '.claude.json')).projects[home].disabledMcpServers).toEqual([]);
+  });
+
+  it('keys a disable by the canonical path when the project path is a symlink', () => {
+    // The CLI keys `projects` by real path, so a symlinked workspace must not
+    // get a second entry under the link — it would read as still enabled.
+    // This is the macOS /var -> /private/var case, exercised explicitly.
+    const link = path.join(home, 'link-to-proj');
+    fs.symlinkSync(proj, link);
+    write(path.join(proj, '.mcp.json'), { mcpServers: { e2e: { command: 'node' } } });
+
+    setMcpServerDisabled({ home, projectPath: link }, 'e2e', 'project', true);
+
+    const cfg = read(path.join(home, '.claude.json'));
+    expect(cfg.projects[proj].disabledMcpServers).toEqual(['e2e']);
+    expect(cfg.projects[link]).toBeUndefined();
+    expect(listMcpServers({ home, projectPath: link })[0].enabled).toBe(false);
   });
 
   it('listing reflects disables', () => {
