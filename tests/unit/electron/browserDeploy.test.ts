@@ -152,6 +152,39 @@ describe('browser candidates', () => {
     expect(nativeHostDirFor({ id: 'x', label: 'X', userDataDir: '/a/b' }))
       .toBe(path.join('/a/b', 'NativeMessagingHosts'));
   });
+
+  it('honours an explicit native host dir over the user-data root', () => {
+    expect(nativeHostDirFor({ id: 'x', label: 'X', userDataDir: '/a/b', nativeHostDir: '/c/d' }))
+      .toBe('/c/d');
+  });
+
+  // Arc and Dia ship the same ArcCore engine and never rebranded Chromium's
+  // DIR_USER_NATIVE_MESSAGING, so they read Chrome's directory. Writing to
+  // their own user-data root produces a bridge that silently never connects.
+  it('points Arc and Dia at Chrome\'s manifest dir on macOS', () => {
+    const mac = browserCandidates('/Users/u', 'darwin');
+    const chromeHostDir = path.join(
+      '/Users/u', 'Library', 'Application Support', 'Google', 'Chrome', 'NativeMessagingHosts',
+    );
+
+    for (const id of ['arc', 'dia']) {
+      const browser = mac.find((b) => b.id === id)!;
+      expect(nativeHostDirFor(browser)).toBe(chromeHostDir);
+      // The user-data root stays distinct — profiles still live there.
+      expect(browser.userDataDir).not.toBe(chromeHostDir);
+    }
+
+    // Chrome itself resolves to the same place, by the ordinary rule.
+    expect(nativeHostDirFor(mac.find((b) => b.id === 'chrome')!)).toBe(chromeHostDir);
+  });
+
+  it('leaves other macOS forks on the user-data root', () => {
+    const mac = browserCandidates('/Users/u', 'darwin');
+    for (const id of ['comet', 'brave', 'edge', 'vivaldi', 'chromium', 'opera']) {
+      const browser = mac.find((b) => b.id === id)!;
+      expect(nativeHostDirFor(browser)).toBe(path.join(browser.userDataDir, 'NativeMessagingHosts'));
+    }
+  });
 });
 
 describe('presence detection', () => {
@@ -253,7 +286,8 @@ describe('detectBrowsers', () => {
     const found = detected.find((b) => b.id === 'arc')!;
     expect(found.extensionId).toBe(EXT_ID);
     expect(found.hostInstalled).toBe(false);
-    expect(found.nativeHostDir).toBe(path.join(arc, 'NativeMessagingHosts'));
+    // Arc reads Chrome's manifest dir, not its own user-data root.
+    expect(found.nativeHostDir).toBe(support('Google', 'Chrome', 'NativeMessagingHosts'));
 
     expect(detected.find((b) => b.id === 'comet')!.extensionId).toBeNull();
   });
