@@ -67,11 +67,43 @@ jobs:
         env:
           NODE_OPTIONS: --max-old-space-size=4096
 
+      # Windows is signed with Azure Artifact Signing (win.azureSignOptions in
+      # package.json); electron-builder reads the AZURE_* credentials from the
+      # environment. Without them it can't authenticate, so fail before the slow
+      # build instead of after it.
+      - name: Check the Windows signing secrets are set
+        if: matrix.platform == 'win'
+        shell: bash
+        env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+        run: |
+          for v in AZURE_TENANT_ID AZURE_CLIENT_ID AZURE_CLIENT_SECRET; do
+            [ -n "${!v}" ] || { echo "::error::Secret $v is not set (run ~/.claude/templates/windows-signing/set-azure-signing-secrets.sh sai)."; exit 1; }
+          done
+
       - name: Build and publish Electron distributables
         if: matrix.platform != 'mac'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
         run: npx electron-builder ${{ matrix.args }} --publish always
+
+      # The release stays a draft if this fails, since publish needs every build.
+      - name: Verify the Windows installer is signed
+        if: matrix.platform == 'win'
+        shell: pwsh
+        run: |
+          $files = Get-ChildItem release -Filter *.exe | Where-Object { $_.Name -like '*Setup*.exe' }
+          if (-not $files) { Write-Error "No installer found in release/"; exit 1 }
+          foreach ($f in $files) {
+            $sig = Get-AuthenticodeSignature $f.FullName
+            Write-Host "$($f.Name): $($sig.Status) — $($sig.SignerCertificate.Subject)"
+            if ($sig.Status -ne 'Valid') { Write-Error "$($f.Name) is not validly signed"; exit 1 }
+          }
 
       # electron-builder's createKeychain() makes a temp keychain with a random
       # password, then calls `security set-key-partition-list -k` with the p12

@@ -50,7 +50,13 @@
     },
     "win": {
       "target": "nsis",
-      "icon": "public/img/sai.png"
+      "icon": "public/img/sai.png",
+      "azureSignOptions": {
+        "publisherName": "Michael Stephens",
+        "endpoint": "https://eus.codesigning.azure.net/",
+        "codeSigningAccountName": "darkharasho-signing",
+        "certificateProfileName": "public-trust"
+      }
     },
     "mac": {
       "target": [
