@@ -2611,6 +2611,42 @@ describe('SdkBackend', () => {
       backend.destroy();
     });
 
+    it('finished survive a resume turn that is still a background wait', async () => {
+      const emitTasks = vi.fn();
+      const { backend } = await runBackgroundWaitTurn(
+        [{ id: 't-1', type: 'subagent', status: 'running' }, { id: 't-2', type: 'subagent', status: 'running' }],
+        [
+          TASK_START('t-1'), TASK_START('t-2'), TASK_DONE('t-1'),
+          // The runtime wakes the model for t-1; that resume turn ends while t-2 still runs.
+          { type: 'assistant', message: { content: [{ type: 'text', text: 't-1 done; t-2 running.' }] } },
+          { type: 'result', stop_reason: 'end_turn', terminal_reason: 'completed', num_turns: 1, duration_ms: 10,
+            background_tasks: [{ id: 't-2', type: 'subagent', status: 'running' }] },
+        ],
+        { emitTasks },
+      );
+      await new Promise((r) => setTimeout(r, 30));
+      const waits = emits.filter(e => e.type === 'done' && (e as any).wait?.kind === 'background');
+      expect(waits.length).toBeGreaterThanOrEqual(2); // the resume turn really re-opened the wait
+      const last = emitTasks.mock.calls.at(-1)![0];
+      expect(last.tasks.map((t: any) => [t.id, t.status])).toEqual([['t-1', 'completed'], ['t-2', 'running']]);
+      backend.destroy();
+    });
+
+    it('session teardown marks still-running cards stopped', async () => {
+      const emitTasks = vi.fn();
+      const { backend, scope } = await runBackgroundWaitTurn(
+        [{ id: 't-1', type: 'subagent', status: 'running' }],
+        [TASK_START('t-1')],
+        { emitTasks },
+      );
+      backend.suspendScope(PROJECT, scope);
+      const last = emitTasks.mock.calls.at(-1)![0];
+      expect(last.scope).toBe(scope);
+      expect(last.tasks[0]).toMatchObject({ id: 't-1', status: 'stopped' });
+      expect(last.tasks[0].endedAt).not.toBeNull();
+      backend.destroy();
+    });
+
     it('stopTask calls query.stopTask', async () => {
       const { backend, fakeQuery, scope } = await runBackgroundWaitTurn(
         [{ id: 't-1', type: 'subagent', status: 'running', description: 'reviewer' }],

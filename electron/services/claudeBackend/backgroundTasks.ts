@@ -152,6 +152,18 @@ export function clearFinishedTasks(tasks: ReadonlyMap<string, BackgroundTaskDeta
   return next;
 }
 
+/** The session (and its runtime) is gone: whatever was still running died
+ *  with it. Returns the SAME map when nothing was running. */
+export function retireRunningTasks(tasks: ReadonlyMap<string, BackgroundTaskDetail>, nowMs: number): Map<string, BackgroundTaskDetail> {
+  let next: Map<string, BackgroundTaskDetail> | null = null;
+  for (const [id, t] of tasks) {
+    if (isTerminalDetail(t)) continue;
+    next ??= new Map(tasks);
+    next.set(id, { ...t, status: 'stopped', endedAt: nowMs });
+  }
+  return next ?? (tasks as Map<string, BackgroundTaskDetail>);
+}
+
 export function isPossiblyStuck(t: BackgroundTaskDetail, nowMs: number): boolean {
   if (t.isShell || !t.isAgent || isTerminalDetail(t)) return false;
   return nowMs - t.lastEventAt >= STUCK_AFTER_MS;

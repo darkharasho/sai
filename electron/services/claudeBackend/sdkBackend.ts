@@ -38,7 +38,7 @@ import {
 import { isImagePath, mimeForImagePath } from '../imageFiles';
 import { notifyCompletion, notifyApproval, notifyQuestion, notifyPlanReview } from '../notify';
 import { devlog } from '../devlog';
-import { foldBackgroundTaskFrame, clearFinishedTasks, visibleTasks, type BackgroundTaskDetail } from './backgroundTasks';
+import { foldBackgroundTaskFrame, clearFinishedTasks, retireRunningTasks, visibleTasks, type BackgroundTaskDetail } from './backgroundTasks';
 import { classifyTurnEnd, isSchedulingTool, isBackgroundLaunch, isAsyncLaunchResult, countLiveBackgroundTasks,
   isTerminalTaskStatus, onlyShellTasksLive, WAKEUP_GRACE_MS, BACKGROUND_WAIT_SETTLE_MS, BACKGROUND_WAIT_IDLE_MS,
   type WaitMeta } from '../waitClassifier';
@@ -156,6 +156,10 @@ interface ScopeSession {
    *  by the wait logic. Spans turns like liveTasks; finished entries are
    *  dropped when the next background wait opens. */
   taskDetails: Map<string, BackgroundTaskDetail>;
+  /** A user message started a turn since the sidebar's Finished list was last
+   *  cleared. Runtime resume turns don't set it, so their background waits keep
+   *  the Finished cards of the batch still in flight. */
+  clearFinishedOnWait: boolean;
   /** A tracked background task reached a terminal status during the CURRENT
    *  turn. Per-turn (cleared by _resetWaitTracking): a task finishing is what
    *  makes the runtime re-invoke the model, so a turn ending right after one
@@ -493,6 +497,7 @@ export class SdkBackend implements ClaudeBackend {
     if (session.sessionId && !session.warm) this.pendingResume.set(scopeKey, session.sessionId);
     session.query.close();
     this.sessions.delete(scopeKey);
+    this._retireTaskDetails(session);
     const { permMode, effort, model } = session.config;
     this._spawnLive(scopeKey, projectPath, scope, { permMode, effort: effort || undefined, model: model || undefined });
   }
@@ -599,6 +604,7 @@ export class SdkBackend implements ClaudeBackend {
         if (session.sessionId && !session.warm) this.pendingResume.set(scopeKey, session.sessionId);
         session.query.close();
         this.sessions.delete(scopeKey);
+        this._retireTaskDetails(session);
         session = undefined;
       }
       if (!session) {
@@ -614,6 +620,7 @@ export class SdkBackend implements ClaudeBackend {
       session.suppressForward = false;
 
       this._beginTurn(session, projectPath, effectiveScope);
+      session.clearFinishedOnWait = true;
       // Workspace auto-suspend watches this clock; without it a workspace with
       // only SDK activity looks quiescent and gets suspended mid-stream. Also
       // re-activates a suspended registry entry so the dropdown flips it back.
@@ -654,6 +661,7 @@ export class SdkBackend implements ClaudeBackend {
       const turnSeq = session?.turnSeq ?? null;
       try { session?.query.close(); } catch { /* already dead */ }
       this.sessions.delete(scopeKey);
+      this._retireTaskDetails(session);
       this._emit({ type: 'error', fatal: true, text: `SDK backend error: ${friendlyError(text)}`, projectPath, scope: effectiveScope });
       this._emit({ type: 'done', projectPath, scope: effectiveScope, turnSeq });
     }
@@ -678,6 +686,16 @@ export class SdkBackend implements ClaudeBackend {
       devlog('claude-sdk', 'stopTask', { scope: session!._scopeName, taskId, ok: false, error: err instanceof Error ? err.message : String(err) });
       return false;
     }
+  }
+
+  /** A session leaving the map takes its runtime (and its tasks) with it: mark
+   *  still-running cards stopped so the sidebar doesn't tick phantoms. */
+  private _retireTaskDetails(session: ScopeSession | undefined): void {
+    if (!session) return;
+    const next = retireRunningTasks(session.taskDetails, this._now());
+    if (next === session.taskDetails) return;
+    session.taskDetails = next;
+    this._emitTaskSnapshot(session);
   }
 
   private _emitTaskSnapshot(session: ScopeSession): void {
@@ -794,6 +812,7 @@ export class SdkBackend implements ClaudeBackend {
       this._resolveGatesForScope(scopeKey, 'Session switched');
       session.query.close();
       this.sessions.delete(scopeKey);
+      this._retireTaskDetails(session);
     }
     if (sessionId) {
       this.pendingResume.set(scopeKey, sessionId);
@@ -1303,6 +1322,7 @@ export class SdkBackend implements ClaudeBackend {
       liveTasks: new Map(),
       liveTaskTypes: new Map(),
       taskDetails: new Map(),
+      clearFinishedOnWait: false,
       sawTaskSettled: false,
       sawTaskFrames: false,
       lastTaskEventAt: Date.now(),
@@ -1671,8 +1691,10 @@ export class SdkBackend implements ClaudeBackend {
             session.pendingBackgroundResume = wait.kind === 'background';
             if (shellsOnly) wait = { kind: 'none', resumeInSeconds: null, taskCount: wait.taskCount };
             session.backgroundWaitOpen = wait.kind === 'background';
-            if (wait.kind === 'background') {
-              // Display only: a new wait starts the sidebar's Finished list fresh.
+            if (wait.kind === 'background' && session.clearFinishedOnWait) {
+              // Display only: the first wait of a user turn starts the
+              // sidebar's Finished list fresh (resume turns keep it).
+              session.clearFinishedOnWait = false;
               session.taskDetails = clearFinishedTasks(session.taskDetails);
               this._emitTaskSnapshot(session);
             }
@@ -1920,6 +1942,7 @@ export class SdkBackend implements ClaudeBackend {
             this._emit({ type: 'done', projectPath, scope: effectiveScope, turnSeq: session.turnSeq });
           }
           this.sessions.delete(scopeKey);
+          this._retireTaskDetails(session);
         }
       }
     };
@@ -1945,6 +1968,7 @@ export class SdkBackend implements ClaudeBackend {
       if (session.sessionId && !session.warm) this.pendingResume.set(scopeKey, session.sessionId);
       session.query.close();
       this.sessions.delete(scopeKey);
+      this._retireTaskDetails(session);
     }
   }
 
@@ -2009,6 +2033,7 @@ export class SdkBackend implements ClaudeBackend {
       // Delete first: the drain's finally then sees the session gone and skips
       // its own streaming done (the one below covers it).
       this.sessions.delete(scopeKey);
+      this._retireTaskDetails(session);
       if (session.sessionId && !session.warm) this.pendingResume.set(scopeKey, session.sessionId);
       // The sweep only reaches idle scopes; a killed agent may be mid-turn or
       // holding a gate — end the turn and release the gates like suspendWorkspace.
