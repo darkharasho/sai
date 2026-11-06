@@ -4,6 +4,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { getLoadGuard } from './loadGuard';
+import { relaunchAppImage } from './appImageRelaunch';
 
 /**
  * Locate the update electron-updater has already downloaded and verified into
@@ -210,11 +211,15 @@ export function registerUpdater(mainWindow: BrowserWindow) {
     // electron-updater if we can't (e.g. APPIMAGE env missing, no pending file).
     if (process.platform === 'linux' && process.env.APPIMAGE) {
       void installAppImageUpdateAtomic()
-        .then((target) => {
+        .then(async (target) => {
           if (target) {
             // app.exit skips before-quit: never leave SAI's processes SIGSTOPped.
             try { getLoadGuard()?.stop(); } catch { /* noop */ }
-            app.relaunch({ execPath: target });
+            // Not app.relaunch(): it hands the new binary our AppImage env,
+            // which points into this instance's dying FUSE mount and makes the
+            // new runtime fail with "Cannot mount AppImage" (see appImageRelaunch).
+            const launched = await relaunchAppImage(target, process.argv.slice(1));
+            if (!launched) app.relaunch({ execPath: target });
             app.exit(0);
           } else {
             // Nothing safe to install from — fall back rather than leave the
