@@ -64,6 +64,8 @@ export interface ClaudeBackend {
   markMcpStale?(projectPath: string, scope?: string, opts?: { restart?: boolean; projectOnly?: boolean }): void;
   send(args: SendArgs): void;
   interrupt(projectPath: string, scope?: string): void;
+  /** SDK only: stop one background task without interrupting the turn. */
+  stopTask?(projectPath: string, scope: string | undefined, taskId: string): Promise<boolean>;
   /** Re-assert backend truth for a scope the renderer believes is streaming.
    *  If the scope is genuinely busy: no-op. If it is idle (or unknown), emit
    *  an unconditional-unstick `done` (turnSeq null — never stale-droppable);

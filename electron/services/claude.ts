@@ -40,6 +40,7 @@ import { getSudoAskpassHelperPath, getSudoBroker, getSudoSession, lockSudo } fro
 import { readCachedSlashCommands, writeCachedSlashCommands, type SlashCommandInfo } from './slashCommands';
 import { withScopeTag } from './loadGuard/scopeTag';
 import { withLoadNote } from './loadGuard/hook';
+import type { BackgroundTaskDetail } from './claudeBackend/backgroundTasks';
 export { CHAT_RENDER_NUDGE, CHAT_GITHUB_WATCH_NUDGE };
 
 
@@ -104,6 +105,18 @@ function safeSend(win: BrowserWindow, channel: string, ...args: unknown[]) {
   } catch {
     // Window already destroyed
   }
+}
+
+export interface BackgroundTasksPayload {
+  projectPath: string;
+  scope: string;
+  tasks: BackgroundTaskDetail[];
+}
+
+/** Background-task snapshots for the sidebar. A separate channel so they never
+ *  enter ChatPanel's message pipeline. */
+export function emitBackgroundTasks(payload: BackgroundTasksPayload): void {
+  if (mainWin) safeSend(mainWin, 'claude:backgroundTasks', payload);
 }
 
 export function emitChatMessage(raw: Record<string, unknown>): void {
@@ -1613,6 +1626,11 @@ export function registerClaudeHandlers(win: BrowserWindow) {
   // claude:stop — kill the persistent process for a scope
   ipcMain.on('claude:stop', (_event, projectPath: string, scope?: string) => {
     getClaudeBackend().interrupt(projectPath, scope);
+  });
+
+  // claude:stopTask — stop ONE background task (SDK only); false if unsupported.
+  ipcMain.handle('claude:stopTask', async (_event, projectPath: string, scope: string | undefined, taskId: string) => {
+    return (await getClaudeBackend().stopTask?.(projectPath, scope, taskId)) ?? false;
   });
 
   // claude:setSessionId — switch to a different Claude session (for history resumption)

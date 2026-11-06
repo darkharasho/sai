@@ -30,6 +30,8 @@ contextBridge.exposeInMainWorld('sai', {
   claudeRefreshSlashCommands: (projectPath: string, scope?: string) =>
     ipcRenderer.invoke('claude:refreshSlashCommands', projectPath, scope),
   claudeStop: (projectPath: string, scope?: string) => ipcRenderer.send('claude:stop', projectPath, scope),
+  claudeStopTask: (projectPath: string, scope: string | undefined, taskId: string): Promise<boolean> =>
+    ipcRenderer.invoke('claude:stopTask', projectPath, scope, taskId),
   claudeSetSessionId: (projectPath: string, sessionId: string | undefined, scope?: string) => ipcRenderer.send('claude:setSessionId', projectPath, sessionId, scope),
   claudeReconcileScope: (projectPath: string, scope?: string) => ipcRenderer.send('claude:reconcileScope', projectPath, scope),
   claudeApprove: (projectPath: string, toolUseId: string, approved: boolean, modifiedCommand?: string, scope?: string) =>
@@ -185,6 +187,11 @@ contextBridge.exposeInMainWorld('sai', {
         ipcRenderer.send('codex:setSessionId', projectPath, sessionId, scope);
       }
     },
+  },
+  claudeOnBackgroundTasks: (callback: (payload: { projectPath: string; scope: string; tasks: unknown[] }) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, payload: { projectPath: string; scope: string; tasks: unknown[] }) => callback(payload);
+    ipcRenderer.on('claude:backgroundTasks', listener);
+    return () => ipcRenderer.removeListener('claude:backgroundTasks', listener);
   },
   claudeOnMessage: (callback: (msg: unknown) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, msg: unknown) => callback(msg);

@@ -64,6 +64,7 @@ vi.mock('../../../electron/services/claude', () => ({
   readSaiSetting: mockReadSaiSetting,
   getRemoteCeiling: mockGetRemoteCeiling,
   getMainWin: () => null,
+  emitBackgroundTasks: () => {},
   spawnEnv: mockSpawnEnv,
   getOrCreateWorkspace: mockGetOrCreateWorkspace,
 }));
@@ -2486,7 +2487,7 @@ describe('SdkBackend', () => {
   async function runBackgroundWaitTurn(
     tasks: unknown,
     after: any[] = [],
-    opts: { scope?: string; kind?: 'chat' | 'task' | 'orchestrator'; before?: any[] } = {},
+    opts: { scope?: string; kind?: 'chat' | 'task' | 'orchestrator'; before?: any[]; emitTasks?: (p: any) => void } = {},
   ) {
     const scope = opts.scope ?? SCOPE;
     let capturedOptions: any = null;
@@ -2533,6 +2534,7 @@ describe('SdkBackend', () => {
       emit: (p) => emits.push(p),
       resolveClaudePath: () => undefined,
       notify,
+      ...(opts.emitTasks ? { emitTasks: opts.emitTasks } : {}),
     });
     if (opts.kind) backend.start({ projectPath: PROJECT, scope, scopeCwd: PROJECT, kind: opts.kind });
     await collectUntilDone(backend, emits, { projectPath: PROJECT, message: 'go', scope, permMode: 'bypass' });
@@ -2557,6 +2559,84 @@ describe('SdkBackend', () => {
     expect(clearing).toHaveLength(1);
     expect(clearing[0].turnSeq).toBeNull(); // never stale-droppable
     backend.destroy();
+  });
+
+  describe('background task details', () => {
+    it('emits a snapshot per task frame', async () => {
+      const emitTasks = vi.fn();
+      const { backend, scope } = await runBackgroundWaitTurn(
+        [{ id: 't-1', type: 'subagent', status: 'running', description: 'reviewer' }],
+        [TASK_START('t-1'), TASK_DONE('t-1')],
+        { emitTasks },
+      );
+      expect(emitTasks.mock.calls.length).toBeGreaterThanOrEqual(2);
+      for (const [p] of emitTasks.mock.calls) {
+        expect(p.projectPath).toBe(PROJECT);
+        expect(p.scope).toBe(scope);
+      }
+      const last = emitTasks.mock.calls.at(-1)![0];
+      expect(last.tasks).toHaveLength(1);
+      expect(last.tasks[0]).toMatchObject({ id: 't-1', status: 'completed' });
+      backend.destroy();
+    });
+
+    it('does not change the wait', async () => {
+      const emitTasks = vi.fn();
+      const { backend } = await runBackgroundWaitTurn(
+        [{ id: 't-1', type: 'subagent', status: 'running', description: 'reviewer' }],
+        [TASK_START('t-1'), TASK_DONE('t-1')],
+        { emitTasks },
+      );
+      backend._sweepOnce(Date.now());
+      expect(emits.filter(e => e.type === 'done' && e.wait == null)).toHaveLength(0);
+      backend._sweepOnce(Date.now() + BACKGROUND_WAIT_SETTLE_MS + 1_000);
+      const clearing = emits.filter(e => e.type === 'done' && e.wait == null);
+      expect(clearing).toHaveLength(1);
+      expect(clearing[0].turnSeq).toBeNull();
+      backend.destroy();
+    });
+
+    it('finished cleared when next background wait opens', async () => {
+      const emitTasks = vi.fn();
+      const { backend } = await runBackgroundWaitTurn(
+        [{ id: 't-2', type: 'subagent', status: 'running', description: 'reviewer' }],
+        [],
+        { emitTasks, before: [TASK_START('t-1'), TASK_DONE('t-1'), TASK_START('t-2')] },
+      );
+      const snaps = emitTasks.mock.calls.map(([p]) => p.tasks.map((t: any) => t.id));
+      // Before the wait opened t-1 was shown as finished…
+      expect(snaps).toContainEqual(['t-1', 't-2']);
+      // …and the snapshot emitted at wait-open dropped it, keeping running t-2.
+      expect(snaps.at(-1)).toEqual(['t-2']);
+      backend.destroy();
+    });
+
+    it('stopTask calls query.stopTask', async () => {
+      const { backend, fakeQuery, scope } = await runBackgroundWaitTurn(
+        [{ id: 't-1', type: 'subagent', status: 'running', description: 'reviewer' }],
+        [TASK_START('t-1')],
+      );
+      fakeQuery.stopTask = vi.fn().mockResolvedValue(undefined);
+      await expect(backend.stopTask(PROJECT, scope, 't-1')).resolves.toBe(true);
+      expect(fakeQuery.stopTask).toHaveBeenCalledWith('t-1');
+      expect(fakeQuery.interrupt).not.toHaveBeenCalled();
+      backend.destroy();
+    });
+
+    it('stopTask on dead scope', async () => {
+      const { backend, fakeQuery, scope } = await runBackgroundWaitTurn(
+        [{ id: 't-1', type: 'subagent', status: 'running', description: 'reviewer' }],
+        [TASK_START('t-1')],
+      );
+      await expect(backend.stopTask(PROJECT, 'no-such-scope', 't-1')).resolves.toBe(false);
+      // No stopTask on the query object (older runtime) → false.
+      await expect(backend.stopTask(PROJECT, scope, 't-1')).resolves.toBe(false);
+      fakeQuery.stopTask = vi.fn().mockRejectedValue(new Error('gone'));
+      await expect(backend.stopTask(PROJECT, scope, 't-1')).resolves.toBe(false);
+      expect(fakeQuery.interrupt).not.toHaveBeenCalled();
+      expect(emits.filter(e => e.type === 'done' && e.wait == null)).toHaveLength(0);
+      backend.destroy();
+    });
   });
 
   it('(52) a background wait stays open while any task is still live', async () => {

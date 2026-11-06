@@ -24,6 +24,8 @@ import {
   generateTitleImpl,
   getAvailableClaudeModels,
   emitChatMessage,
+  emitBackgroundTasks,
+  type BackgroundTasksPayload,
   readCachedSlashCommands,
   writeCachedSlashCommands,
   type SlashCommandInfo,
@@ -36,6 +38,7 @@ import {
 import { isImagePath, mimeForImagePath } from '../imageFiles';
 import { notifyCompletion, notifyApproval, notifyQuestion, notifyPlanReview } from '../notify';
 import { devlog } from '../devlog';
+import { foldBackgroundTaskFrame, clearFinishedTasks, visibleTasks, type BackgroundTaskDetail } from './backgroundTasks';
 import { classifyTurnEnd, isSchedulingTool, isBackgroundLaunch, isAsyncLaunchResult, countLiveBackgroundTasks,
   isTerminalTaskStatus, onlyShellTasksLive, WAKEUP_GRACE_MS, BACKGROUND_WAIT_SETTLE_MS, BACKGROUND_WAIT_IDLE_MS,
   type WaitMeta } from '../waitClassifier';
@@ -66,6 +69,9 @@ interface ScopeSession {
     [Symbol.asyncIterator](): AsyncIterator<any>;
     interrupt(): Promise<void>;
     close(): void;
+    /** Stop one background task (SDK runtime ≥ task frames). Optional: older
+     *  runtimes and test fakes may not have it. */
+    stopTask?(taskId: string): Promise<void>;
   };
   /** Enqueue a user message into the input channel */
   pushInput: (msg: SdkUserInputMessage) => void;
@@ -146,6 +152,10 @@ interface ScopeSession {
    *  for live tasks only. A turn whose live work is all shells ends for the
    *  user at once (see onlyShellTasksLive). */
   liveTaskTypes: Map<string, string>;
+  /** Display-only per-task detail for the background-work sidebar. Never read
+   *  by the wait logic. Spans turns like liveTasks; finished entries are
+   *  dropped when the next background wait opens. */
+  taskDetails: Map<string, BackgroundTaskDetail>;
   /** A tracked background task reached a terminal status during the CURRENT
    *  turn. Per-turn (cleared by _resetWaitTracking): a task finishing is what
    *  makes the runtime re-invoke the model, so a turn ending right after one
@@ -333,6 +343,8 @@ export interface SdkBackendDeps {
   queryFn?: typeof QueryFn;
   /** Where to send claude:message payloads. Default: real ipc / remoteBus. */
   emit?: (payload: Record<string, unknown>) => void;
+  /** Where to send background-task snapshots (claude:backgroundTasks). */
+  emitTasks?: (payload: BackgroundTasksPayload) => void;
   /** How to resolve the claude executable path. Default: PATH scan. */
   resolveClaudePath?: () => string | undefined;
   /** OS notification hooks. Default: notify.ts against the registered main window. */
@@ -384,6 +396,7 @@ export class SdkBackend implements ClaudeBackend {
 
   private readonly queryFn: typeof QueryFn;
   private readonly _emit: (payload: Record<string, unknown>) => void;
+  private readonly _emitTasks: (payload: BackgroundTasksPayload) => void;
   private readonly _resolveClaudePath: () => string | undefined;
   private readonly _notify: SdkNotify;
   private readonly _buildChatMcpServer?: (workspace: string) => McpSdkServerConfigWithInstance | undefined;
@@ -406,6 +419,7 @@ export class SdkBackend implements ClaudeBackend {
     }
 
     this._emit = deps?.emit ?? defaultEmit;
+    this._emitTasks = deps?.emitTasks ?? ((p) => emitBackgroundTasks(p));
     this._resolveClaudePath = deps?.resolveClaudePath ?? resolveClaudePath;
     this._notify = deps?.notify ?? defaultNotify;
     this._buildChatMcpServer = deps?.buildChatMcpServer;
@@ -643,6 +657,35 @@ export class SdkBackend implements ClaudeBackend {
       this._emit({ type: 'error', fatal: true, text: `SDK backend error: ${friendlyError(text)}`, projectPath, scope: effectiveScope });
       this._emit({ type: 'done', projectPath, scope: effectiveScope, turnSeq });
     }
+  }
+
+  // ─── stopTask ──────────────────────────────────────────────────────────────
+
+  /** Stop ONE background task. Never interrupts the turn; resolves false when
+   *  there is no live query, the runtime lacks stopTask, or the call fails. */
+  async stopTask(projectPath: string, scope: string | undefined, taskId: string): Promise<boolean> {
+    const session = this.sessions.get(toScopeKey(projectPath, scope));
+    const query = session?.query;
+    if (!query || typeof query.stopTask !== 'function') {
+      devlog('claude-sdk', 'stopTask', { scope: scope ?? 'chat', taskId, ok: false, reason: 'no-query' });
+      return false;
+    }
+    try {
+      await query.stopTask(taskId);
+      devlog('claude-sdk', 'stopTask', { scope: session!._scopeName, taskId, ok: true });
+      return true;
+    } catch (err) {
+      devlog('claude-sdk', 'stopTask', { scope: session!._scopeName, taskId, ok: false, error: err instanceof Error ? err.message : String(err) });
+      return false;
+    }
+  }
+
+  private _emitTaskSnapshot(session: ScopeSession): void {
+    this._emitTasks({
+      projectPath: session._projectPath,
+      scope: session._scopeName,
+      tasks: visibleTasks(session.taskDetails),
+    });
   }
 
   // ─── interrupt ─────────────────────────────────────────────────────────────
@@ -1259,6 +1302,7 @@ export class SdkBackend implements ClaudeBackend {
       wakeupDeadline: null,
       liveTasks: new Map(),
       liveTaskTypes: new Map(),
+      taskDetails: new Map(),
       sawTaskSettled: false,
       sawTaskFrames: false,
       lastTaskEventAt: Date.now(),
@@ -1343,6 +1387,12 @@ export class SdkBackend implements ClaudeBackend {
 
   /** Fold one system task_* frame into the session's live-task ledger. */
   private _trackTaskFrame(session: ScopeSession, m: Record<string, unknown>, scopeKey: string): void {
+    // Display-only detail for the sidebar; independent of the ledger below.
+    const nextDetails = foldBackgroundTaskFrame(session.taskDetails, m, this._now());
+    if (nextDetails !== session.taskDetails) {
+      session.taskDetails = nextDetails;
+      this._emitTaskSnapshot(session);
+    }
     session.sawTaskFrames = true;
     session.lastTaskEventAt = Date.now();
     const id = typeof m.task_id === 'string' ? m.task_id : null;
@@ -1621,6 +1671,11 @@ export class SdkBackend implements ClaudeBackend {
             session.pendingBackgroundResume = wait.kind === 'background';
             if (shellsOnly) wait = { kind: 'none', resumeInSeconds: null, taskCount: wait.taskCount };
             session.backgroundWaitOpen = wait.kind === 'background';
+            if (wait.kind === 'background') {
+              // Display only: a new wait starts the sidebar's Finished list fresh.
+              session.taskDetails = clearFinishedTasks(session.taskDetails);
+              this._emitTaskSnapshot(session);
+            }
             session.backgroundSettleAt = null;
             session.wakeupDeadline = (wait.kind === 'scheduled' && typeof wait.resumeInSeconds === 'number')
               ? Date.now() + wait.resumeInSeconds * 1000 + WAKEUP_GRACE_MS
