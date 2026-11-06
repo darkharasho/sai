@@ -2,6 +2,8 @@ import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import type { SlashCommandInfo } from './lib/slashCommands';
 import NavBar from './components/NavBar';
 import ChatPanel from './components/Chat/ChatPanel';
+import BackgroundTasksSidebar from './components/Chat/BackgroundTasksSidebar';
+import { selectSidebarTasks } from './components/Chat/selectSidebarTasks';
 import TerminalPanel from './components/Terminal/TerminalPanel';
 import GitSidebar from './components/Git/GitSidebar';
 import { MetaGitSidebar } from './components/Git/MetaGitSidebar';
@@ -1977,6 +1979,28 @@ export default function App() {
   }, [workspaces]);
 
   const activeWorkspace = activeProjectPath ? getWorkspace(activeProjectPath) : null;
+  // Background-work sidebar follows the active Claude chat (same key as the
+  // waiting= lookup on the ChatPanel mount).
+  const activeTaskScope = aiProvider === 'claude' && activeProjectPath && activeWorkspace?.activeSession?.id
+    ? activeWorkspace.activeSession.id
+    : null;
+  const sidebarTasks = selectSidebarTasks(
+    backgroundTasksByScope,
+    activeTaskScope ? `${activeProjectPath}:${activeTaskScope}` : null,
+  );
+  useEffect(() => {
+    // Switching to a chat with no tasks (or the last finished card being
+    // cleared) closes the sidebar; it never reopens on its own.
+    if (sidebarTasks.length === 0) setTaskSidebarOpen(false);
+  }, [sidebarTasks.length]);
+  const handleStopBackgroundTask = useCallback(
+    (taskId: string): Promise<boolean> => {
+      if (!activeProjectPath || !activeTaskScope) return Promise.resolve(false);
+      return window.sai.claudeStopTask?.(activeProjectPath, activeTaskScope, taskId) ?? Promise.resolve(false);
+    },
+    [activeProjectPath, activeTaskScope],
+  );
+  const closeTaskSidebar = useCallback(() => setTaskSidebarOpen(false), []);
 
   // Broadcast active workspace+session changes to paired follower devices.
   // Broadcasts even when activeSession is null (empty sessionId) so the phone
@@ -6084,6 +6108,13 @@ export default function App() {
               </div>
             ))}
           </div>
+          {taskSidebarOpen && sidebarTasks.length > 0 && (
+            <BackgroundTasksSidebar
+              tasks={sidebarTasks}
+              onClose={closeTaskSidebar}
+              onStopTask={handleStopBackgroundTask}
+            />
+          )}
         </div>
       </div>
 

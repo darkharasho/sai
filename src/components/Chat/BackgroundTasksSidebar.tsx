@@ -1,6 +1,6 @@
 // Full-height right column listing the active chat's background tasks.
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { LayoutGroup, useReducedMotion } from 'motion/react';
+import { LayoutGroup, motion, useReducedMotion } from 'motion/react';
 import { X } from 'lucide-react';
 import { isTerminalDetail, type BackgroundTaskDetail } from '../../../electron/services/claudeBackend/backgroundTasks';
 import BackgroundTaskCard from './BackgroundTaskCard';
@@ -131,7 +131,13 @@ export default function BackgroundTasksSidebar({ tasks, onClose, onStopTask }: P
           <div className="sai-bgtasks-section" data-section="running">{running.map(renderCard)}</div>
           {finished.length > 0 && (
             <div className="sai-bgtasks-section" data-section="finished">
-              <div className="sai-bgtasks-label">Finished</div>
+              <motion.div
+                className="sai-bgtasks-label"
+                layout={reducedMotion ? false : 'position'}
+                transition={{ duration: 0.28, ease: [0.2, 0.7, 0.2, 1] }}
+              >
+                Finished
+              </motion.div>
               {finished.map(renderCard)}
             </div>
           )}
@@ -164,7 +170,8 @@ const SIDEBAR_CSS = `
   .sai-bgtask { position:relative; background:var(--surface-2); border:1px solid var(--border-hairline);
     border-radius:9px; padding:10px 11px; display:flex; flex-direction:column; gap:6px; }
   .sai-bgtask[data-stuck="true"] { border-color:rgba(224,108,117,.45); }
-  .sai-bgtask[data-state="finished"] { opacity:.62; }
+  /* Dim the children, not the card: motion's layoutId writes an inline opacity on the card. */
+  .sai-bgtask[data-state="finished"] > * { opacity:.62; }
   .sai-bgtask-head { display:flex; align-items:center; gap:8px; min-width:0; }
   .sai-bgtask-dot { width:12px; height:12px; flex-shrink:0; border-radius:50%; display:grid; place-items:center;
     font-size:8px; font-weight:700; line-height:1; color:var(--surface-0);

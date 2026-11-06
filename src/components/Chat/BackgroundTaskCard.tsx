@@ -48,7 +48,8 @@ export default function BackgroundTaskCard({ task, nowMs, settling, stopping, st
           <span>{formatElapsed(elapsedS)}</span>
           {task.totalTokens != null && <span>{formatTokens(task.totalTokens)} tok</span>}
           {task.toolUses != null && <span>{task.toolUses} tool{task.toolUses === 1 ? '' : 's'}</span>}
-          {!terminal && sinceS >= 1 && <span>updated {formatElapsed(sinceS)} ago</span>}
+          {/* Shells never report progress; stuck cards already say how long. */}
+          {!terminal && !task.isShell && !stuck && sinceS >= 1 && <span>updated {formatElapsed(sinceS)} ago</span>}
         </span>
         {stuck && <span className="sai-bgtask-stuck">⚠ Quiet for {Math.floor(sinceS / 60)}m — may be stuck</span>}
         {!terminal && (

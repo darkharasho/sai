@@ -74,6 +74,17 @@ describe('BackgroundTasksSidebar', () => {
     expect(within(card('a')).getByText(/may be stuck/)).toBeTruthy();
   });
 
+  it('no "updated … ago" for shells or stuck cards', () => {
+    render(<BackgroundTasksSidebar tasks={[
+      task({ id: 's', isShell: true, isAgent: false, kind: 'shell', lastEventAt: NOW - 300_000 }),
+      task({ id: 'k', lastEventAt: NOW - 130_000 }),
+      task({ id: 'a', lastEventAt: NOW - 3_000 }),
+    ]} onClose={() => {}} onStopTask={async () => true} />);
+    expect(card('s').textContent).not.toMatch(/updated/);
+    expect(card('k').textContent).not.toMatch(/updated/);
+    expect(card('a').textContent).toMatch(/updated 3s ago/);
+  });
+
   it('× calls onClose', () => {
     const onClose = vi.fn();
     render(<BackgroundTasksSidebar tasks={three()} onClose={onClose} onStopTask={async () => true} />);
