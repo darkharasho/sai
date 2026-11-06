@@ -53,6 +53,21 @@ function get(url: string, token: string): Promise<any> {
   });
 }
 
+// Env for `git clone` that authenticates to github.com with the token for this
+// one command only. Passing it via GIT_CONFIG_* (not the URL or argv) keeps the
+// token out of the new repo's .git/config and out of the process list.
+export function cloneAuthEnv(token: string, base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const n = Number(base.GIT_CONFIG_COUNT || '0') || 0;
+  const basic = Buffer.from(`x-access-token:${token}`).toString('base64');
+  return {
+    ...base,
+    GIT_TERMINAL_PROMPT: '0',
+    GIT_CONFIG_COUNT: String(n + 1),
+    [`GIT_CONFIG_KEY_${n}`]: 'http.https://github.com/.extraheader',
+    [`GIT_CONFIG_VALUE_${n}`]: `Authorization: Basic ${basic}`,
+  };
+}
+
 let orgsCache: { token: string; orgs: string[] } | null = null;
 async function getOrgs(token: string): Promise<string[]> {
   if (orgsCache && orgsCache.token === token) return orgsCache.orgs;
@@ -227,9 +242,6 @@ export function registerGithubAuthHandlers(
     const token = readSettings().github_auth?.token;
     if (!token) throw new Error('Not authenticated');
 
-    // Inject token into clone URL for auth: https://<token>@github.com/...
-    const authedUrl = cloneUrl.replace('https://github.com/', `https://${token}@github.com/`);
-
     // Ensure parent dir exists
     fs.mkdirSync(targetDir, { recursive: true });
 
@@ -242,7 +254,7 @@ export function registerGithubAuthHandlers(
     }
 
     return new Promise<string>((resolve, reject) => {
-      execFile('git', ['clone', authedUrl, clonePath], { timeout: 120000 }, (err) => {
+      execFile('git', ['clone', cloneUrl, clonePath], { timeout: 120000, env: cloneAuthEnv(token) }, (err) => {
         if (err) {
           reject(new Error(err.message));
         } else {
