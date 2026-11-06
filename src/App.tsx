@@ -83,6 +83,7 @@ import { turnEndIsStale } from './lib/turnSeqGuard';
 import { resolveClaudeConfig, setWorkspaceOverride, sanitizeOverrideMap, type ClaudeOverrideMap } from './lib/claudeWorkspaceConfig';
 import { resolveSwarmClaudeConfig } from './lib/swarmClaudeConfig';
 import type { WaitMeta } from '../electron/services/waitClassifier';
+import { isTerminalDetail, type BackgroundTaskDetail } from '../electron/services/claudeBackend/backgroundTasks';
 import { WAKEUP_GRACE_MS } from '../electron/services/waitClassifier';
 
 const SWARM_DEFAULT_CAP = 5;
@@ -385,6 +386,25 @@ export default function App() {
   const [waitingScopes, setWaitingScopes] = useState<Map<string, { wait: WaitMeta; startedAtMs: number }>>(new Map());
   // Mirror for handlers that must read the live map without re-subscribing
   // (grace sweep, session-delete cleanup).
+  // Background-work sidebar: latest per-task snapshot per `${projectPath}:${scope}`
+  // (claude:backgroundTasks, SDK only). Display only — never feeds wait logic.
+  const [backgroundTasksByScope, setBackgroundTasksByScope] = useState<Map<string, BackgroundTaskDetail[]>>(new Map());
+  const [taskSidebarOpen, setTaskSidebarOpen] = useState(false);
+  const toggleTaskSidebar = useCallback(() => setTaskSidebarOpen((o) => !o), []);
+  useEffect(() => {
+    const off = window.sai.claudeOnBackgroundTasks?.((p: { projectPath: string; scope: string; tasks: BackgroundTaskDetail[] }) => {
+      if (!p?.projectPath || !p.scope) return;
+      const key = `${p.projectPath}:${p.scope}`;
+      setBackgroundTasksByScope((prev) => {
+        if (!prev.has(key) && p.tasks.length === 0) return prev;
+        const next = new Map(prev);
+        if (p.tasks.length === 0) next.delete(key);
+        else next.set(key, p.tasks);
+        return next;
+      });
+    });
+    return () => { off?.(); };
+  }, []);
   const waitingScopesRef = useRef(waitingScopes);
   waitingScopesRef.current = waitingScopes;
   // Unsent draft text and attached context per workspace, persisted across
@@ -5187,6 +5207,15 @@ export default function App() {
                       ? waitingScopes.get(`${wsPath}:${ws.activeSession.id}`) ?? null
                       : waitingScopes.get(`${wsPath}:chat`) ?? null
                   }
+                  {...(() => {
+                    const bgTasks = aiProvider === 'claude' ? backgroundTasksByScope.get(`${wsPath}:${ws.activeSession.id}`) : undefined;
+                    if (!bgTasks || bgTasks.length === 0) return {};
+                    return {
+                      liveBackgroundTaskCount: bgTasks.filter((t) => !isTerminalDetail(t)).length,
+                      onToggleBackgroundTasks: toggleTaskSidebar,
+                      backgroundTasksOpen: taskSidebarOpen,
+                    };
+                  })()}
                   awaitingQuestion={
                     // Scope-precise: a sibling chat's pending question must not
                     // freeze THIS panel's thinking indicator / send routing.

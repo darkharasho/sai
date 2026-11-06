@@ -233,6 +233,10 @@ interface ChatPanelProps {
    * real completion. Consumed by Task 9 to render a waiting pill/indicator.
    */
   waiting?: { wait: WaitMeta; startedAtMs: number } | null;
+  /** Background-work sidebar plumbing, passed straight to the wait pill. */
+  liveBackgroundTaskCount?: number;
+  onToggleBackgroundTasks?: () => void;
+  backgroundTasksOpen?: boolean;
 }
 
 const EMPTY_PROMPTS = [
@@ -458,7 +462,7 @@ const LOAD_MORE_CHUNK = 30; // messages to load when scrolling up
 const LOAD_GUARD_ERROR_QUIET_MS = 15_000;
 
 
-export default function ChatPanel({ projectPath, overlayControl, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, availableModels, claudeOverrideState, aiProvider, codexModel, onCodexModelChange, codexModels, onCodexModelsRefresh, codexPermission, onCodexPermissionChange, codexEffort, onCodexEffortChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, kimiModel, onKimiModelChange, kimiModels, kimiApprovalMode, onKimiApprovalModeChange, initialMessages, onMessagesChange, onTurnComplete, onClaudeSessionId, onGeminiSessionId, onKimiSessionId, onCodexSessionId, activeFilePath, onFileOpen, isActive, isStreaming = false, awaitingQuestion = false, initialDraft, onDraftChange, initialContextItems, onContextItemsChange, messageQueue = [], onQueueAdd, onQueueRemove, onQueueShift, onQueuePromote, sessionId, terminalTabs = [], onSlashCommandsUpdate, onInterceptSend, claudeScope = 'chat', onOpenMcpPanel, claudeKind = 'chat', claudeOrchestratorContext, initialPendingApproval = null, renderToolCall, renderMessage, activeMetaRuntime, emptyStateVisual, conversationHeaderVisual, mentionInsertRef: mentionInsertRefProp, waiting = null }: ChatPanelProps) {
+export default function ChatPanel({ projectPath, overlayControl, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, availableModels, claudeOverrideState, aiProvider, codexModel, onCodexModelChange, codexModels, onCodexModelsRefresh, codexPermission, onCodexPermissionChange, codexEffort, onCodexEffortChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, kimiModel, onKimiModelChange, kimiModels, kimiApprovalMode, onKimiApprovalModeChange, initialMessages, onMessagesChange, onTurnComplete, onClaudeSessionId, onGeminiSessionId, onKimiSessionId, onCodexSessionId, activeFilePath, onFileOpen, isActive, isStreaming = false, awaitingQuestion = false, initialDraft, onDraftChange, initialContextItems, onContextItemsChange, messageQueue = [], onQueueAdd, onQueueRemove, onQueueShift, onQueuePromote, sessionId, terminalTabs = [], onSlashCommandsUpdate, onInterceptSend, claudeScope = 'chat', onOpenMcpPanel, claudeKind = 'chat', claudeOrchestratorContext, initialPendingApproval = null, renderToolCall, renderMessage, activeMetaRuntime, emptyStateVisual, conversationHeaderVisual, mentionInsertRef: mentionInsertRefProp, waiting = null, liveBackgroundTaskCount, onToggleBackgroundTasks, backgroundTasksOpen }: ChatPanelProps) {
   const [messages, setMessagesRaw] = useState<ChatMessageType[]>(() => {
     const initial = initialMessages || [];
     // Anything present at mount is history, not a fresh arrival — a workspace/
@@ -2681,7 +2685,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
             </TaskRegistryContext.Provider>
             {isWaiting && waiting && (
               <div className="chat-waiting-row">
-                <WaitingIndicator wait={waiting.wait} startedAtMs={waiting.startedAtMs} onCancel={handleCancelWait} />
+                <WaitingIndicator wait={waiting.wait} startedAtMs={waiting.startedAtMs} onCancel={handleCancelWait} liveTaskCount={liveBackgroundTaskCount} onToggleTasks={onToggleBackgroundTasks} tasksOpen={backgroundTasksOpen} />
               </div>
             )}
           </>
