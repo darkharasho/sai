@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, shell, Menu, MenuItem, screen, clipboard, Notification, protocol } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, shell, Menu, MenuItem, screen, clipboard, Notification, protocol, powerMonitor } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -85,6 +85,7 @@ import { destroyAll, startSuspendTimer, stopSuspendTimer, getAll, remove, suspen
 import { initFocusTracking, setActiveWorkspace } from './services/notify';
 import { devlog, devlogEnabled, devlogFor, devlogPath } from './services/devlog';
 import { readIntactClipboardPng } from './services/clipboardImage';
+import { startIdleMemoryPurge, collectRendererGarbage, logPurge } from './services/idleMemoryPurge';
 import { LoadGuard, inactiveState } from './services/loadGuard';
 import { makeOnAgentKilled, type ScopeSuspender } from './services/loadGuard/hook';
 import { Signaller, defaultSignalDeps, frozenFileName, readStartTicks, recoverOrphanedFrozenFiles } from './services/loadGuard/signals';
@@ -466,6 +467,33 @@ function createWindow() {
     overlayManager?.setMainFocused(true);
     mainWindow?.flashFrame(false);
   });
+
+  // Give freed renderer memory back to the OS while nobody is looking.
+  // See services/idleMemoryPurge.ts for the measurements behind this.
+  {
+    const win = mainWindow;
+    const memoryPurge = startIdleMemoryPurge({
+      now: () => Date.now(),
+      isFocused: () => !win.isDestroyed() && win.isFocused(),
+      systemIdleMs: () => powerMonitor.getSystemIdleTime() * 1000,
+      purge: async () => {
+        if (win.isDestroyed()) return;
+        const wc = win.webContents;
+        const pid = wc.getOSProcessId();
+        const workingSetMb = () => {
+          const m = app.getAppMetrics().find((x) => x.pid === pid);
+          return m ? Math.round(m.memory.workingSetSize / 1024) : undefined;
+        };
+        const beforeMb = workingSetMb();
+        const gcMs = await collectRendererGarbage(wc);
+        // Freed pages are returned asynchronously; sample a little later.
+        setTimeout(() => logPurge({ gcMs, beforeMb, afterMb: workingSetMb() }), 5_000).unref?.();
+      },
+    });
+    win.on('blur', memoryPurge.onBlur);
+    win.on('focus', memoryPurge.onFocus);
+    win.on('closed', memoryPurge.stop);
+  }
 
   // Right-click context menu with spelling suggestions
   mainWindow.webContents.on('context-menu', (_event, params) => {
