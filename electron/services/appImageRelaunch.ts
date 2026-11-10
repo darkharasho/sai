@@ -49,13 +49,26 @@ export function sanitizeAppImageEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 }
 
 /**
- * POSIX sh script: wait (max ~30s) for pid $1 to exit, then exec the rest of
- * argv. Args: <pid> <target> [args…], with $0 as a label.
+ * POSIX sh script: wait for pid $1 to exit (up to `maxWaitIterations` * 0.2s),
+ * then exec the rest of argv. Args: <pid> <target> [args…], with $0 as a label.
+ *
+ * If the old instance is STILL alive after the window, we abort (exit 1) instead
+ * of exec-ing — launching the new binary while the old one holds the profile is
+ * what produced two instances fighting over IndexedDB (a frozen renderer). The
+ * single-instance lock would make the new copy quit anyway, so there is nothing
+ * to gain by starting it; the user relaunches the (already stuck) app by hand.
+ * The default window is generous (60s) so an honestly-slow quit still relaunches.
  */
-export const WAIT_THEN_EXEC_SCRIPT =
-  'pid="$1"; shift; i=0; ' +
-  'while kill -0 "$pid" 2>/dev/null && [ "$i" -lt 150 ]; do sleep 0.2; i=$((i+1)); done; ' +
-  'exec "$@"';
+export function buildWaitThenExecScript(maxWaitIterations = 300): string {
+  return (
+    'pid="$1"; shift; i=0; ' +
+    `while kill -0 "$pid" 2>/dev/null && [ "$i" -lt ${maxWaitIterations} ]; do sleep 0.2; i=$((i+1)); done; ` +
+    'if kill -0 "$pid" 2>/dev/null; then exit 1; fi; ' +
+    'exec "$@"'
+  );
+}
+
+export const WAIT_THEN_EXEC_SCRIPT = buildWaitThenExecScript();
 
 export interface RelaunchCommand {
   command: string;

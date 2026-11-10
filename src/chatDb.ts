@@ -335,6 +335,33 @@ export async function dbExternalizeStoredImages(store?: StoreImageFn): Promise<n
   return rewritten;
 }
 
+/**
+ * Collect every on-disk tool-result image path referenced by any persisted
+ * message, across all sessions. This is the authoritative reference set for the
+ * image orphan GC: a file survives iff some surviving chat points at it (so
+ * pinned and in-retention chats keep their images). Run AFTER dbPurgeExpired so
+ * purged sessions no longer contribute references.
+ */
+export async function dbCollectReferencedImagePaths(): Promise<string[]> {
+  const db = await openDb();
+  const records = await new Promise<Array<{ messages?: ChatMessage[] }>>((resolve, reject) => {
+    const req = db.transaction('messages', 'readonly').objectStore('messages').getAll();
+    req.onsuccess = () => resolve(req.result as Array<{ messages?: ChatMessage[] }>);
+    req.onerror = () => reject(req.error);
+  });
+  const paths = new Set<string>();
+  for (const rec of records) {
+    for (const msg of rec.messages ?? []) {
+      for (const tc of msg.toolCalls ?? []) {
+        for (const img of tc.resultImages ?? []) {
+          if (img.filePath) paths.add(img.filePath);
+        }
+      }
+    }
+  }
+  return [...paths];
+}
+
 export async function clearDb(): Promise<void> {
   // Close existing connection so we can delete the DB
   if (dbPromise) {

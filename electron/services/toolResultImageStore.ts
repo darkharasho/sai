@@ -35,6 +35,52 @@ export function storeImageBase64(data: string, mimeType: string, dir: string = t
   return file;
 }
 
+/**
+ * Given the filenames present in the image dir and the set of referenced file
+ * paths (from persisted chat records), return the filenames that nothing points
+ * at. Matching is by basename: the files are content-addressed (sha256.<ext>),
+ * so the basename is a stable unique id, and comparing basenames sidesteps the
+ * $HOME symlink trap (/home vs /var/home) that full-path equality would hit —
+ * a mismatch there would wrongly flag a live image as an orphan and delete it.
+ */
+export function selectOrphanImages(filenames: string[], referencedPaths: Iterable<string>): string[] {
+  const referenced = new Set<string>();
+  for (const p of referencedPaths) referenced.add(path.basename(p));
+  return filenames.filter((name) => !referenced.has(name));
+}
+
+/**
+ * Delete every file in `dir` not referenced by `referencedPaths`. Reference-based
+ * only — a file survives as long as any kept chat record points at it, so pinned
+ * and in-retention chats never lose their images. Returns counts for logging.
+ */
+export function pruneOrphanImages(
+  referencedPaths: string[],
+  dir: string = toolResultImageDir(),
+): { deleted: number; freedBytes: number } {
+  let entries: string[];
+  try {
+    entries = fs.readdirSync(dir);
+  } catch {
+    return { deleted: 0, freedBytes: 0 };
+  }
+  const orphans = selectOrphanImages(entries, referencedPaths);
+  let deleted = 0;
+  let freedBytes = 0;
+  for (const name of orphans) {
+    const file = path.join(dir, name);
+    try {
+      const size = fs.statSync(file).size;
+      fs.unlinkSync(file);
+      deleted++;
+      freedBytes += size;
+    } catch {
+      /* file vanished or unreadable — skip */
+    }
+  }
+  return { deleted, freedBytes };
+}
+
 function externalizeBlock(block: any, dir: string): any {
   const src = block?.source;
   if (block?.type !== 'image' || src?.type !== 'base64' || typeof src.data !== 'string') return block;
