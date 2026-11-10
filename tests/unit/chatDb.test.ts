@@ -13,6 +13,7 @@ import {
   migrateFromLocalStorage,
   _resetMigrationFlag,
   dbExternalizeStoredImages,
+  dbCollectReferencedImagePaths,
 } from '@/chatDb';
 import type { ChatSession, ChatMessage } from '@/types';
 
@@ -41,6 +42,26 @@ function makeSession(overrides: Partial<ChatSession> = {}): ChatSession {
 
 beforeEach(async () => {
   await clearDb();
+});
+
+describe('dbCollectReferencedImagePaths', () => {
+  it('collects filePath refs from toolCalls across all sessions, deduped', async () => {
+    const withImgs = (paths: string[]): ChatMessage =>
+      makeMessage({ toolCalls: [{ resultImages: paths.map((p) => ({ filePath: p })) }] as any });
+
+    await dbSaveSession('/p/a', makeSession({ messages: [withImgs(['/dir/a.png', '/dir/b.jpg'])] }));
+    await dbSaveSession('/p/b', makeSession({ messages: [withImgs(['/dir/b.jpg', '/dir/c.png'])] }));
+
+    const refs = await dbCollectReferencedImagePaths();
+    expect(new Set(refs)).toEqual(new Set(['/dir/a.png', '/dir/b.jpg', '/dir/c.png']));
+  });
+
+  it('ignores inline (dataUrl) images and messages without tool calls', async () => {
+    const inline = makeMessage({ toolCalls: [{ resultImages: [{ dataUrl: 'data:image/png;base64,AAAA' }] }] as any });
+    await dbSaveSession('/p/a', makeSession({ messages: [inline, makeMessage()] }));
+
+    expect(await dbCollectReferencedImagePaths()).toEqual([]);
+  });
 });
 
 // ---------------------------------------------------------------------------

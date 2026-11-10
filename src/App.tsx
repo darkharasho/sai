@@ -29,7 +29,7 @@ import { computeUnmountFlushes, computeQuitFlushes } from './workspaceFlush';
 import { buildOverlayPayload, truncateSnippet, updateRecentDone, type OverlayRow, type OverlayTailItem } from './lib/overlayFeed';
 import { toolCallDetail } from './lib/toolCallDetail';
 import { findLatestTodos } from './components/Chat/TodoProgress';
-import { dbGetSessions, dbGetAllSessions, dbGetMessages, dbGetMessagesTail, dbPatchSessionMeta, dbPurgeExpired, dbExternalizeStoredImages, migrateFromLocalStorage } from './chatDb';
+import { dbGetSessions, dbGetAllSessions, dbGetMessages, dbGetMessagesTail, dbPatchSessionMeta, dbPurgeExpired, dbExternalizeStoredImages, dbCollectReferencedImagePaths, migrateFromLocalStorage } from './chatDb';
 import { queueSaveSession } from './lib/sessionSaveQueue';
 import type { ChatSession, ChatMessage, GitFile, OpenFile, WorkspaceContext, QueuedMessage, TerminalTab, PendingApproval, SwarmTask, ApprovalPolicy, SwarmApproval, EffortLevel, CodexEffort, CodexModelOption, ModelChoice, ClaudeModelOption, AIProvider } from './types';
 import type { MetaWorkspaceListItem, MetaWorkspaceRuntime } from './types';
@@ -111,7 +111,14 @@ interface ScopeReconcileBridge {
 
 // One-time rewrite of inline tool-result images in stored transcripts; awaited
 // before the first session load so no save can race it.
-const IMAGES_EXTERNALIZED_KEY = 'sai-tool-images-externalized-v1';
+//
+// v2: the v1 sweep left some transcripts with inline base64 still in place (they
+// predated the sweep, or it half-ran), so Chromium kept multi-MB records spilled
+// into IndexedDB's external blob store — hundreds of MB that never reclaimed and
+// risked clone-OOM on save. Bumping the key forces one more pass for existing
+// users: it moves those images to disk as file refs (still displayed, now GC'd
+// by the orphan sweep) and overwrites the giant records so the blobs are freed.
+const IMAGES_EXTERNALIZED_KEY = 'sai-tool-images-externalized-v2';
 let externalizeStoredImagesPromise: Promise<void> | null = null;
 function externalizeStoredImagesOnce(): Promise<void> {
   if (localStorage.getItem(IMAGES_EXTERNALIZED_KEY)) return Promise.resolve();
@@ -125,6 +132,26 @@ function externalizeStoredImagesOnce(): Promise<void> {
       externalizeStoredImagesPromise = null;
     });
   return externalizeStoredImagesPromise;
+}
+
+// Reference-based GC for tool-result images: delete files on disk that no
+// surviving chat points at. Must run AFTER dbPurgeExpired (so retired sessions
+// stop contributing refs) and AFTER externalizeStoredImagesOnce (so inline
+// images have become file refs that count). Once per launch is enough.
+let pruneImagesPromise: Promise<void> | null = null;
+async function pruneOrphanToolImages(): Promise<void> {
+  const referenced = await dbCollectReferencedImagePaths();
+  const res = await (window.sai as any).pruneToolResultImages?.(referenced);
+  if (res?.deleted) {
+    console.info(`[persist] pruned ${res.deleted} orphaned tool images (${Math.round((res.freedBytes ?? 0) / 1024 / 1024)}MB freed)`);
+  }
+}
+function pruneOrphanToolImagesOnce(): Promise<void> {
+  pruneImagesPromise ??= pruneOrphanToolImages().catch(err => {
+    console.warn('[persist] tool image GC failed:', err);
+    pruneImagesPromise = null;
+  });
+  return pruneImagesPromise;
 }
 
 function stopSwarmTaskProvider(task: SwarmTask): void {
@@ -2562,6 +2589,7 @@ export default function App() {
       const retentionDays = await window.sai.settingsGet('historyRetention', 14);
       await dbPurgeExpired(retentionDays);
       await externalizeStoredImagesOnce();
+      void pruneOrphanToolImagesOnce();
       const sessions = await dbGetSessions(activeProjectPath);
       // Normalize lastViewedAt on load. Two cases:
       //   1. Legacy rows with no lastViewedAt field at all.
@@ -5890,10 +5918,14 @@ export default function App() {
         onNewProject={() => setShowNewProject(true)}
         onHistoryRetentionChange={(days) => {
           dbPurgeExpired(days).then(count => {
-            if (count > 0 && activeProjectPath) {
-              dbGetSessions(activeProjectPath).then(sessions => {
-                updateWorkspace(activeProjectPath, ws => ({ ...ws, sessions }));
-              });
+            if (count > 0) {
+              // Sessions were retired — reclaim their now-orphaned tool images.
+              void pruneOrphanToolImages().catch(() => {});
+              if (activeProjectPath) {
+                dbGetSessions(activeProjectPath).then(sessions => {
+                  updateWorkspace(activeProjectPath, ws => ({ ...ws, sessions }));
+                });
+              }
             }
           });
         }}

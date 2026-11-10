@@ -7,6 +7,7 @@ import {
   sanitizeAppImageEnv,
   buildRelaunchCommands,
   relaunchAppImage,
+  buildWaitThenExecScript,
   WAIT_THEN_EXEC_SCRIPT,
 } from '../../../electron/services/appImageRelaunch';
 
@@ -147,5 +148,21 @@ describe('WAIT_THEN_EXEC_SCRIPT (real sh)', () => {
   it('execs immediately when the pid is already gone', () => {
     const res = spawnSync('/bin/sh', ['-c', WAIT_THEN_EXEC_SCRIPT, 'sai-relaunch', '999999999', '/bin/echo', 'now']);
     expect(res.stdout.toString().trim()).toBe('now');
+  });
+
+  it('aborts without exec when the old pid outlives the wait window', async () => {
+    // A short cap so the test doesn't wait the real 60s. The "old instance"
+    // (a sleep) is still alive when the window elapses, so we must NOT exec.
+    const alive = spawn('sleep', ['5']);
+    const script = buildWaitThenExecScript(2); // 2 * 0.2s = 0.4s window
+    const res = await new Promise<{ out: string; code: number | null }>((resolve) => {
+      let out = '';
+      const child = spawn('/bin/sh', ['-c', script, 'sai-relaunch', String(alive.pid), '/bin/echo', 'should-not-run']);
+      child.stdout.on('data', (d) => (out += d));
+      child.on('exit', (code) => resolve({ out, code }));
+    });
+    alive.kill();
+    expect(res.out.trim()).toBe('');
+    expect(res.code).not.toBe(0);
   });
 });

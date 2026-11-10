@@ -6,7 +6,7 @@ import { createHash } from 'node:crypto';
 import { listMetaWorkspaces } from './metaWorkspace';
 import { syntheticRootFor } from './metaSyntheticRoot';
 import { safeJoin } from './remote/safe-join';
-import { storeImageBase64 } from './toolResultImageStore';
+import { storeImageBase64, pruneOrphanImages } from './toolResultImageStore';
 
 function fileSha(content: string): string {
   return createHash('sha256').update(content, 'utf8').digest('hex').slice(0, 16);
@@ -143,6 +143,12 @@ export function registerFsHandlers(mainWindow: BrowserWindow) {
     if (!m) throw new Error('not a base64 data URL');
     return storeImageBase64(m[2], m[1]);
   });
+
+  // Reference-based GC: delete tool-result images no surviving chat points at.
+  // The renderer owns the chat DB, so it collects the referenced paths and
+  // hands them here for the actual unlink.
+  ipcMain.handle('toolResultImage:prune', async (_e, referenced: string[]) =>
+    pruneOrphanImages(Array.isArray(referenced) ? referenced : []));
 
   ipcMain.handle('fs:mtime', async (_e, filePath: string) => {
     const s = await statFileImpl(filePath);
