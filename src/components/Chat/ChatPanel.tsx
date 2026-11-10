@@ -476,12 +476,15 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
   });
   const taskRegistry = useMemo(() => buildTaskRegistry(messages), [messages]);
   const messagesRef = useRef<ChatMessageType[]>(initialMessages || []);
+  // Apply updates to the ref EAGERLY, then hand React the result. Computing
+  // inside a React updater made the ref lag every queued-but-unrendered
+  // update, so the done-time flushMessagesToParent persisted a stale list —
+  // a reply streamed into a hidden workspace saved only its first delta, and
+  // the turn end unmounted the panel before the queued updates could apply.
   const setMessages = useCallback((updater: ChatMessageType[] | ((prev: ChatMessageType[]) => ChatMessageType[])) => {
-    setMessagesRaw(prev => {
-      const next = typeof updater === 'function' ? updater(prev) : updater;
-      messagesRef.current = next;
-      return next;
-    });
+    const next = typeof updater === 'function' ? updater(messagesRef.current) : updater;
+    messagesRef.current = next;
+    setMessagesRaw(next);
   }, []);
 
   // Coalesce streaming text-delta appends to one React state update per animation
