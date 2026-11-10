@@ -86,6 +86,7 @@ import { initFocusTracking, setActiveWorkspace } from './services/notify';
 import { devlog, devlogEnabled, devlogFor, devlogPath } from './services/devlog';
 import { readIntactClipboardPng } from './services/clipboardImage';
 import { startIdleMemoryPurge, collectRendererGarbage, logPurge } from './services/idleMemoryPurge';
+import { canonicalUserData, enforceSingleInstance } from './services/singleInstance';
 import { LoadGuard, inactiveState } from './services/loadGuard';
 import { makeOnAgentKilled, type ScopeSuspender } from './services/loadGuard/hook';
 import { Signaller, defaultSignalDeps, frozenFileName, readStartTicks, recoverOrphanedFrozenFiles } from './services/loadGuard/signals';
@@ -125,6 +126,32 @@ import { sanitizeCssColor } from '../src/render/renderSizing';
 // Allow E2E tests to isolate userData
 if (process.env.SAI_USER_DATA_DIR) {
   app.setPath('userData', process.env.SAI_USER_DATA_DIR);
+}
+
+// Canonicalize userData so the single-instance lock key is stable regardless of
+// how the path was spelled. $HOME here is symlinked (/home -> /var/home), and a
+// self-update relaunch can re-enter via the other spelling; without this the two
+// spellings would key different locks and a second copy would slip through to
+// fight over the same IndexedDB backing store (see services/singleInstance.ts).
+app.setPath('userData', canonicalUserData(app.getPath('userData')));
+
+// Guard against a second copy sharing this profile. If another instance already
+// holds the lock we focus it and quit — two instances corrupt each other's
+// IndexedDB and freeze the renderer. E2E runs opt out (each gets its own dir).
+if (!process.env.SAI_USER_DATA_DIR) {
+  enforceSingleInstance({
+    requestLock: () => app.requestSingleInstanceLock(),
+    onSecondInstance: (handler) => app.on('second-instance', handler),
+    focusExisting: () => {
+      if (!mainWindow || mainWindow.isDestroyed()) return;
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+    },
+    // app.exit(0) terminates immediately and synchronously, so the rest of main
+    // never runs in a duplicate instance.
+    quit: () => app.exit(0),
+  });
 }
 
 // Enable remote debugging when requested (npm run dev:debug)
