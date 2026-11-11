@@ -7,6 +7,12 @@ export type SessionMessageLike = SessionMessage;
 
 export interface SubagentTranscriptChunk {
   agentId: string;
+  /**
+   * `meta.finished === true`. Claude Code through 2.1.222 writes the sidecar meta
+   * once at spawn (`agentType`, `description`, `toolUseId`, `spawnDepth`) and never
+   * adds a finished flag, so this stays false there: callers must treat the card's
+   * own status as the authority on completion and use this only as a positive hint.
+   */
   finished: boolean;
   messages: SessionMessageLike[];
   nextOffset: number;
@@ -33,6 +39,43 @@ export function isValidTranscriptRequest(sessionId: unknown, toolUseId: unknown,
     typeof offset === 'number' && Number.isInteger(offset) && offset >= 0;
 }
 
+/** Nesting depth walked under a session's `subagents` dir (a subagent's own subagents nest one level each). */
+const MAX_SCAN_DEPTH = 8;
+
+/**
+ * Walks one session's `subagents` tree for the meta file naming `toolUseId`.
+ * The CLI nests a spawned agent's transcript under its parent's path
+ * (`subagents/<parent agent id>/agent-<id>.jsonl`), so this cannot be a flat
+ * readdir or nested agents are never found.
+ */
+async function scanSubagentDir(
+  dir: string,
+  toolUseId: string,
+  depth: number,
+): Promise<{ agentId: string; metaPath: string; finished: boolean } | null> {
+  let entries: import('node:fs').Dirent[];
+  try { entries = await fs.readdir(dir, { withFileTypes: true }); } catch { return null; }
+  const subdirs: string[] = [];
+  for (const e of entries) {
+    if (e.isDirectory()) { subdirs.push(path.join(dir, e.name)); continue; }
+    const m = /^agent-(.+)\.meta\.json$/.exec(e.name);
+    if (!m) continue;
+    const metaPath = path.join(dir, e.name);
+    try {
+      const meta = JSON.parse(await fs.readFile(metaPath, 'utf8'));
+      if (meta && meta.toolUseId === toolUseId) {
+        return { agentId: m[1], metaPath, finished: meta.finished === true };
+      }
+    } catch { /* unreadable meta: skip */ }
+  }
+  if (depth >= MAX_SCAN_DEPTH) return null;
+  for (const sub of subdirs) {
+    const found = await scanSubagentDir(sub, toolUseId, depth + 1);
+    if (found) return found;
+  }
+  return null;
+}
+
 async function scanForAgent(
   sessionId: string,
   toolUseId: string,
@@ -40,20 +83,8 @@ async function scanForAgent(
 ): Promise<{ agentId: string; metaPath: string; finished: boolean } | null> {
   const entries = await fs.readdir(projectsRoot);
   for (const entry of entries) {
-    const dir = path.join(projectsRoot, entry, sessionId, 'subagents');
-    let files: string[];
-    try { files = await fs.readdir(dir); } catch { continue; }
-    for (const f of files) {
-      const m = /^agent-(.+)\.meta\.json$/.exec(f);
-      if (!m) continue;
-      const metaPath = path.join(dir, f);
-      try {
-        const meta = JSON.parse(await fs.readFile(metaPath, 'utf8'));
-        if (meta && meta.toolUseId === toolUseId) {
-          return { agentId: m[1], metaPath, finished: meta.finished === true };
-        }
-      } catch { /* unreadable meta: skip */ }
-    }
+    const found = await scanSubagentDir(path.join(projectsRoot, entry, sessionId, 'subagents'), toolUseId, 0);
+    if (found) return found;
   }
   return null;
 }

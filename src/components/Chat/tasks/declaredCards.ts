@@ -5,7 +5,11 @@ import { isSaiTaskToolName, validateSaiTaskInput } from '../../../lib/saiTaskToo
 export interface DeclaredCards {
   cards: TaskCard[];
   batchStartedAt: number | null;
-  activeInlineId: string | null;
+  /**
+   * The card the model last tagged: every later assistant message is attributed
+   * to it until it finishes or another task is updated. null = untagged output.
+   */
+  activeCardId: string | null;
 }
 
 const isFinished = (c: TaskCard) => c.status === 'done' || c.status === 'failed';
@@ -27,11 +31,17 @@ function recount(c: TaskCard): void {
   c.currentLabel = c.steps.find((s) => s.state === 'current')?.label ?? null;
 }
 
-/** Fold the model's `sai_task` calls (in chat history order) into task cards. Never throws. */
+/**
+ * Fold the model's `sai_task` calls (in chat history order) into task cards. Never throws.
+ *
+ * Updating a task also tags the output that follows it: assistant messages are
+ * attributed to the last-updated card until that card finishes or another is
+ * updated, which is what gives a non-subagent card a stream of its own.
+ */
 export function deriveDeclaredCards(messages: ChatMessage[]): DeclaredCards {
   let cards: TaskCard[] = [];
   let batchStartedAt: number | null = null;
-  let activeInlineId: string | null = null;
+  let activeCardId: string | null = null;
   // A user message arrived since the last sai_task call: an unfinished batch the
   // model never closed out may be abandoned (see the create branch).
   let userSinceTaskCall = false;
@@ -42,12 +52,12 @@ export function deriveDeclaredCards(messages: ChatMessage[]): DeclaredCards {
       if (m?.role !== 'assistant') continue;
       const calls = Array.isArray(m.toolCalls) ? m.toolCalls : [];
 
-      // Attribute this message to the card that was active before it.
-      if (activeInlineId) {
+      // Attribute this message to the card that was tagged before it.
+      if (activeCardId) {
         const onlyTask = calls.length > 0 && calls.every((c) => isSaiTaskToolName(c?.name));
         const empty = typeof m.content !== 'string' || m.content.trim() === '';
         if (!(onlyTask && empty)) {
-          cards.find((c) => c.id === activeInlineId)?.messageIds.push(m.id);
+          cards.find((c) => c.id === activeCardId)?.messageIds.push(m.id);
         }
       }
 
@@ -68,7 +78,7 @@ export function deriveDeclaredCards(messages: ChatMessage[]): DeclaredCards {
           if (cards.length === 0 || cards.every(isFinished) || abandoned) {
             cards = [];
             batchStartedAt = ts;
-            activeInlineId = null;
+            activeCardId = null;
           }
           for (const t of input.tasks as any[]) {
             if (!t || typeof t.id !== 'string' || typeof t.title !== 'string') continue;
@@ -105,7 +115,6 @@ export function deriveDeclaredCards(messages: ChatMessage[]): DeclaredCards {
           card.status = 'running';
           card.endedAt = null;
           if (card.startedAt == null) card.startedAt = ts;
-          activeInlineId = card.agent ? null : card.id;
         } else if (input.status === 'done') {
           card.steps.forEach((s) => { s.state = 'done'; });
           card.status = 'done';
@@ -117,11 +126,14 @@ export function deriveDeclaredCards(messages: ChatMessage[]): DeclaredCards {
           card.result = note ?? 'Failed';
         }
 
-        if (input.status === 'done' || input.status === 'failed') {
-          if (activeInlineId === card.id) activeInlineId = null;
-        } else if (card.agent && activeInlineId === card.id) {
-          activeInlineId = null;
-        }
+        // Any update tags the card: the model touching a task is the signal that
+        // what it does next belongs to that task. Finishing it untags.
+        // Agent-backed cards are tagged too — the renderer prefers the subagent
+        // transcript when there is one, so this only surfaces on cards that
+        // never got an agent (an unresolved agent string, a failed spawn).
+        activeCardId = input.status === 'done' || input.status === 'failed'
+          ? (activeCardId === card.id ? null : activeCardId)
+          : card.id;
         recount(card);
       }
     }
@@ -129,5 +141,5 @@ export function deriveDeclaredCards(messages: ChatMessage[]): DeclaredCards {
     // display-only fold: never throw into render
   }
 
-  return { cards, batchStartedAt, activeInlineId };
+  return { cards, batchStartedAt, activeCardId };
 }

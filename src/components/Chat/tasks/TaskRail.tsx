@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { TaskBoard, TaskCard, TailLine } from './types';
-import { TaskCardView, formatElapsed } from './TaskCardView';
+import { TaskCardView } from './TaskCardView';
+import { batchSummary } from './batchSummary';
 import './tasks.css';
 
 export interface TaskRailProps {
@@ -36,15 +37,7 @@ export function TaskRail({ board, tails, selectedId, onSelect, onOpenStream, onS
   const doneCount = board.cards.filter((c) => c.status === 'done').length;
   const collapsed = board.allDone && !expanded;
 
-  let summary = '';
-  if (board.allDone) {
-    const ends = board.cards.map((c) => c.endedAt).filter((x): x is number => typeof x === 'number');
-    const dur = ends.length && board.batchStartedAt != null ? ` · ${formatElapsed(Math.max(...ends) - board.batchStartedAt)}` : '';
-    const failed = board.cards.filter((c) => c.status === 'failed').length;
-    summary = failed > 0
-      ? `${n - failed} done · ${failed} failed${dur}`
-      : `${n} task${n === 1 ? '' : 's'} done${dur}`;
-  }
+  const summary = board.allDone ? batchSummary(board) : '';
 
   return (
     <aside className="task-rail" aria-label="Tasks">

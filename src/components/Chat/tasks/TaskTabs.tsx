@@ -1,4 +1,6 @@
+import { useState } from 'react';
 import type { TaskBoard, TaskCard, TailLine } from './types';
+import { batchSummary } from './batchSummary';
 import './tasks.css';
 
 export interface TaskTabsProps {
@@ -11,9 +13,48 @@ export interface TaskTabsProps {
   onStop?(card: TaskCard): void;
 }
 
+/** Per-batch collapse state: `batch` is the board's batchStartedAt it applies to. */
+interface BatchView { batch: number | null; open: boolean; dismissed: boolean }
+
+const CLOSED: BatchView = { batch: null, open: false, dismissed: false };
+
 export function TaskTabs({ board, tails, activeId, onSelect, onStop }: TaskTabsProps) {
+  // Derived against batchStartedAt so a new batch starts fresh without an effect.
+  const [view, setView] = useState<BatchView>(CLOSED);
+  const sameBatch = view.batch === board.batchStartedAt;
+  const expanded = sameBatch && view.open;
+  const dismissed = sameBatch && view.dismissed;
+
   if (board.cards.length === 0) return null;
   const active = activeId ? board.cards.find((c) => c.id === activeId) ?? null : null;
+
+  // Finished work collapses to one line, then out of the way entirely — the
+  // strip sits above the chat, so stale tabs cost the conversation space.
+  // Never while a tab is open: that would pull the strip out from under the user.
+  if (board.allDone && active === null && !expanded) {
+    if (dismissed) return null;
+    return (
+      <div className="task-tabs task-tabs--collapsed">
+        <button
+          type="button"
+          className="task-tabs__summary"
+          aria-expanded={false}
+          onClick={() => setView({ batch: board.batchStartedAt, open: true, dismissed: false })}
+        >
+          {batchSummary(board)}
+        </button>
+        <button
+          type="button"
+          className="task-tabs__dismiss"
+          aria-label="Dismiss finished tasks"
+          title="Dismiss finished tasks"
+          onClick={() => setView({ batch: board.batchStartedAt, open: false, dismissed: true })}
+        >
+          ×
+        </button>
+      </div>
+    );
+  }
   const tail = active ? (tails.get(active.id) ?? []).slice(-4) : [];
   const canStop = !!active && active.status === 'running' && !!active.agent?.taskId && !!onStop;
 
@@ -45,6 +86,20 @@ export function TaskTabs({ board, tails, activeId, onSelect, onStop }: TaskTabsP
             </button>
           );
         })}
+        {board.allDone && (
+          <button
+            type="button"
+            className="task-tabs__collapse"
+            aria-label="Collapse finished tasks"
+            title="Collapse finished tasks"
+            onClick={() => {
+              onSelect(null); // an open tab would keep the strip expanded
+              setView({ batch: board.batchStartedAt, open: false, dismissed: false });
+            }}
+          >
+            ⌃
+          </button>
+        )}
       </div>
       {active && (
         <div className="task-tabs__strip">

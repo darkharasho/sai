@@ -11,10 +11,18 @@ interface Chunk {
   messages: Array<{ type: string; uuid: string; message: unknown }>;
   nextOffset: number;
 }
-interface Entry { raw: Chunk['messages']; offset: number; nulls: number; transcript: AgentTranscript }
+interface Entry {
+  raw: Chunk['messages'];
+  offset: number;
+  nulls: number;
+  /** Epoch ms before which a live id is not re-polled (null-result backoff). */
+  nextAt: number;
+  transcript: AgentTranscript;
+}
 
-/** Consecutive null results tolerated for a live id before it is marked unavailable. */
-const MAX_LIVE_NULLS = 3;
+/** Backoff after consecutive nulls on a live id: 2s, 4s, 8s … capped. */
+const MAX_BACKOFF_MS = 30_000;
+const backoffMs = (nulls: number) => Math.min(POLL_MS * 2 ** Math.max(0, nulls - 1), MAX_BACKOFF_MS);
 
 const NONE: ReadonlySet<string> = new Set();
 
@@ -23,10 +31,14 @@ const NONE: ReadonlySet<string> = new Set();
  * `liveIds`. Raw messages accumulate per id and are re-converted as a whole so a
  * tool_result in a later chunk pairs with its tool_use from an earlier one.
  *
- * A null (no transcript yet) marks a non-live id unavailable only once its card
- * is finished (`finishedIds`): the subagent may not have written its meta yet.
- * An id entering `liveIds` clears unavailable/nulls; an id leaving it gets one
- * final poll so the transcript's tail isn't lost.
+ * A null (no transcript yet) never marks a live id unavailable — a queued agent
+ * can take minutes to write its sidecar meta, and `unavailable` is terminal
+ * (polling stops) — so live nulls only back the poll off. Unavailable is reached
+ * one way: a non-live id whose card has finished (`finishedIds`) and still has
+ * no transcript on disk.
+ *
+ * An id entering `liveIds` clears unavailable/nulls/backoff; an id leaving it
+ * gets one final poll so the transcript's tail isn't lost.
  */
 export function useAgentTranscripts(
   sessionId: string | null | undefined,
@@ -92,9 +104,10 @@ export function useAgentTranscripts(
         let added = 0;
         if (!chunk) {
           const nulls = (prev?.nulls ?? 0) + 1;
-          const unavailable = isLive ? nulls >= MAX_LIVE_NULLS : finishedRef.current.has(id);
+          const unavailable = isLive ? false : finishedRef.current.has(id);
           next = {
             raw: prev?.raw ?? [], offset: prev?.offset ?? 0, nulls,
+            nextAt: Date.now() + backoffMs(nulls),
             transcript: { messages: prev?.transcript.messages ?? [], finished: false, unavailable },
           };
         } else {
@@ -104,6 +117,7 @@ export function useAgentTranscripts(
           next = {
             raw,
             nulls: 0,
+            nextAt: 0,
             offset: typeof chunk.nextOffset === 'number' ? chunk.nextOffset : raw.length,
             transcript: added || !prev
               ? { messages: transcriptToChatMessages(raw), finished: chunk.finished === true, unavailable: false }
@@ -139,7 +153,7 @@ export function useAgentTranscripts(
       const e = entries.current.get(id);
       if (!e || (e.nulls === 0 && !e.transcript.unavailable)) continue;
       const transcript = e.transcript.unavailable ? { ...e.transcript, unavailable: false } : e.transcript;
-      entries.current.set(id, { ...e, nulls: 0, transcript });
+      entries.current.set(id, { ...e, nulls: 0, nextAt: 0, transcript });
       if (transcript !== e.transcript) setTranscripts((m) => new Map(m).set(id, transcript));
     }
     // Leaving liveIds: owe one final poll.
@@ -159,7 +173,15 @@ export function useAgentTranscripts(
     }
     const timer = live.length
       ? setInterval(() => {
-        for (const id of live) if (!entries.current.get(id)?.transcript.finished) void poll(id, true);
+        const now = Date.now();
+        for (const id of live) {
+          const e = entries.current.get(id);
+          if (e?.transcript.finished) continue;
+          // Backed off after nulls: the sidecar meta isn't on disk yet and the
+          // scan walks every project dir, so don't re-scan on every tick.
+          if (e && e.nextAt > now) continue;
+          void poll(id, true);
+        }
       }, POLL_MS)
       : null;
 

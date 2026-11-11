@@ -89,22 +89,33 @@ describe('useAgentTranscripts', () => {
     expect(fetchFn).toHaveBeenCalledTimes(1);
   });
 
-  it('retries a live id and marks it unavailable only after 3 consecutive nulls, keeping messages', async () => {
+  it('never marks a live id unavailable on nulls, and backs the retries off', async () => {
+    fetchFn.mockResolvedValue(null);
+    const { result } = renderHook(() => useAgentTranscripts('sess', ['a'], new Set(['a'])));
+    await flush();
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    await tick(2000);
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+    await tick(2000); // backed off to 4s after the second null
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+    await tick(2000);
+    expect(fetchFn).toHaveBeenCalledTimes(3);
+    expect(result.current.get('a')).toMatchObject({ unavailable: false, messages: [] });
+  });
+
+  it('a live id whose transcript lands only after minutes still loads it, keeping earlier messages', async () => {
     fetchFn
       .mockResolvedValueOnce({ agentId: 'x', finished: false, messages: [text('u1', 'one')], nextOffset: 1 })
       .mockResolvedValue(null);
     const { result } = renderHook(() => useAgentTranscripts('sess', ['a'], new Set(['a'])));
     await flush();
-    await tick(2000);
-    expect(result.current.get('a')!.unavailable).toBe(false);
-    await tick(2000);
-    expect(result.current.get('a')!.unavailable).toBe(false);
-    await tick(2000);
+    await tick(300_000);
     const t = result.current.get('a')!;
-    expect(t.unavailable).toBe(true);
+    expect(t.unavailable).toBe(false);
     expect(t.messages.map((m) => m.content)).toEqual(['one']);
-    await tick(6000);
-    expect(fetchFn).toHaveBeenCalledTimes(4);
+    fetchFn.mockResolvedValue({ agentId: 'x', finished: true, messages: [text('u2', 'two')], nextOffset: 2 });
+    await tick(30_000);
+    expect(result.current.get('a')!.messages.map((m) => m.content)).toEqual(['one', 'two']);
   });
 
   it('a live id that returns null once then succeeds is not unavailable', async () => {
@@ -197,17 +208,14 @@ describe('useAgentTranscripts', () => {
     expect(result.current.get('a')!.messages.map((m) => m.content)).toEqual(['one']);
   });
 
-  it('a live id marked unavailable recovers when it re-enters liveIds', async () => {
-    fetchFn.mockResolvedValueOnce(null).mockResolvedValueOnce(null).mockResolvedValueOnce(null)
+  it('an unavailable id recovers when it re-enters liveIds', async () => {
+    fetchFn.mockResolvedValueOnce(null)
       .mockResolvedValue({ agentId: 'x', finished: false, messages: [text('u1', 'one')], nextOffset: 1 });
-    const { result, rerender } = renderHook(({ live }) => useAgentTranscripts('sess', ['a'], live), {
-      initialProps: { live: new Set(['a']) as ReadonlySet<string> },
+    const { result, rerender } = renderHook(({ live }) => useAgentTranscripts('sess', ['a'], live, new Set(['a'])), {
+      initialProps: { live: new Set<string>() as ReadonlySet<string> },
     });
     await flush();
-    await tick(4000);
     expect(result.current.get('a')!.unavailable).toBe(true);
-    rerender({ live: new Set<string>() });
-    await flush();
     rerender({ live: new Set(['a']) });
     await tick(2000);
     expect(result.current.get('a')).toMatchObject({ unavailable: false });
