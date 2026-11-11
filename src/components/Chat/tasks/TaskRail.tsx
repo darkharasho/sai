@@ -18,11 +18,10 @@ const NO_TAIL: TailLine[] = [];
 
 export function TaskRail({ board, tails, selectedId, onSelect, onOpenStream, onStop, onAnswer, onReply }: TaskRailProps) {
   const [now, setNow] = useState(() => Date.now());
-  const [expanded, setExpanded] = useState(false);
+  const [exp, setExp] = useState<{ batch: number | null; open: boolean }>({ batch: null, open: false });
+  // Derived so a new batch is collapsed again without an effect.
+  const expanded = exp.batch === board.batchStartedAt && exp.open;
   const anyRunning = board.cards.some((c) => c.status === 'running');
-
-  // Reset the collapsed/expanded choice for each new batch.
-  useEffect(() => { setExpanded(false); }, [board.batchStartedAt]);
 
   useEffect(() => {
     if (!anyRunning) return;
@@ -47,7 +46,7 @@ export function TaskRail({ board, tails, selectedId, onSelect, onOpenStream, onS
   return (
     <aside className="task-rail" aria-label="Tasks">
       {board.allDone ? (
-        <button type="button" className="task-rail__summary" aria-expanded={!collapsed} onClick={() => setExpanded((e) => !e)}>
+        <button type="button" className="task-rail__summary" aria-expanded={!collapsed} onClick={() => setExp({ batch: board.batchStartedAt, open: !expanded })}>
           {summary}
         </button>
       ) : (

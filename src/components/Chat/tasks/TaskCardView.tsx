@@ -6,7 +6,7 @@ export interface TaskCardViewProps {
   tail: TailLine[];
   selected: boolean;
   /** Current time, used for elapsed while running. */
-  now: number;
+  now?: number;
   onSelect(id: string): void;
   onOpenStream(id: string): void;
   onStop?(card: TaskCard): void;
@@ -31,7 +31,7 @@ function elapsedOf(card: TaskCard, now: number): string | null {
 const STEP_GLYPH = { done: '✓', current: '●', pending: '○' } as const;
 
 export function TaskCardView({
-  card, tail, selected, now, onSelect, onOpenStream, onStop, onAnswer, onReply,
+  card, tail, selected, now = Date.now(), onSelect, onOpenStream, onStop, onAnswer, onReply,
 }: TaskCardViewProps) {
   const total = card.totalCount;
   const pct = total > 0 ? Math.min(100, Math.max(0, (card.doneCount / total) * 100)) : 0;

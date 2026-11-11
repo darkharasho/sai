@@ -83,6 +83,15 @@ describe('TaskRail', () => {
     expect(screen.queryByText('Alpha')).toBeNull();
   });
 
+  it('collapses again when batchStartedAt changes', () => {
+    const mk = (start: number) => board([card({ status: 'done', endedAt: 5000 })], { allDone: true, batchStartedAt: start });
+    const { rerender } = render(<TaskRail {...props(mk(0))} />);
+    fireEvent.click(screen.getByText(/1 task done/));
+    expect(screen.getByText('Alpha')).toBeTruthy();
+    rerender(<TaskRail {...props(mk(1000))} />);
+    expect(screen.queryByText('Alpha')).toBeNull();
+  });
+
   it('renders nothing for an empty board', () => {
     const { container } = render(<TaskRail {...props(board([]))} />);
     expect(container.firstChild).toBeNull();
