@@ -13,7 +13,7 @@ describe('buildSaiChatMcpServer', () => {
   });
 
   it('registers a handler for every chat tool, and nothing else', () => {
-    const expected = toolsForToolset('chat').map((t) => `sai_${t.name}`).sort();
+    const expected = [...toolsForToolset('chat').map((t) => `sai_${t.name}`), 'sai_task'].sort();
     expect(expected.length).toBeGreaterThan(0);
 
     const server = buildSaiChatMcpServer({ workspace: '/ws', dispatch: async () => ({}) });
@@ -42,5 +42,15 @@ describe('buildSaiChatMcpServer', () => {
     const handler = (server as any).__handlersForTest.get('sai_confirm');
     const result = await handler({ message: 'ok?' });
     expect(result).toEqual({ content: [{ type: 'text', text: 'boom' }], isError: true });
+  });
+
+  it('registers sai_task alongside the chat tools', async () => {
+    const dispatch = vi.fn(async () => ({ ok: true }));
+    const server = buildSaiChatMcpServer({ workspace: '/ws', dispatch });
+    const handlers = (server as any).__handlersForTest;
+    expect(handlers.has('sai_task')).toBe(true);
+    const input = { action: 'update', id: 'a', status: 'done' };
+    await handlers.get('sai_task')(input);
+    expect(dispatch).toHaveBeenCalledWith({ tool: 'task', input, workspace: '/ws' });
   });
 });

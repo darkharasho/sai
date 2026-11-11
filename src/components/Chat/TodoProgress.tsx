@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { SPRING, useReducedMotionTransition } from './motion';
 import { buildTaskRegistry } from './taskRegistry';
 
-interface Todo {
+export interface Todo {
   id: string;
   content: string;
   activeForm?: string;
@@ -16,6 +16,8 @@ interface Todo {
 interface TodoProgressProps {
   messages: ChatMessage[];
   isStreaming: boolean;
+  /** When not undefined, shown instead of the todos derived from `messages`. */
+  todos?: Todo[] | null;
 }
 
 export function findLatestTodos(messages: ChatMessage[]): Todo[] | null {
@@ -88,8 +90,11 @@ export function findLatestTodos(messages: ChatMessage[]): Todo[] | null {
 const RADIUS = 8;
 const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
 
-export default function TodoProgress({ messages, isStreaming }: TodoProgressProps) {
-  const todos = useMemo(() => findLatestTodos(messages), [messages]);
+export default function TodoProgress({ messages, isStreaming, todos: todosOverride }: TodoProgressProps) {
+  const todos = useMemo(
+    () => (todosOverride !== undefined ? todosOverride : findLatestTodos(messages)),
+    [messages, todosOverride],
+  );
   const [dismissed, setDismissed] = useState(false);
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLSpanElement | null>(null);

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
 import { ChevronDown, CornerLeftUp } from 'lucide-react';
 import { motion, AnimatePresence, LayoutGroup } from 'motion/react';
 import { setFlipRect } from './flipRegistry';
@@ -81,6 +81,7 @@ import ChatMessage from './ChatMessage';
 import { watchTargetsFromMessage } from './githubRunResolver';
 
 const EMPTY_URL_SET: Set<string> = new Set();
+const HIDDEN_STYLE = { display: 'none' } as const;
 import ChatInput, { type ContextItem } from './ChatInput';
 import type { ChatMessage as ChatMessageType, ToolCall, PendingApproval, PendingSudoPrompt, PendingCodexUserInput, PendingCodexMcpElicitation, QueuedMessage, TerminalTab } from '../../types';
 import type { MetaWorkspaceRuntime, CodexEffort, CodexModelOption } from '../../types';
@@ -89,6 +90,14 @@ import { buildHelpMessage } from './helpText';
 import McpAuthNudge from './McpAuthNudge';
 import { buildTaskRegistry, TaskRegistryContext } from './taskRegistry';
 import { parseAiError, looksLikeApiError } from './parseAiError';
+import { classifyToolType } from './tasks/toolType';
+import { useTaskBoard } from './tasks/useTaskBoard';
+import { TaskRail } from './tasks/TaskRail';
+import { TaskTabs } from './tasks/TaskTabs';
+import { TaskStreamView } from './tasks/TaskStreamView';
+import type { TaskCard } from './tasks/types';
+import './tasks/tasks.css';
+import type { BackgroundTaskDetail } from '../../../electron/services/claudeBackend/backgroundTasks';
 import { buildMetaPreamble } from '../../lib/metaSystemPrompt';
 import { normalizeCodexEffort } from '../../lib/codexEffort';
 import {
@@ -237,6 +246,14 @@ interface ChatPanelProps {
   liveBackgroundTaskCount?: number;
   onToggleBackgroundTasks?: () => void;
   backgroundTasksOpen?: boolean;
+  /** Task rail/tabs: App sets this for Claude SDK chats only. */
+  taskUiEnabled?: boolean;
+  taskView?: 'rail' | 'tabs';
+  /** This chat's background task snapshots (App's sidebar tasks for the scope). */
+  backgroundTasks?: BackgroundTaskDetail[];
+  onStopBackgroundTask?(taskId: string): Promise<boolean>;
+  /** Claude CLI session id; subagent transcripts are stored under it. */
+  claudeSessionId?: string;
 }
 
 const EMPTY_PROMPTS = [
@@ -462,7 +479,7 @@ const LOAD_MORE_CHUNK = 30; // messages to load when scrolling up
 const LOAD_GUARD_ERROR_QUIET_MS = 15_000;
 
 
-export default function ChatPanel({ projectPath, overlayControl, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, availableModels, claudeOverrideState, aiProvider, codexModel, onCodexModelChange, codexModels, onCodexModelsRefresh, codexPermission, onCodexPermissionChange, codexEffort, onCodexEffortChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, kimiModel, onKimiModelChange, kimiModels, kimiApprovalMode, onKimiApprovalModeChange, initialMessages, onMessagesChange, onTurnComplete, onClaudeSessionId, onGeminiSessionId, onKimiSessionId, onCodexSessionId, activeFilePath, onFileOpen, isActive, isStreaming = false, awaitingQuestion = false, initialDraft, onDraftChange, initialContextItems, onContextItemsChange, messageQueue = [], onQueueAdd, onQueueRemove, onQueueShift, onQueuePromote, sessionId, terminalTabs = [], onSlashCommandsUpdate, onInterceptSend, claudeScope = 'chat', onOpenMcpPanel, claudeKind = 'chat', claudeOrchestratorContext, initialPendingApproval = null, renderToolCall, renderMessage, activeMetaRuntime, emptyStateVisual, conversationHeaderVisual, mentionInsertRef: mentionInsertRefProp, waiting = null, liveBackgroundTaskCount, onToggleBackgroundTasks, backgroundTasksOpen }: ChatPanelProps) {
+export default function ChatPanel({ projectPath, overlayControl, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, availableModels, claudeOverrideState, aiProvider, codexModel, onCodexModelChange, codexModels, onCodexModelsRefresh, codexPermission, onCodexPermissionChange, codexEffort, onCodexEffortChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, kimiModel, onKimiModelChange, kimiModels, kimiApprovalMode, onKimiApprovalModeChange, initialMessages, onMessagesChange, onTurnComplete, onClaudeSessionId, onGeminiSessionId, onKimiSessionId, onCodexSessionId, activeFilePath, onFileOpen, isActive, isStreaming = false, awaitingQuestion = false, initialDraft, onDraftChange, initialContextItems, onContextItemsChange, messageQueue = [], onQueueAdd, onQueueRemove, onQueueShift, onQueuePromote, sessionId, terminalTabs = [], onSlashCommandsUpdate, onInterceptSend, claudeScope = 'chat', onOpenMcpPanel, claudeKind = 'chat', claudeOrchestratorContext, initialPendingApproval = null, renderToolCall, renderMessage, activeMetaRuntime, emptyStateVisual, conversationHeaderVisual, mentionInsertRef: mentionInsertRefProp, waiting = null, liveBackgroundTaskCount, onToggleBackgroundTasks, backgroundTasksOpen, taskUiEnabled = false, taskView = 'rail', backgroundTasks, onStopBackgroundTask, claudeSessionId }: ChatPanelProps) {
   const [messages, setMessagesRaw] = useState<ChatMessageType[]>(() => {
     const initial = initialMessages || [];
     // Anything present at mount is history, not a fresh arrival — a workspace/
@@ -736,6 +753,37 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
   const pendingComposerRectRef = useRef<DOMRect | null>(null);
   const localMentionInsertRef = useRef<((linkName: string) => void) | null>(null);
   const mentionInsertRef = mentionInsertRefProp ?? localMentionInsertRef;
+
+  // Task rail/tabs (display-only). The hook is a no-op when disabled.
+  const [openTaskId, setOpenTaskId] = useState<string | null>(null);
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const bottomStripRef = useRef<HTMLDivElement>(null);
+  const taskBoard = useTaskBoard({
+    enabled: taskUiEnabled, messages, claudeSessionId, backgroundTasks, isStreaming, awaitingQuestion,
+    focusId: openTaskId ?? selectedTaskId,
+  });
+  const taskCards = taskBoard.board.cards;
+  const showTaskUi = taskUiEnabled && taskCards.length > 0;
+  const openTaskCard = openTaskId ? taskCards.find(c => c.id === openTaskId) ?? null : null;
+  useEffect(() => { setOpenTaskId(null); setSelectedTaskId(null); }, [sessionId]);
+  useEffect(() => {
+    if (openTaskId && !openTaskCard) setOpenTaskId(null);
+  }, [openTaskId, openTaskCard]);
+  // The message list is display:none while a stream is open, which drops its
+  // scroll offset; remember it on open and put it back on return.
+  const listScrollRef = useRef<number | null>(null);
+  const openTaskStream = useCallback((id: string | null) => {
+    if (id && listScrollRef.current === null) listScrollRef.current = chatContainerRef.current?.scrollTop ?? null;
+    setOpenTaskId(id);
+  }, []);
+  const streamOpen = !!openTaskCard;
+  useLayoutEffect(() => {
+    if (streamOpen) return;
+    const el = chatContainerRef.current;
+    const saved = listScrollRef.current;
+    listScrollRef.current = null;
+    if (el && saved !== null && !isAtBottomRef.current) el.scrollTop = saved;
+  }, [streamOpen]);
 
   // Keep render window pinned to the tail when user is at bottom
   useEffect(() => {
@@ -1424,21 +1472,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
             tools.push({
               id: block.id,
               turnSeq: toolTurnSeq,
-              type: block.name?.includes('Edit') || block.name === 'Write' ? 'file_edit' :
-                    block.name?.includes('Bash') ? 'terminal_command' :
-                    block.name?.includes('Glob') || block.name?.includes('Grep') || block.name === 'ToolSearch' ? 'file_search' :
-                    block.name?.includes('Read') ? 'file_read' :
-                    block.name?.includes('WebFetch') || block.name?.includes('WebSearch') ? 'web_fetch' :
-                    block.name === 'TodoWrite' ? 'todo' :
-                    block.name === 'Agent' || block.name === 'SendUserMessage' ? 'agent' :
-                    block.name?.includes('Notebook') ? 'notebook' :
-                    block.name === 'AskUserQuestion' ? 'question' :
-                    block.name === 'EnterPlanMode' || block.name === 'ExitPlanMode' ? 'plan' :
-                    block.name === 'EnterWorktree' || block.name === 'ExitWorktree' ? 'worktree' :
-                    block.name === 'Skill' ? 'skill' :
-                    block.name === 'Monitor' || block.name === 'ScheduleWakeup' || block.name?.startsWith('Cron') ? 'schedule' :
-                    block.name === 'TaskOutput' || block.name === 'TaskStop' || block.name === 'RemoteTrigger' ? 'task' :
-                    block.name?.startsWith('mcp__') ? 'mcp' : 'other',
+              type: classifyToolType(block.name),
               name: block.name || 'tool',
               input: typeof block.input === 'string' ? block.input :
                      typeof block.input === 'object' ? JSON.stringify(block.input, null, 2) : '',
@@ -2442,6 +2476,25 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
     return window.sai.claudeAnswerPlanReview(projectPath, toolUseId, approved, claudeScope).then(() => undefined);
   }, [aiProvider, projectPath, claudeScope]);
 
+  const handleTaskSelect = useCallback((id: string) => {
+    setSelectedTaskId(prev => (prev === id ? null : id));
+  }, []);
+  const handleTaskStop = useCallback((card: TaskCard) => {
+    const taskId = card.agent?.taskId;
+    if (taskId) void onStopBackgroundTask?.(taskId);
+  }, [onStopBackgroundTask]);
+  const taskQuestion = taskBoard.pendingQuestion;
+  const handleTaskAnswer = useCallback((option: string) => {
+    if (!taskQuestion?.answerable) return;
+    void handleAnswerQuestion(taskQuestion.toolUseId, { [taskQuestion.text]: taskQuestion.multiSelect ? [option] : option });
+  }, [taskQuestion, handleAnswerQuestion]);
+  const handleTaskReply = useCallback(() => {
+    bottomStripRef.current?.querySelector('textarea')?.focus();
+  }, []);
+  const renderTaskMessage = (m: ChatMessageType) => (
+    <ChatMessage message={m} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} renderToolCall={renderToolCall} renderMessage={renderMessage} metaRuntime={activeMetaRuntime} onAnswerQuestion={handleAnswerQuestion} onAnswerPlanReview={handleAnswerPlanReview} />
+  );
+
   const handleQueue = (text: string, fullText: string, images?: string[], attachments?: { images: number; files: number; terminal: boolean }) => {
     if (sessionId && onQueueAdd) {
       onQueueAdd(sessionId, text, fullText, images, attachments);
@@ -2584,15 +2637,18 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
   }, []);
 
   return (
-    <div className="chat-panel">
+    <div className={`chat-panel${showTaskUi && taskView === 'rail' ? ' chat-panel--task-rail' : ''}`}>
       <LoadGuardBanner state={loadGuard} />
+      {showTaskUi && taskView === 'tabs' && (
+        <TaskTabs board={taskBoard.board} tails={taskBoard.tails} activeId={openTaskCard?.id ?? null} onSelect={openTaskStream} onStop={handleTaskStop} />
+      )}
       <motion.div
         className="pinned-prompt-bar"
         layoutId={pinnedUserMessage ? `pinned-${pinnedUserMessage.id}` : undefined}
         data-layout-id={pinnedUserMessage ? `pinned-${pinnedUserMessage.id}` : undefined}
         animate={{ height: pinnedUserMessage ? 32 : 0, opacity: pinnedUserMessage ? 1 : 0 }}
         transition={dockTransition}
-        style={{ overflow: 'hidden' }}
+        style={openTaskCard ? { overflow: 'hidden', display: 'none' } : { overflow: 'hidden' }}
       >
         {pinnedUserMessage && (
           <>
@@ -2610,7 +2666,18 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
           </>
         )}
       </motion.div>
-      <div className="chat-messages" ref={chatContainerRef} onScroll={handleScroll}>
+      {openTaskCard && (
+        <TaskStreamView
+          card={openTaskCard}
+          messages={taskBoard.streamMessages(openTaskCard)}
+          onBack={() => setOpenTaskId(null)}
+          renderMessage={renderTaskMessage}
+          onStop={handleTaskStop}
+        />
+      )}
+      {/* Hidden, not unmounted, while a task stream is open: the scroll
+          observers attach to this container once on mount. */}
+      <div className="chat-messages" ref={chatContainerRef} onScroll={handleScroll} style={openTaskCard ? HIDDEN_STYLE : undefined}>
         <LayoutGroup id="sai-brand">
           {messages.length === 0 ? (
             <div className="chat-empty">
@@ -2721,7 +2788,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
         </AnimatePresence>
         <div ref={messagesEndRef} />
       </div>
-      <div className="follow-btn-anchor">
+      <div className="follow-btn-anchor" style={openTaskCard ? HIDDEN_STYLE : undefined}>
         <AnimatePresence>
           {!followOn && (
             <motion.button
@@ -2743,7 +2810,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
         </AnimatePresence>
       </div>
       <LayoutGroup>
-        <div data-testid="chat-bottom-strip" className="chat-bottom-strip">
+        <div data-testid="chat-bottom-strip" className="chat-bottom-strip" ref={bottomStripRef}>
           {/* The WaitingIndicator pill in the transcript owns the waiting
               affordance; the composer keeps its stop button live instead of
               growing a second cancel row here. */}
@@ -2808,6 +2875,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
             waiting={isWaiting}
             awaitingQuestion={awaitingQuestion}
             messages={messages}
+            todos={taskBoard.todos}
             onStop={() => aiProvider === 'gemini' ? (window.sai as any).geminiStop(projectPath) : aiProvider === 'kimi' ? (window.sai as any).kimiStop(projectPath) : aiProvider === 'codex' ? window.sai.codexStop(projectPath, claudeScope) : window.sai.claudeStop?.(projectPath, claudeScope)}
             permissionMode={permissionMode}
             onPermissionChange={onPermissionChange}
@@ -2860,6 +2928,18 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
           />
         </div>
       </LayoutGroup>
+      {showTaskUi && taskView === 'rail' && (
+        <TaskRail
+          board={taskBoard.board}
+          tails={taskBoard.tails}
+          selectedId={selectedTaskId}
+          onSelect={handleTaskSelect}
+          onOpenStream={openTaskStream}
+          onStop={handleTaskStop}
+          onAnswer={handleTaskAnswer}
+          onReply={handleTaskReply}
+        />
+      )}
       <style>{`
         .chat-panel {
           flex: 1;
@@ -2867,6 +2947,18 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
           flex-direction: column;
           min-height: 0;
           overflow: hidden;
+        }
+        /* The rail is a right column; positioned so toggling it never
+           re-parents (and remounts) the message list or composer. */
+        .chat-panel--task-rail {
+          position: relative;
+          padding-right: 340px;
+        }
+        .chat-panel--task-rail > .task-rail {
+          position: absolute;
+          top: 0;
+          right: 0;
+          bottom: 0;
         }
         .chat-bottom-strip {
           display: flex;

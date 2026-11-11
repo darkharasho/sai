@@ -41,6 +41,23 @@ export const CHAT_TASKS_NUDGE =
   'session, just do the work without one and do not mention the tool or its absence ' +
   'to the user.';
 
+/**
+ * SDK-chat variant of CHAT_TASKS_NUDGE: steers the model to keep the sai_task
+ * task cards (the persistent task rail) current. CLI and Codex chats keep
+ * CHAT_TASKS_NUDGE; sdkBackend uses this one in its place.
+ */
+export const CHAT_TASK_CARDS_NUDGE =
+  'When the user asks for several things in one message, or for multi-step work (3+ distinct steps, ' +
+  'refactors, features, debugging sessions), track it with the sai_task tool: call it with action ' +
+  '"create" BEFORE starting, with one task per distinct request and that task\'s real steps. Keep the ' +
+  'cards honest as you go: set status "running" with the current step index when you start or advance ' +
+  'a step, "done" with a one-line note when a task finishes, "failed" with the reason if it can\'t be ' +
+  'finished. When you hand a task to a background agent, pass agent = the exact description you gave ' +
+  'the Agent call so SAI can show that agent\'s live work on the card. SAI renders these as a persistent ' +
+  'task panel the user watches; stale or skipped updates make it lie. Use sai_task instead of ' +
+  'TaskCreate/TodoWrite. If the tool is deferred, load it via ToolSearch first. Skip it for single-step or conversational requests, and if the tool is not ' +
+  'registered in this session, just do the work and do not mention the tool or its absence.';
+
 export const CHAT_GITHUB_WATCH_NUDGE =
   'After you run `git push` (including pushing tags) or otherwise trigger a GitHub Actions ' +
   'workflow (gh workflow run, gh pr create, creating a release), show the user a live CI ' +

@@ -1,6 +1,7 @@
 // electron/services/claudeBackend/saiMcpServer.ts
 import { createSdkMcpServer, tool, type McpSdkServerConfigWithInstance } from '@anthropic-ai/claude-agent-sdk';
 import { toolsForToolset } from '../../../src/lib/saiTools';
+import { SAI_TASK_TOOL } from '../../../src/lib/saiTaskTool';
 import { jsonSchemaToZodShape } from './jsonSchemaToZod';
 import { toMcpSuccessContent, toMcpErrorContent } from '../mcpToolContent';
 import type { SaiToolDispatch } from '../saiToolBridge';
@@ -24,7 +25,7 @@ export function buildSaiChatMcpServer(deps: SaiMcpDeps): McpSdkServerConfigWithI
   const { workspace, dispatch } = deps;
   const handlersForTest = new Map<string, (args: Record<string, unknown>) => Promise<unknown>>();
 
-  const tools = toolsForToolset('chat').map((def) => {
+  const tools = [...toolsForToolset('chat'), SAI_TASK_TOOL].map((def) => {
     const advertisedName = `sai_${def.name}`;
     const handler = async (args: Record<string, unknown>) => {
       try {

@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
+import { validateSaiTaskInput } from './lib/saiTaskTool';
 import type { SlashCommandInfo } from './lib/slashCommands';
 import NavBar from './components/NavBar';
 import ChatPanel from './components/Chat/ChatPanel';
@@ -32,7 +33,7 @@ import { findLatestTodos } from './components/Chat/TodoProgress';
 import { dbGetSessions, dbGetAllSessions, dbGetMessages, dbGetMessagesTail, dbPatchSessionMeta, dbPurgeExpired, dbExternalizeStoredImages, dbCollectReferencedImagePaths, migrateFromLocalStorage } from './chatDb';
 import { queueSaveSession } from './lib/sessionSaveQueue';
 import type { ChatSession, ChatMessage, GitFile, OpenFile, WorkspaceContext, QueuedMessage, TerminalTab, PendingApproval, SwarmTask, ApprovalPolicy, SwarmApproval, EffortLevel, CodexEffort, CodexModelOption, ModelChoice, ClaudeModelOption, AIProvider } from './types';
-import type { MetaWorkspaceListItem, MetaWorkspaceRuntime } from './types';
+import type { MetaWorkspaceListItem, MetaWorkspaceRuntime, SessionKind } from './types';
 import { loadHomeInfo } from './lib/homeWorkspace';
 import { isAIProvider } from './types';
 import { THEMES, applyTheme, setAccent, bootstrapAppearance, type ThemeId, HIGHLIGHT_THEMES, setActiveHighlightTheme, type HighlightThemeId } from './themes';
@@ -464,6 +465,12 @@ export default function App() {
   const sessionLoadSeqRef = useRef(0);
   const [focusedChat, setFocusedChat] = useState(false);
   const [overlayEnabled, setOverlayEnabled] = useState(false);
+  // Task rail/tabs (Claude SDK chats only). claudeBackendSetting is a load-time
+  // snapshot: the backend only switches after a restart, so a live settings
+  // change must not flip the task UI. It starts as 'cli' so a CLI user never
+  // sees a flash of task UI before settings load.
+  const [taskView, setTaskView] = useState<'rail' | 'tabs'>('rail');
+  const [claudeBackendSetting, setClaudeBackendSetting] = useState<'cli' | 'sdk'>('cli');
   // Session-scoped overlay mode from the inline control under the chat input.
   const [overlayMode, setOverlayMode] = useState<'on' | 'off' | 'persist'>('on');
   const handleOverlayModeChange = useCallback((m: 'on' | 'off' | 'persist') => {
@@ -1717,6 +1724,15 @@ export default function App() {
         return;
       }
 
+      if (req.tool === 'task') {
+        // Display-only: the task rail derives cards from the transcript's tool
+        // calls. Just ack (or tell the model its input was bad).
+        const v = validateSaiTaskInput(req.input);
+        if (v.ok) sai.respondSwarmTool(req.id, { ok: true });
+        else sai.respondSwarmToolError(req.id, v.error);
+        return;
+      }
+
       if (req.tool === 'watch_github_run') {
         const saiAny = sai as { githubApiGet?: (p: string) => Promise<{ ok: boolean; status: number; body: any }> };
         void resolveWatchRun(req.input ?? {}, saiAny.githubApiGet).then(
@@ -2006,6 +2022,11 @@ export default function App() {
   }, [workspaces]);
 
   const activeWorkspace = activeProjectPath ? getWorkspace(activeProjectPath) : null;
+  // Task rail/tabs gate: Claude on the SDK backend, normal chats only (the
+  // main ChatPanel mount's claudeKind; task sessions and the swarm
+  // orchestrator keep today's UI).
+  const taskUiEnabledFor = (kind: SessionKind | undefined): boolean =>
+    aiProvider === 'claude' && claudeBackendSetting !== 'cli' && kind !== 'task' && kind !== 'orchestrator';
   // Background-work sidebar follows the active Claude chat (same key as the
   // waiting= lookup on the ChatPanel mount).
   const activeTaskScope = aiProvider === 'claude' && activeProjectPath && activeWorkspace?.activeSession?.id
@@ -2020,6 +2041,9 @@ export default function App() {
     // cleared) closes the sidebar; it never reopens on its own.
     if (sidebarTasks.length === 0) setTaskSidebarOpen(false);
   }, [sidebarTasks.length]);
+  // The task rail replaces the background-work sidebar in Claude SDK chats
+  // (same discriminator as the main ChatPanel mount's claudeKind).
+  const activeTaskUiEnabled = !!activeTaskScope && taskUiEnabledFor(activeWorkspace?.activeSession?.kind);
   const handleStopBackgroundTask = useCallback(
     (taskId: string): Promise<boolean> => {
       if (!activeProjectPath || !activeTaskScope) return Promise.resolve(false);
@@ -2259,6 +2283,8 @@ export default function App() {
     const guard = <T,>(fn: (v: T) => void) => (v: T) => { if (!cancelled) fn(v); };
     window.sai.settingsGet('focusedChat', false).then(guard((v: boolean) => setFocusedChat(v)));
     window.sai.settingsGet('overlayEnabled', false).then(guard((v: boolean) => setOverlayEnabled(!!v)));
+    window.sai.settingsGet('taskView', 'rail').then(guard((v: string) => setTaskView(v === 'tabs' ? 'tabs' : 'rail')));
+    window.sai.settingsGet('claudeBackend', 'sdk').then(guard((v: string) => setClaudeBackendSetting(v === 'cli' ? 'cli' : 'sdk')));
     window.sai.settingsGet('overlayMode', 'on').then(guard((v: string) => {
       if (v === 'on' || v === 'off' || v === 'persist') setOverlayMode(v);
     }));
@@ -5262,6 +5288,10 @@ export default function App() {
                   {...(() => {
                     const bgTasks = aiProvider === 'claude' ? backgroundTasksByScope.get(`${wsPath}:${ws.activeSession.id}`) : undefined;
                     if (!bgTasks || bgTasks.length === 0) return {};
+                    // The task rail shows these tasks; no sidebar toggle.
+                    if (taskUiEnabledFor(ws.activeSession.kind)) {
+                      return { liveBackgroundTaskCount: bgTasks.filter((t) => !isTerminalDetail(t)).length };
+                    }
                     return {
                       liveBackgroundTaskCount: bgTasks.filter((t) => !isTerminalDetail(t)).length,
                       onToggleBackgroundTasks: toggleTaskSidebar,
@@ -5287,6 +5317,11 @@ export default function App() {
                   onQueueShift={handleQueueShift}
                   onQueuePromote={handleQueuePromote}
                   sessionId={ws.activeSession.id}
+                  taskUiEnabled={taskUiEnabledFor(ws.activeSession.kind)}
+                  taskView={taskView}
+                  backgroundTasks={aiProvider === 'claude' ? selectSidebarTasks(backgroundTasksByScope, `${wsPath}:${ws.activeSession.id}`) : undefined}
+                  onStopBackgroundTask={(taskId: string) => window.sai.claudeStopTask?.(wsPath, ws.activeSession.id, taskId) ?? Promise.resolve(false)}
+                  claudeSessionId={ws.activeSession.claudeSessionId}
                   onMessagesChange={(messages: ChatMessage[]) => {
                     wsMessagesRef.current.set(wsPath, messages);
                     // First-user-message persist: as soon as the user sends
@@ -5879,6 +5914,7 @@ export default function App() {
           }
           if (key === 'focusedChat') { setFocusedChat(value); if (value) { setExpanded(['chat', 'terminal']); setSplitRatio(0.66); } }
           if (key === 'overlayEnabled') setOverlayEnabled(!!value);
+          if (key === 'taskView') setTaskView(value === 'tabs' ? 'tabs' : 'rail');
           if (key === 'defaultView') { /* persisted only, applies on next launch */ }
           if (key === 'sidebarWidth') document.documentElement.style.setProperty('--sidebar-width', `${value}px`);
           if (typeof key === 'string' && key.startsWith('swarm.')) {
@@ -6140,7 +6176,7 @@ export default function App() {
               </div>
             ))}
           </div>
-          {taskSidebarOpen && sidebarTasks.length > 0 && (
+          {taskSidebarOpen && sidebarTasks.length > 0 && !activeTaskUiEnabled && (
             <BackgroundTasksSidebar
               tasks={sidebarTasks}
               onClose={closeTaskSidebar}

@@ -80,6 +80,7 @@ vi.mock('../../../electron/services/notify', () => ({
 // Import after mocks are set up
 import { parseScopeTag } from '../../../electron/services/loadGuard/scopeTag';
 import { SdkBackend } from '../../../electron/services/claudeBackend/sdkBackend';
+import { CHAT_TASKS_NUDGE, CHAT_TASK_CARDS_NUDGE } from '../../../electron/services/chatNudges';
 import { BACKGROUND_WAIT_SETTLE_MS, BACKGROUND_WAIT_IDLE_MS } from '../../../electron/services/waitClassifier';
 import {
   __resetMcpRuntimeStatusForTests,
@@ -700,6 +701,71 @@ describe('SdkBackend', () => {
     fakeQuery.close();
   });
 
+  it('sai_task is auto-allowed without an approval card or awaitingInput', async () => {
+    const fakeQuery = makeFakeQuery([], { hang: true });
+    let capturedOptions: any = null;
+    const queryFn = vi.fn((args: { prompt: any; options: any }) => {
+      capturedOptions = args.options;
+      return fakeQuery;
+    });
+    const backend = new SdkBackend({
+      queryFn,
+      emit: (p) => emits.push(p),
+      resolveClaudePath: () => undefined,
+    });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.send({ projectPath: PROJECT, message: 'run', scope: SCOPE, permMode: 'default' });
+    await new Promise<void>((resolve) => {
+      const check = () => (capturedOptions ? resolve() : setTimeout(check, 5));
+      setTimeout(check, 5);
+    });
+
+    const input = { action: 'create', title: 'x' };
+    const result = await capturedOptions.canUseTool(
+      'mcp__sai__sai_task',
+      input,
+      { toolUseID: 'tu-task', signal: new AbortController().signal },
+    );
+    expect(result).toEqual({ behavior: 'allow', updatedInput: input });
+    expect(emits.find(e => e.type === 'approval_needed')).toBeUndefined();
+    const session = (backend as any).sessions.get(`${PROJECT}::${SCOPE}`) ?? [...(backend as any).sessions.values()][0];
+    expect(session.awaitingInput).toBeFalsy();
+
+    fakeQuery.close();
+  });
+
+  it('a non-SAI tool ending in sai_task still goes through approval', async () => {
+    const fakeQuery = makeFakeQuery([], { hang: true });
+    let capturedOptions: any = null;
+    const queryFn = vi.fn((args: { prompt: any; options: any }) => {
+      capturedOptions = args.options;
+      return fakeQuery;
+    });
+    const backend = new SdkBackend({
+      queryFn,
+      emit: (p) => emits.push(p),
+      resolveClaudePath: () => undefined,
+    });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.send({ projectPath: PROJECT, message: 'run', scope: SCOPE, permMode: 'default' });
+    await new Promise<void>((resolve) => {
+      const check = () => (capturedOptions ? resolve() : setTimeout(check, 5));
+      setTimeout(check, 5);
+    });
+
+    void capturedOptions.canUseTool(
+      'mcp__other__sai_task',
+      { action: 'create' },
+      { toolUseID: 'tu-other', signal: new AbortController().signal },
+    );
+    await new Promise(r => setTimeout(r, 5));
+    const approval = emits.find(e => e.type === 'approval_needed');
+    expect(approval).toBeDefined();
+    expect(approval!.toolName).toBe('mcp__other__sai_task');
+
+    fakeQuery.close();
+  });
+
   it('(10) canUseTool for non-Bash has no command; approve(false) resolves deny', async () => {
     const fakeQuery = makeFakeQuery([], { hang: true });
 
@@ -1181,6 +1247,8 @@ describe('SdkBackend', () => {
     const appended = (capturedOptions.systemPrompt && capturedOptions.systemPrompt.append) || '';
     expect(appended).toContain('render_html');
     expect(appended).toContain('sai_watch_github_run');
+    expect(appended).toContain(CHAT_TASK_CARDS_NUDGE);
+    expect(appended).not.toContain(CHAT_TASKS_NUDGE);
 
     fakeQuery.close();
   });

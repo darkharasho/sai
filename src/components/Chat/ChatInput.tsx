@@ -1,6 +1,6 @@
 import { useState, useRef, KeyboardEvent, useEffect, useMemo } from 'react';
 import type { PendingApproval, PendingSudoPrompt, TerminalTab, ChatMessage as ChatMessageType, QueuedMessage, MetaWorkspaceRuntime, EffortLevel, CodexEffort, CodexModelOption, ModelChoice, AIProvider } from '../../types';
-import TodoProgress from './TodoProgress';
+import TodoProgress, { type Todo } from './TodoProgress';
 import MessageQueue from './MessageQueue';
 import LoadGuardPill from './LoadGuardPill';
 import type { LoadGuardPublicState } from '../../../electron/services/loadGuard';
@@ -50,6 +50,8 @@ interface ChatInputProps {
    *  routed as the free-text answer rather than a new turn. */
   awaitingQuestion?: boolean;
   messages?: ChatMessageType[];
+  /** Overrides the todo ring's derivation from `messages` when not undefined. */
+  todos?: Todo[] | null;
   onStop?: () => void;
   /** Sends are being queued even though idle (system load guard paused); placeholder only. */
   sendsQueued?: boolean;
@@ -294,7 +296,7 @@ function getBarColor(pct: number, isOverage: boolean): string {
   return 'var(--accent)';
 }
 
-export default function ChatInput({ projectPath, onSend, overlayControl, onBeforeSend, disabled, slashCommands = [], onSlashRefresh, isStreaming, waiting, awaitingQuestion, messages = [], onStop, onQueue, sendsQueued, loadGuard, queueCount, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, availableModels, claudeOverrideState, contextUsage, sessionUsage, sessionCost, usageLimits = [], billingMode = 'subscription', activeFilePath, fileContextEnabled = true, onFileContextToggle, aiProvider = 'claude', pendingApproval, pendingSudoPrompt, onApprove, onDeny, onAlwaysAllow, onAmend, codexModel = 'o3', codexModels = [], onCodexModelChange, onCodexModelsRefresh, codexPermission = 'auto', onCodexPermissionChange, codexEffort = 'high', onCodexEffortChange, geminiModel = 'auto-gemini-3', geminiModels = [], onGeminiModelChange, geminiApprovalMode = 'default', onGeminiApprovalModeChange, geminiConversationMode = 'planning', onGeminiConversationModeChange, kimiModel = 'kimi-k3', kimiModels = [], onKimiModelChange, kimiApprovalMode = 'default', onKimiApprovalModeChange, terminalTabs = [], messageQueue = [], onQueueRemove, onQueuePromote, onQueueSendNow, initialDraft = '', onDraftChange, initialContextItems = [], onContextItemsChange, metaRuntime, mentionInsertRef }: ChatInputProps) {
+export default function ChatInput({ projectPath, onSend, overlayControl, onBeforeSend, disabled, slashCommands = [], onSlashRefresh, isStreaming, waiting, awaitingQuestion, messages = [], todos, onStop, onQueue, sendsQueued, loadGuard, queueCount, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, availableModels, claudeOverrideState, contextUsage, sessionUsage, sessionCost, usageLimits = [], billingMode = 'subscription', activeFilePath, fileContextEnabled = true, onFileContextToggle, aiProvider = 'claude', pendingApproval, pendingSudoPrompt, onApprove, onDeny, onAlwaysAllow, onAmend, codexModel = 'o3', codexModels = [], onCodexModelChange, onCodexModelsRefresh, codexPermission = 'auto', onCodexPermissionChange, codexEffort = 'high', onCodexEffortChange, geminiModel = 'auto-gemini-3', geminiModels = [], onGeminiModelChange, geminiApprovalMode = 'default', onGeminiApprovalModeChange, geminiConversationMode = 'planning', onGeminiConversationModeChange, kimiModel = 'kimi-k3', kimiModels = [], onKimiModelChange, kimiApprovalMode = 'default', onKimiApprovalModeChange, terminalTabs = [], messageQueue = [], onQueueRemove, onQueuePromote, onQueueSendNow, initialDraft = '', onDraftChange, initialContextItems = [], onContextItemsChange, metaRuntime, mentionInsertRef }: ChatInputProps) {
   const selectedCodexModel = codexModels.find(model => model.id === codexModel);
   const supportedCodexEfforts = effortsForCodexModel(selectedCodexModel);
   const effectiveCodexEffort = normalizeCodexEffort(codexEffort, selectedCodexModel);
@@ -1095,7 +1097,7 @@ export default function ChatInput({ projectPath, onSend, overlayControl, onBefor
               onClick={aiProvider === 'claude' ? () => onSend('/compact') : undefined}
             />
           )}
-          <TodoProgress messages={messages} isStreaming={!!isStreaming} />
+          <TodoProgress messages={messages} isStreaming={!!isStreaming} todos={todos} />
           <MessageQueue
             queue={messageQueue}
             onRemove={onQueueRemove ?? (() => {})}

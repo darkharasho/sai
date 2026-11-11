@@ -1,4 +1,5 @@
 import React, { memo, useState, useRef, useCallback, useEffect, useLayoutEffect, useMemo } from 'react';
+import { isSaiTaskToolName } from '../../lib/saiTaskTool';
 import { createPortal } from 'react-dom';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
@@ -366,6 +367,10 @@ function ChatMessage({
   // Load-guard events: a message's loadGuard never changes, so this early
   // return keeps hook order stable per message (same as renderMessage above).
   if (message.loadGuard) return <LoadGuardEventCard event={message.loadGuard} />;
+  const visibleToolCalls = message.toolCalls?.filter(tc => !isSaiTaskToolName(String(tc.name ?? '')));
+  const hiddenTaskOnly = !!message.toolCalls && message.toolCalls.length > 0 && visibleToolCalls!.length === 0
+    && !(typeof message.content === 'string' ? message.content.trim() : message.content)
+    && !message.reasoning && !(message.images && message.images.length > 0);
   const dotColor = getDotColor(message.role);
   const userAttachments = message.role === 'user'
     ? parseUserAttachments(typeof message.content === 'string' ? message.content : String(message.content ?? ''))
@@ -846,6 +851,11 @@ function ChatMessage({
     },
   }), [onFileOpen, projectPath]);
 
+  // sai_task calls drive the task rail, not the transcript. A message holding
+  // nothing else renders nothing (after all hooks, so hook order stays stable
+  // as tool calls stream in).
+  if (hiddenTaskOnly) return null;
+
   return (
     <>
     <motion.div
@@ -936,15 +946,15 @@ function ChatMessage({
           ))}
         </div>
       )}
-      {message.toolCalls && message.toolCalls.length > 0 && (
+      {visibleToolCalls && visibleToolCalls.length > 0 && (
         <Stagger cadence="default">
           {(() => {
             // The newest running tool card is the one born from the thinking row —
             // unless the live reasoning card above already claimed the seed.
             const seedToolIdx = seedGrow && !message.reasoningLive
-              ? message.toolCalls.reduce((acc, tc, idx) => (tc.output == null ? idx : acc), -1)
+              ? visibleToolCalls.reduce((acc, tc, idx) => (tc.output == null ? idx : acc), -1)
               : -1;
-            return message.toolCalls.map((tc, i) => {
+            return visibleToolCalls.map((tc, i) => {
               if (renderToolCall) {
                 const custom = renderToolCall(tc, toolCallsExpanded, i === seedToolIdx);
                 if (custom != null) return <React.Fragment key={i}>{custom}</React.Fragment>;
