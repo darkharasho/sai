@@ -18,6 +18,9 @@ export function TaskStreamView({ card, messages, onBack, renderMessage }: TaskSt
   const bodyRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
   const count = messages?.length ?? 0;
+  const last = messages && messages.length > 0 ? messages[messages.length - 1] : null;
+  const lastLen = last && typeof last.content === 'string' ? last.content.length : 0;
+  const lastCardId = useRef(card.id);
 
   useEffect(() => {
     const el = bodyRef.current;
@@ -31,11 +34,15 @@ export function TaskStreamView({ card, messages, onBack, renderMessage }: TaskSt
 
   useLayoutEffect(() => {
     const el = bodyRef.current;
+    if (lastCardId.current !== card.id) {
+      lastCardId.current = card.id;
+      stickRef.current = true;
+    }
     if (el && stickRef.current) el.scrollTop = el.scrollHeight;
-  }, [count]);
+  }, [card.id, count, lastLen]);
 
   return (
-    <div className={`task-stream task-card--${card.status}`} data-testid="task-stream">
+    <div className={`task-stream task-status--${card.status}`} data-testid="task-stream">
       <div className="task-stream__header">
         <button type="button" className="task-stream__back" onClick={onBack}>← All</button>
         <span className="task-card__dot" aria-hidden="true" />

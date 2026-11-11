@@ -47,7 +47,7 @@ export function TaskCardView({
 
   return (
     <div
-      className={`task-card task-card--${card.status}${selected ? ' task-card--selected' : ''}`}
+      className={`task-card task-card--${card.status} task-status--${card.status}${selected ? ' task-card--selected' : ''}`}
       data-testid={`task-card-${card.id}`}
     >
       <div

@@ -30,7 +30,7 @@ export function TaskTabs({ board, tails, activeId, onSelect }: TaskTabsProps) {
           return (
             <button
               key={c.id} type="button" role="tab" aria-selected={isActive}
-              className={`task-tabs__tab task-card--${c.status}${isActive ? ' task-tabs__tab--active' : ''}`}
+              className={`task-tabs__tab task-status--${c.status}${isActive ? ' task-tabs__tab--active' : ''}`}
               onClick={() => onSelect(c.id)}
             >
               <span className="task-card__dot" aria-hidden="true" />
