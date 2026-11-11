@@ -38,4 +38,16 @@ describe('buildTailLines', () => {
     const lines = buildTailLines([{ id: 'm', role: 'assistant', content: 'x'.repeat(100) + '\nmore', timestamp: 0 }]);
     expect(lines[0].text).toHaveLength(80);
   });
+
+  it('skips null message and tool-call entries without throwing', () => {
+    const junk = [null, { id: 'm', role: 'assistant', content: 'ok', timestamp: 0, toolCalls: [null, tool('Bash', { command: 'ls' }, 'x')] }] as any;
+    expect(() => buildTailLines(junk)).not.toThrow();
+    expect(buildTailLines(junk).map((l) => l.text)).toEqual(['ok', '$ ls']);
+  });
+
+  it('strips simple markdown from text lines', () => {
+    const m = (content: string): ChatMessage => ({ id: 'm', role: 'assistant', content, timestamp: 0 });
+    const lines = buildTailLines([m('## **Plan** for `foo`'), m('Use __bold__ and `code`'), m('### Heading')]);
+    expect(lines.map((l) => l.text)).toEqual(['Plan for foo', 'Use bold and code', 'Heading']);
+  });
 });

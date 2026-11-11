@@ -34,5 +34,8 @@ describe('saiTaskTool', () => {
     expect(isSaiTaskToolName('Task')).toBe(false);
     expect(isSaiTaskToolName('TaskCreate')).toBe(false);
     expect(isSaiTaskToolName('mcp__sai__sai_render_html')).toBe(false);
+    expect(isSaiTaskToolName('sai_task')).toBe(true);
+    expect(isSaiTaskToolName('mcp__evil__sai_task')).toBe(false);
+    expect(isSaiTaskToolName('not_sai_task')).toBe(false);
   });
 });

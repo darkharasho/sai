@@ -55,7 +55,7 @@ export const CHAT_TASK_CARDS_NUDGE =
   'finished. When you hand a task to a background agent, pass agent = the exact description you gave ' +
   'the Agent call so SAI can show that agent\'s live work on the card. SAI renders these as a persistent ' +
   'task panel the user watches; stale or skipped updates make it lie. Use sai_task instead of ' +
-  'TaskCreate/TodoWrite. Skip it for single-step or conversational requests, and if the tool is not ' +
+  'TaskCreate/TodoWrite. If the tool is deferred, load it via ToolSearch first. Skip it for single-step or conversational requests, and if the tool is not ' +
   'registered in this session, just do the work and do not mention the tool or its absence.';
 
 export const CHAT_GITHUB_WATCH_NUDGE =

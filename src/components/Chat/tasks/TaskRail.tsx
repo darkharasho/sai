@@ -40,7 +40,10 @@ export function TaskRail({ board, tails, selectedId, onSelect, onOpenStream, onS
   if (board.allDone) {
     const ends = board.cards.map((c) => c.endedAt).filter((x): x is number => typeof x === 'number');
     const dur = ends.length && board.batchStartedAt != null ? ` · ${formatElapsed(Math.max(...ends) - board.batchStartedAt)}` : '';
-    summary = `${n} task${n === 1 ? '' : 's'} done${dur}`;
+    const failed = board.cards.filter((c) => c.status === 'failed').length;
+    summary = failed > 0
+      ? `${n - failed} done · ${failed} failed${dur}`
+      : `${n} task${n === 1 ? '' : 's'} done${dur}`;
   }
 
   return (

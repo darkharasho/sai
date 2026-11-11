@@ -71,5 +71,5 @@ export function validateSaiTaskInput(input: unknown): { ok: true } | { ok: false
 }
 
 export function isSaiTaskToolName(name: string): boolean {
-  return typeof name === 'string' && (name === 'task' || name.endsWith('sai_task'));
+  return name === 'task' || name === 'mcp__sai__sai_task' || name === 'sai_task';
 }

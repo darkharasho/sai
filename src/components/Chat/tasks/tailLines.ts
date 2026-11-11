@@ -4,6 +4,8 @@ import type { TailLine } from './types';
 const str = (v: unknown): string => (typeof v === 'string' ? v : v == null ? '' : String(v));
 const firstLine = (s: string) => s.split('\n').find(l => l.trim()) ?? '';
 const basename = (p: string) => p.split(/[\\/]/).filter(Boolean).pop() ?? p;
+/** Strip simple markdown: leading #s, **, __ and backticks. */
+const plain = (s: string) => s.replace(/^#+\s*/, '').replace(/\*\*|__|`/g, '');
 
 function parseInput(input: string): Record<string, unknown> {
   try {
@@ -26,10 +28,11 @@ function toolText(tc: ToolCall): string {
 export function buildTailLines(messages: ChatMessage[], max = 4): TailLine[] {
   const lines: TailLine[] = [];
   for (const m of messages ?? []) {
-    if (m.role !== 'assistant') continue;
-    const text = firstLine(str(m.content)).trim();
+    if (m?.role !== 'assistant') continue;
+    const text = plain(firstLine(str(m.content)).trim()).trim();
     if (text) lines.push({ text: text.slice(0, 80), tone: 'normal' });
-    for (const tc of m.toolCalls ?? []) {
+    for (const tc of Array.isArray(m.toolCalls) ? m.toolCalls : []) {
+      if (!tc) continue;
       const out = tc.output;
       const isErr = typeof out === 'string' && (out.startsWith('Error') || out.includes('<tool_use_error>'));
       lines.push({ text: toolText(tc), tone: isErr ? 'error' : out === undefined ? 'live' : 'normal' });

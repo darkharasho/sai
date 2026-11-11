@@ -96,4 +96,15 @@ describe('TaskRail', () => {
     const { container } = render(<TaskRail {...props(board([]))} />);
     expect(container.firstChild).toBeNull();
   });
+
+  it('summary counts failed cards and a failed card shows its reason', () => {
+    const b = board([
+      card({ id: 'a', status: 'done', endedAt: 60_000 }),
+      card({ id: 'b', title: 'Beta', status: 'done', endedAt: 60_000 }),
+      card({ id: 'c', title: 'Gamma', status: 'failed', endedAt: 125_000, result: 'tests broke' }),
+    ], { allDone: true });
+    render(<TaskRail {...props(b)} />);
+    fireEvent.click(screen.getByText('2 done · 1 failed · 2m 5s'));
+    expect(screen.getByText('Failed: tests broke')).toBeTruthy();
+  });
 });

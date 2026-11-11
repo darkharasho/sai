@@ -41,6 +41,7 @@ export function TaskCardView({
     card.status === 'waiting' ? 'Waiting on you'
     : card.status === 'paused' ? 'Paused'
     : card.status === 'done' ? `Done${card.result ? `: ${card.result}` : ''}`
+    : card.status === 'failed' ? (card.result ? `Failed: ${card.result}` : 'Failed')
     : card.currentLabel;
   const tailLines = card.status === 'running' ? tail.slice(-4) : card.status === 'done' ? tail.slice(-1) : [];
   const canStop = selected && card.status === 'running' && !!card.agent?.taskId && !!onStop;
