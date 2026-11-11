@@ -59,6 +59,15 @@ describe('foldBackgroundTaskFrame', () => {
     expect(m.get('a')).toMatchObject({ status: 'failed', error: 'nope', endedAt: 10 });
   });
 
+  it('captures tool_use_id from task_started', () => {
+    const m = foldBackgroundTaskFrame(empty(), sys('task_started', { task_id: 'a', description: 'd', tool_use_id: 'toolu_1' }), 0);
+    expect(m.get('a')!.toolUseId).toBe('toolu_1');
+    const p = foldBackgroundTaskFrame(empty(), sys('task_progress', { task_id: 'b', description: 'd', tool_use_id: 'toolu_2' }), 0);
+    expect(p.get('b')!.toolUseId).toBe('toolu_2');
+    const n = foldBackgroundTaskFrame(empty(), sys('task_started', { task_id: 'c', description: 'd', tool_use_id: 42 }), 0);
+    expect(n.get('c')!.toolUseId).toBeNull();
+  });
+
   it('skip_transcript hidden', () => {
     let m = foldBackgroundTaskFrame(empty(), sys('task_started', { task_id: 'h', description: 'housekeeping', skip_transcript: true }), 0);
     m = foldBackgroundTaskFrame(m, sys('task_progress', { task_id: 'h', description: 'housekeeping', usage: { total_tokens: 1, tool_uses: 0, duration_ms: 1 } }), 5);

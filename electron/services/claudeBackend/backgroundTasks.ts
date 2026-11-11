@@ -27,6 +27,8 @@ export interface BackgroundTaskDetail {
   error: string | null;
   /** skip_transcript housekeeping task — filtered out of snapshots. */
   hidden?: boolean;
+  /** tool_use id of the Agent call that launched this task (display-only join key). */
+  toolUseId: string | null;
 }
 
 export const STUCK_AFTER_MS = 120_000;
@@ -75,6 +77,7 @@ function blank(id: string, nowMs: number): BackgroundTaskDetail {
     lastToolName: null,
     summary: null,
     error: null,
+    toolUseId: null,
   };
 }
 
@@ -115,6 +118,7 @@ export function foldBackgroundTaskFrame(
       t.isShell = taskType === SHELL_TASK_TYPE;
       t.isAgent = t.isAgent || subagentType !== null;
       if (frame.skip_transcript === true) t.hidden = true;
+      t.toolUseId = str(frame.tool_use_id) ?? t.toolUseId;
       break;
     }
     case 'task_progress': {
@@ -124,6 +128,7 @@ export function foldBackgroundTaskFrame(
       t.lastToolName = str(frame.last_tool_name) ?? t.lastToolName;
       t.summary = str(frame.summary) ?? t.summary;
       t.isAgent = true;
+      t.toolUseId = str(frame.tool_use_id) ?? t.toolUseId;
       break;
     }
     case 'task_updated': {
