@@ -41,6 +41,7 @@ import { readCachedSlashCommands, writeCachedSlashCommands, type SlashCommandInf
 import { withScopeTag } from './loadGuard/scopeTag';
 import { withLoadNote } from './loadGuard/hook';
 import type { BackgroundTaskDetail } from './claudeBackend/backgroundTasks';
+import { readSubagentTranscript } from './claudeBackend/subagentTranscripts';
 export { CHAT_RENDER_NUDGE, CHAT_GITHUB_WATCH_NUDGE };
 
 
@@ -1631,6 +1632,11 @@ export function registerClaudeHandlers(win: BrowserWindow) {
   // claude:stopTask — stop ONE background task (SDK only); false if unsupported.
   ipcMain.handle('claude:stopTask', async (_event, projectPath: string, scope: string | undefined, taskId: string) => {
     return (await getClaudeBackend().stopTask?.(projectPath, scope, taskId)) ?? false;
+  });
+
+  // claude:subagentTranscript — read a background subagent's transcript by its tool_use id.
+  ipcMain.handle('claude:subagentTranscript', async (_event, sessionId: string, toolUseId: string, offset: number) => {
+    return readSubagentTranscript(sessionId, toolUseId, offset);
   });
 
   // claude:setSessionId — switch to a different Claude session (for history resumption)

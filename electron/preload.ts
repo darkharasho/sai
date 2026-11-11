@@ -32,6 +32,8 @@ contextBridge.exposeInMainWorld('sai', {
   claudeStop: (projectPath: string, scope?: string) => ipcRenderer.send('claude:stop', projectPath, scope),
   claudeStopTask: (projectPath: string, scope: string | undefined, taskId: string): Promise<boolean> =>
     ipcRenderer.invoke('claude:stopTask', projectPath, scope, taskId),
+  claudeSubagentTranscript: (sessionId: string, toolUseId: string, offset: number) =>
+    ipcRenderer.invoke('claude:subagentTranscript', sessionId, toolUseId, offset),
   claudeSetSessionId: (projectPath: string, sessionId: string | undefined, scope?: string) => ipcRenderer.send('claude:setSessionId', projectPath, sessionId, scope),
   claudeReconcileScope: (projectPath: string, scope?: string) => ipcRenderer.send('claude:reconcileScope', projectPath, scope),
   claudeApprove: (projectPath: string, toolUseId: string, approved: boolean, modifiedCommand?: string, scope?: string) =>
