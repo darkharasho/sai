@@ -701,6 +701,39 @@ describe('SdkBackend', () => {
     fakeQuery.close();
   });
 
+  it('sai_task is auto-allowed without an approval card or awaitingInput', async () => {
+    const fakeQuery = makeFakeQuery([], { hang: true });
+    let capturedOptions: any = null;
+    const queryFn = vi.fn((args: { prompt: any; options: any }) => {
+      capturedOptions = args.options;
+      return fakeQuery;
+    });
+    const backend = new SdkBackend({
+      queryFn,
+      emit: (p) => emits.push(p),
+      resolveClaudePath: () => undefined,
+    });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.send({ projectPath: PROJECT, message: 'run', scope: SCOPE, permMode: 'default' });
+    await new Promise<void>((resolve) => {
+      const check = () => (capturedOptions ? resolve() : setTimeout(check, 5));
+      setTimeout(check, 5);
+    });
+
+    const input = { action: 'create', title: 'x' };
+    const result = await capturedOptions.canUseTool(
+      'mcp__sai__sai_task',
+      input,
+      { toolUseID: 'tu-task', signal: new AbortController().signal },
+    );
+    expect(result).toEqual({ behavior: 'allow', updatedInput: input });
+    expect(emits.find(e => e.type === 'approval_needed')).toBeUndefined();
+    const session = (backend as any).sessions.get(`${PROJECT}::${SCOPE}`) ?? [...(backend as any).sessions.values()][0];
+    expect(session.awaitingInput).toBeFalsy();
+
+    fakeQuery.close();
+  });
+
   it('(10) canUseTool for non-Bash has no command; approve(false) resolves deny', async () => {
     const fakeQuery = makeFakeQuery([], { hang: true });
 
