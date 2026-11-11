@@ -52,7 +52,10 @@ export const CHAT_TASK_CARDS_NUDGE =
   '"create" BEFORE starting, with one task per distinct request and that task\'s real steps. Keep the ' +
   'cards honest as you go: set status "running" with the current step index when you start or advance ' +
   'a step, "done" with a one-line note when a task finishes, "failed" with the reason if it can\'t be ' +
-  'finished. When you hand a task to a background agent, pass agent = the exact description you gave ' +
+  'finished. Updating a task also tags the work that follows onto its card — your replies and tool ' +
+  'calls are filed under the task you last updated — so update a task right before you start on it, ' +
+  'and update the new one as soon as you switch, even when nothing else about the card changed. ' +
+  'When you hand a task to a background agent, pass agent = the exact description you gave ' +
   'the Agent call so SAI can show that agent\'s live work on the card. SAI renders these as a persistent ' +
   'task panel the user watches; stale or skipped updates make it lie. Use sai_task instead of ' +
   'TaskCreate/TodoWrite. If the tool is deferred, load it via ToolSearch first. Skip it for single-step or conversational requests, and if the tool is not ' +

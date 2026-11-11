@@ -28,8 +28,52 @@ describe('TaskStreamView', () => {
     expect(screen.getByText('Transcript unavailable')).toBeTruthy();
   });
   it('shows empty state for no messages', () => {
-    render(<TaskStreamView card={card} messages={[]} onBack={() => {}} renderMessage={() => null} />);
+    render(<TaskStreamView card={{ ...card, status: 'done' }} messages={[]} onBack={() => {}} renderMessage={() => null} />);
     expect(screen.getByText('No activity yet')).toBeTruthy();
+    cleanup();
+    render(<TaskStreamView card={card} messages={[]} onBack={() => {}} renderMessage={() => null} />);
+    expect(screen.getByText('Waiting for the first activity…')).toBeTruthy();
+  });
+  it('renders a status panel instead of the dead end when a fallback is given', () => {
+    const detail: any = {
+      id: 'bg1', description: 'npm test', kind: 'shell', isShell: true, isAgent: false,
+      status: 'running', startedAt: 0, endedAt: null, lastEventAt: 0,
+      totalTokens: null, toolUses: 3, lastToolName: 'Bash', summary: null, error: null, toolUseId: null,
+    };
+    render(
+      <TaskStreamView
+        card={{ ...card, agent: { description: 'npm test', toolUseId: null, taskId: 'bg1' } }}
+        messages={null}
+        fallback={{ reason: 'shell', detail }}
+        onBack={() => {}}
+        renderMessage={() => null}
+      />,
+    );
+    expect(screen.queryByText('Transcript unavailable')).toBeNull();
+    expect(screen.getByTestId('task-stream-fallback').getAttribute('data-reason')).toBe('shell');
+    expect(screen.getByText(/shell command running in the background/)).toBeTruthy();
+    expect(screen.getByText('shell')).toBeTruthy();
+    expect(screen.getByText('Bash')).toBeTruthy();
+    expect(screen.getByText('3')).toBeTruthy();
+  });
+  it('fallback surfaces a failed task error', () => {
+    const detail: any = {
+      id: 'bg2', description: 'd', kind: 'Explore', isShell: false, isAgent: true,
+      status: 'failed', startedAt: 0, endedAt: 5000, lastEventAt: 5000,
+      totalTokens: 1234, toolUses: null, lastToolName: null, summary: null, error: 'agent crashed', toolUseId: 'tu',
+    };
+    render(
+      <TaskStreamView
+        card={{ ...card, status: 'failed', agent: { description: 'd', toolUseId: 'tu', taskId: 'bg2' } }}
+        messages={null}
+        fallback={{ reason: 'missing', detail }}
+        onBack={() => {}}
+        renderMessage={() => null}
+      />,
+    );
+    expect(screen.getByText('agent crashed')).toBeTruthy();
+    expect(screen.getByText('failed')).toBeTruthy();
+    expect(screen.getByText('1,234')).toBeTruthy();
   });
   it('back button calls onBack', () => {
     const onBack = vi.fn();

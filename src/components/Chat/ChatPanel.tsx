@@ -2670,6 +2670,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
         <TaskStreamView
           card={openTaskCard}
           messages={taskBoard.streamMessages(openTaskCard)}
+          fallback={taskBoard.streamFallback(openTaskCard)}
           onBack={() => setOpenTaskId(null)}
           renderMessage={renderTaskMessage}
           onStop={handleTaskStop}

@@ -72,7 +72,7 @@ describe('deriveDeclaredCards', () => {
     expect(r.batchStartedAt).toBe(9);
   });
 
-  it('attributes assistant messages to the active inline card only', () => {
+  it('attributes assistant messages to the last-tagged card, including agent cards', () => {
     const r = deriveDeclaredCards([
       msg([call(create([{ id: 'a', title: 'A', steps: ['1'] }, { id: 'b', title: 'B', steps: ['1'] }, { id: 'c', title: 'C', steps: ['1'] }]))], 1, '', 'm0'),
       msg(undefined, 2, 'before', 'pre'),
@@ -87,17 +87,36 @@ describe('deriveDeclaredCards', () => {
     const by = Object.fromEntries(r.cards.map((c) => [c.id, c]));
     expect(by.a.messageIds).toEqual(['wa']);
     expect(by.b.messageIds).toEqual(['wb']);
-    expect(by.c.messageIds).toEqual([]);
+    // An agent card is tagged too; the renderer prefers its transcript when it has one.
+    expect(by.c.messageIds).toEqual(['wc']);
     expect(by.c.agent).toEqual({ description: 'sub', toolUseId: null, taskId: null });
-    expect(r.activeInlineId).toBeNull();
+    expect(r.activeCardId).toBe('c');
   });
 
-  it('clears activeInlineId when the card finishes', () => {
-    const r = deriveDeclaredCards([
+  it('a bare update re-tags without changing the card', () => {
+    const base = [
+      msg([call(create([{ id: 'a', title: 'A', steps: ['1'] }, { id: 'b', title: 'B', steps: ['1'] }]))], 1, '', 'm0'),
+      msg([call(upd({ id: 'a', status: 'running' }))], 2, '', 'ra'),
+      msg(undefined, 3, 'work a', 'wa'),
+      msg([call(upd({ id: 'b' }))], 4, '', 'tb'),
+      msg(undefined, 5, 'work b', 'wb'),
+    ];
+    const r = deriveDeclaredCards(base);
+    const by = Object.fromEntries(r.cards.map((c) => [c.id, c]));
+    expect(by.a.messageIds).toEqual(['wa']);
+    expect(by.b.messageIds).toEqual(['wb']);
+    expect(by.a.status).toBe('running');
+    expect(by.b.status).toBe('queued'); // re-tagging alone does not start it
+    expect(r.activeCardId).toBe('b');
+  });
+
+  it('tags the card on update and untags it when it finishes', () => {
+    const start = [
       msg([call(create([{ id: 'a', title: 'A', steps: ['1'] }]))], 1),
       msg([call(upd({ id: 'a', status: 'running' }))], 2),
-    ]);
-    expect(r.activeInlineId).toBe('a');
+    ];
+    expect(deriveDeclaredCards(start).activeCardId).toBe('a');
+    expect(deriveDeclaredCards([...start, msg([call(upd({ id: 'a', status: 'done' }))], 3)]).activeCardId).toBeNull();
   });
 
   it('ignores malformed calls without throwing', () => {
@@ -137,7 +156,7 @@ describe('deriveDeclaredCards', () => {
       const r = deriveDeclaredCards([...first(), userMsg(3), msg([call(create([{ id: 'b', title: 'B', steps: ['x'] }]))], 4)]);
       expect(r.cards.map((c) => c.id)).toEqual(['b']);
       expect(r.batchStartedAt).toBe(4);
-      expect(r.activeInlineId).toBeNull();
+      expect(r.activeCardId).toBeNull();
     });
 
     it('without a user message the create appends to the running batch', () => {

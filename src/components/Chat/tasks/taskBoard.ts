@@ -213,8 +213,8 @@ export function deriveTaskBoard(messages: ChatMessage[], rt: BoardRuntime): Task
       const inlineRunning = (c: TaskCard) =>
         (c.status === 'running' || c.status === 'paused') &&
         (!c.agent || (c.agent.toolUseId === null && c.agent.taskId === null));
-      const card = declared.activeInlineId
-        ? cards.find((c) => c.id === declared.activeInlineId && inlineRunning(c))
+      const card = declared.activeCardId
+        ? cards.find((c) => c.id === declared.activeCardId && inlineRunning(c))
         : cards.find(inlineRunning);
       if (card) {
         card.status = 'waiting';

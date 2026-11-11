@@ -34,14 +34,34 @@ export interface UseTaskBoardArgs {
   focusId: string | null;
 }
 
+/**
+ * Why a card has no transcript to show, plus the runtime task behind it so the
+ * stream view can fall back to status rather than a dead end.
+ *
+ * - `shell`: a backgrounded shell command. Only Agent subagents write a
+ *   transcript; a shell task's output lands in the chat when it reports back.
+ * - `no-agent`: a background task with no Agent tool_use id to read (a workflow
+ *   or other runtime task), so there is no sidecar transcript to find.
+ * - `missing`: an Agent-backed card that finished without a transcript on disk.
+ */
+export type StreamFallbackReason = 'shell' | 'no-agent' | 'missing';
+
+export interface StreamFallback {
+  reason: StreamFallbackReason;
+  /** The background task behind the card, when one is bound. */
+  detail: BackgroundTaskDetail | null;
+}
+
 export interface TaskBoardState {
   board: TaskBoard;
   tails: Map<string, TailLine[]>;
   /** undefined = no cards, keep the composer's own todo derivation. */
   todos: Todo[] | null | undefined;
   pendingQuestion: PendingTaskQuestion | null;
-  /** Stream view messages for a card; null = transcript unavailable. */
+  /** Stream view messages for a card; null = nothing to stream (see streamFallback). */
   streamMessages(card: TaskCard): ChatMessage[] | null;
+  /** Why streamMessages returned null, for the stream view's empty state. */
+  streamFallback(card: TaskCard): StreamFallback | null;
 }
 
 const EMPTY_BOARD: TaskBoard = { cards: [], batchStartedAt: null, allDone: false };
@@ -103,6 +123,29 @@ function stepsToTodos(card: TaskCard): Todo[] {
 const transcriptId = (card: TaskCard): string | null => card.agent?.toolUseId ?? null;
 const isAgentBacked = (card: TaskCard) => !!card.agent && (card.agent.toolUseId !== null || card.agent.taskId !== null);
 
+/**
+ * What a card's stream and tail read from, in order: its subagent transcript,
+ * then the chat messages the model tagged onto it, then nothing (null — the
+ * stream view shows task status instead).
+ */
+function cardSource(
+  card: TaskCard,
+  transcripts: Map<string, AgentTranscript>,
+  messages: ChatMessage[],
+): ChatMessage[] | null {
+  const tagged = () => (card.messageIds.length === 0 ? NO_MESSAGES : messages.filter((m) => card.messageIds.includes(m.id)));
+  const tid = transcriptId(card);
+  if (tid) {
+    const t = transcripts.get(tid);
+    if (!t) return NO_MESSAGES; // not loaded yet
+    if (!t.unavailable) return t.messages;
+  } else if (!isAgentBacked(card)) {
+    return tagged();
+  }
+  const fallback = tagged();
+  return fallback.length > 0 ? fallback : null;
+}
+
 export function useTaskBoard({
   enabled, messages, claudeSessionId, backgroundTasks, isStreaming, awaitingQuestion, focusId,
 }: UseTaskBoardArgs): TaskBoardState {
@@ -157,10 +200,7 @@ export function useTaskBoard({
     if (board.cards.length === 0) return EMPTY_TAILS;
     const out = new Map<string, TailLine[]>();
     for (const card of board.cards) {
-      const tid = transcriptId(card);
-      const source = tid ? (transcripts.get(tid)?.messages ?? NO_MESSAGES)
-        : isAgentBacked(card) ? NO_MESSAGES
-        : messages.filter((m) => card.messageIds.includes(m.id));
+      const source = cardSource(card, transcripts, messages) ?? NO_MESSAGES;
       let lines: TailLine[] = [];
       try { lines = buildTailLines(source); } catch { /* display-only: never throw into render */ }
       out.set(card.id, lines);
@@ -175,16 +215,17 @@ export function useTaskBoard({
     return focus ? stepsToTodos(focus) : null;
   }, [board, focusId]);
 
-  const streamMessages = (card: TaskCard): ChatMessage[] | null => {
-    const tid = transcriptId(card);
-    if (tid) {
-      const t = transcripts.get(tid);
-      if (!t) return NO_MESSAGES;
-      return t.unavailable ? null : t.messages;
-    }
-    if (isAgentBacked(card)) return null; // background task with no tool_use id: no transcript to read
-    return messages.filter((m) => card.messageIds.includes(m.id));
+  const streamMessages = (card: TaskCard): ChatMessage[] | null => cardSource(card, transcripts, messages);
+
+  const streamFallback = (card: TaskCard): StreamFallback | null => {
+    if (streamMessages(card) !== null) return null;
+    const taskId = card.agent?.taskId ?? null;
+    const detail = taskId ? tasks.find((t) => t.id === taskId) ?? null : null;
+    const reason: StreamFallbackReason = detail?.isShell
+      ? 'shell'
+      : card.agent?.toolUseId ? 'missing' : 'no-agent';
+    return { reason, detail };
   };
 
-  return { board, tails, todos, pendingQuestion, streamMessages };
+  return { board, tails, todos, pendingQuestion, streamMessages, streamFallback };
 }

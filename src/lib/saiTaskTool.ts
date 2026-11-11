@@ -9,7 +9,7 @@ export const SAI_TASK_TOOL: SaiToolDef = {
   name: 'task',
   toolset: 'chat',
   description:
-    'Show and update task cards in SAI\'s task panel. When the user asks for several things at once, or for one piece of multi-step work, call this FIRST with action "create" and one task per distinct request. Each task gets a short id, a short title, and its real steps. As you work, call action "update": set status "running" with `step` = index of the step now in progress (earlier steps count as done), set status "done" with a one-line `note` when finished, or "failed" with the reason. When you hand a task to the Agent tool, pass `agent` = the exact `description` you gave the Agent call. Use this instead of TaskCreate/TodoWrite. Skip it for single-step or conversational requests.',
+    'Show and update task cards in SAI\'s task panel. When the user asks for several things at once, or for one piece of multi-step work, call this FIRST with action "create" and one task per distinct request. Each task gets a short id, a short title, and its real steps. As you work, call action "update": set status "running" with `step` = index of the step now in progress (earlier steps count as done), set status "done" with a one-line `note` when finished, or "failed" with the reason. Updating a task also tags the work that follows it: everything you say and every tool you run is filed under that task\'s card until you update a different task or finish this one, so update the card you are about to work on BEFORE you start on it, and when you switch tasks, even if nothing else changed (a bare {action:"update", id} re-tags without altering the card). When you hand a task to the Agent tool, pass `agent` = the exact `description` you gave the Agent call. Use this instead of TaskCreate/TodoWrite. Skip it for single-step or conversational requests.',
   input_schema: {
     type: 'object',
     properties: {
@@ -28,7 +28,7 @@ export const SAI_TASK_TOOL: SaiToolDef = {
           required: ['id', 'title', 'steps'],
         },
       },
-      id: { type: 'string', description: 'For update: the task id.' },
+      id: { type: 'string', description: 'For update: the task id. Also tags the work that follows onto this task\'s card.' },
       status: { type: 'string', enum: ['running', 'done', 'failed'] },
       step: { type: 'number', description: 'Index of the step now in progress.' },
       note: { type: 'string', description: 'One-line result or failure reason.' },

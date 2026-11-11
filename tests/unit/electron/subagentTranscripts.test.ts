@@ -28,6 +28,25 @@ describe('subagentTranscripts', () => {
     expect(await findSubagentId('sess-1', 'toolu_x', root)).toEqual({ agentId: 'bbb', finished: false });
   });
 
+  it('finds an agent nested under its parent agent, and reads it from that path', async () => {
+    // The CLI writes a nested agent at subagents/<parent agent id>/agent-<id>.jsonl.
+    const dir = path.join(root, '-proj-a', 'sess-n', 'subagents', 'aaa', 'bbb');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'agent-ccc.meta.json'), JSON.stringify({ toolUseId: 'toolu_deep', spawnDepth: 3 }));
+    fs.writeFileSync(path.join(dir, 'agent-ccc.jsonl'), '{"a":1}\n');
+    expect(await findSubagentId('sess-n', 'toolu_deep', root)).toEqual({ agentId: 'ccc', finished: false });
+    const getMessages = vi.fn().mockResolvedValue([msg(1)]);
+    expect(await readSubagentTranscript('sess-n', 'toolu_deep', 0, { projectsRoot: root, getMessages }))
+      .toMatchObject({ agentId: 'ccc', nextOffset: 1 });
+  });
+
+  it('reports finished false when the meta omits the flag (current CLI behaviour)', async () => {
+    writeMeta('-proj-a', 'sess-m', 'mmm', { agentType: 'Explore', description: 'd', toolUseId: 'toolu_m', spawnDepth: 1 });
+    const getMessages = vi.fn().mockResolvedValue([]);
+    expect(await readSubagentTranscript('sess-m', 'toolu_m', 0, { projectsRoot: root, getMessages }))
+      .toMatchObject({ agentId: 'mmm', finished: false });
+  });
+
   it('returns null when no meta matches', async () => {
     writeMeta('-proj-a', 'sess-0', 'aaa', { toolUseId: 'toolu_other' });
     const getMessages = vi.fn();
