@@ -125,4 +125,44 @@ describe('deriveDeclaredCards', () => {
     ]);
     expect(r.cards[0].steps.map((s) => s.label)).toEqual(['1', 'x']);
   });
+
+  describe('abandoned batch', () => {
+    const userMsg = (ts: number): ChatMessage => ({ id: `u${++n}`, role: 'user', content: 'next thing', timestamp: ts });
+    const first = () => [
+      msg([call(create([{ id: 'a', title: 'A', steps: ['1'] }]))], 1),
+      msg([call(upd({ id: 'a', status: 'running' }))], 2),
+    ];
+
+    it('a user message after a never-finished inline card lets the next create start a new batch', () => {
+      const r = deriveDeclaredCards([...first(), userMsg(3), msg([call(create([{ id: 'b', title: 'B', steps: ['x'] }]))], 4)]);
+      expect(r.cards.map((c) => c.id)).toEqual(['b']);
+      expect(r.batchStartedAt).toBe(4);
+      expect(r.activeInlineId).toBeNull();
+    });
+
+    it('without a user message the create appends to the running batch', () => {
+      const r = deriveDeclaredCards([...first(), msg([call(create([{ id: 'b', title: 'B', steps: ['x'] }]))], 4)]);
+      expect(r.cards.map((c) => c.id)).toEqual(['a', 'b']);
+      expect(r.batchStartedAt).toBe(1);
+    });
+
+    it('a user message only counts since the last sai_task call', () => {
+      const r = deriveDeclaredCards([
+        ...first(), userMsg(3),
+        msg([call(upd({ id: 'a', status: 'running', step: 0 }))], 4),
+        msg([call(create([{ id: 'b', title: 'B', steps: ['x'] }]))], 5),
+      ]);
+      expect(r.cards.map((c) => c.id)).toEqual(['a', 'b']);
+    });
+
+    it('an unfinished agent card keeps the batch open across a user message', () => {
+      const r = deriveDeclaredCards([
+        msg([call(create([{ id: 'a', title: 'A', steps: ['1'], agent: 'Research' }]))], 1),
+        userMsg(2),
+        msg([call(create([{ id: 'b', title: 'B', steps: ['x'] }]))], 3),
+      ]);
+      expect(r.cards.map((c) => c.id)).toEqual(['a', 'b']);
+      expect(r.batchStartedAt).toBe(1);
+    });
+  });
 });

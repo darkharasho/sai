@@ -32,9 +32,13 @@ export function deriveDeclaredCards(messages: ChatMessage[]): DeclaredCards {
   let cards: TaskCard[] = [];
   let batchStartedAt: number | null = null;
   let activeInlineId: string | null = null;
+  // A user message arrived since the last sai_task call: an unfinished batch the
+  // model never closed out may be abandoned (see the create branch).
+  let userSinceTaskCall = false;
 
   try {
     for (const m of messages ?? []) {
+      if (m?.role === 'user') { userSinceTaskCall = true; continue; }
       if (m?.role !== 'assistant') continue;
       const calls = Array.isArray(m.toolCalls) ? m.toolCalls : [];
 
@@ -52,9 +56,16 @@ export function deriveDeclaredCards(messages: ChatMessage[]): DeclaredCards {
         const input = parseInput(call.input);
         if (!input) continue;
         const ts = m.timestamp;
+        const userTurnSince = userSinceTaskCall;
+        userSinceTaskCall = false;
 
         if (input.action === 'create') {
-          if (cards.length === 0 || cards.every(isFinished)) {
+          // New batch when the old one is finished, or when the user moved on and
+          // no agent-backed card may still be working. Approximation: the fold
+          // can't see runtime state, so an agent card counts as possibly live
+          // until the model marks it finished.
+          const abandoned = userTurnSince && !cards.some((c) => c.agent !== null && !isFinished(c));
+          if (cards.length === 0 || cards.every(isFinished) || abandoned) {
             cards = [];
             batchStartedAt = ts;
             activeInlineId = null;

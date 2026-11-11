@@ -68,19 +68,21 @@ describe('useAgentTranscripts', () => {
     await tick(2000);
     expect(fetchFn).toHaveBeenCalledTimes(2);
     rerender({ live: new Set<string>() });
+    await flush(); // one final poll on leaving liveIds
+    expect(fetchFn).toHaveBeenCalledTimes(3);
     await tick(6000);
-    expect(fetchFn).toHaveBeenCalledTimes(2);
+    expect(fetchFn).toHaveBeenCalledTimes(3);
     rerender({ live: new Set(['a']) });
     await tick(2000);
-    expect(fetchFn).toHaveBeenCalledTimes(3);
+    expect(fetchFn).toHaveBeenCalledTimes(4);
     unmount();
     await tick(6000);
-    expect(fetchFn).toHaveBeenCalledTimes(3);
+    expect(fetchFn).toHaveBeenCalledTimes(4);
   });
 
-  it('marks a non-live id unavailable on a single null without retrying', async () => {
+  it('marks a non-live, finished id unavailable on a single null without retrying', async () => {
     fetchFn.mockResolvedValue(null);
-    const { result } = renderHook(() => useAgentTranscripts('sess', ['a'], new Set<string>()));
+    const { result } = renderHook(() => useAgentTranscripts('sess', ['a'], new Set<string>(), new Set(['a'])));
     await flush();
     expect(result.current.get('a')).toMatchObject({ unavailable: true, messages: [] });
     await tick(6000);
@@ -178,5 +180,70 @@ describe('useAgentTranscripts', () => {
     expect(result.current.get('a')!.finished).toBe(true);
     await tick(6000);
     expect(fetchFn).toHaveBeenCalledTimes(3);
+  });
+
+  it('race: a null before the subagent writes its meta does not stick once the id goes live', async () => {
+    fetchFn
+      .mockResolvedValueOnce(null)
+      .mockResolvedValue({ agentId: 'x', finished: false, messages: [text('u1', 'one')], nextOffset: 1 });
+    const { result, rerender } = renderHook(({ live }) => useAgentTranscripts('sess', ['a'], live), {
+      initialProps: { live: new Set<string>() as ReadonlySet<string> },
+    });
+    await flush();
+    expect(result.current.get('a')?.unavailable ?? false).toBe(false);
+    rerender({ live: new Set(['a']) });
+    await tick(2000);
+    expect(result.current.get('a')).toMatchObject({ unavailable: false });
+    expect(result.current.get('a')!.messages.map((m) => m.content)).toEqual(['one']);
+  });
+
+  it('a live id marked unavailable recovers when it re-enters liveIds', async () => {
+    fetchFn.mockResolvedValueOnce(null).mockResolvedValueOnce(null).mockResolvedValueOnce(null)
+      .mockResolvedValue({ agentId: 'x', finished: false, messages: [text('u1', 'one')], nextOffset: 1 });
+    const { result, rerender } = renderHook(({ live }) => useAgentTranscripts('sess', ['a'], live), {
+      initialProps: { live: new Set(['a']) as ReadonlySet<string> },
+    });
+    await flush();
+    await tick(4000);
+    expect(result.current.get('a')!.unavailable).toBe(true);
+    rerender({ live: new Set<string>() });
+    await flush();
+    rerender({ live: new Set(['a']) });
+    await tick(2000);
+    expect(result.current.get('a')).toMatchObject({ unavailable: false });
+    expect(result.current.get('a')!.messages).toHaveLength(1);
+  });
+
+  it('live → not-live gets one final poll that picks up the tail', async () => {
+    fetchFn
+      .mockResolvedValueOnce({ agentId: 'x', finished: false, messages: [text('u1', 'one')], nextOffset: 1 })
+      .mockResolvedValue({ agentId: 'x', finished: true, messages: [text('u2', 'two')], nextOffset: 2 });
+    const { result, rerender } = renderHook(({ live }) => useAgentTranscripts('sess', ['a'], live, new Set<string>()), {
+      initialProps: { live: new Set(['a']) as ReadonlySet<string> },
+    });
+    await flush();
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    rerender({ live: new Set<string>() });
+    await flush();
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+    expect(fetchFn).toHaveBeenLastCalledWith('sess', 'a', 1);
+    expect(result.current.get('a')!.messages.map((m) => m.content)).toEqual(['one', 'two']);
+    await tick(6000);
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+  });
+
+  it('a non-live id that nulled is re-polled once when its card finishes, then marked unavailable', async () => {
+    fetchFn.mockResolvedValue(null);
+    const { result, rerender } = renderHook(({ fin }) => useAgentTranscripts('sess', ['a'], new Set<string>(), fin), {
+      initialProps: { fin: new Set<string>() as ReadonlySet<string> },
+    });
+    await flush();
+    expect(result.current.get('a')?.unavailable ?? false).toBe(false);
+    rerender({ fin: new Set(['a']) });
+    await flush();
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+    expect(result.current.get('a')!.unavailable).toBe(true);
+    await tick(6000);
+    expect(fetchFn).toHaveBeenCalledTimes(2);
   });
 });

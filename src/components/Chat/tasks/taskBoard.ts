@@ -69,7 +69,25 @@ function agentCalls(messages: ChatMessage[]): AgentCall[] {
   return out;
 }
 
+const TODO_TOOLS = new Set(['TodoWrite', 'TaskCreate', 'TaskUpdate']);
+
+/** A todo-tracking call happened after the last user message (the current turn). */
+function todosInLatestTurn(messages: ChatMessage[]): boolean {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m?.role === 'user') return false;
+    if (m?.role === 'assistant' && Array.isArray(m.toolCalls) && m.toolCalls.some((c) => TODO_TOOLS.has(c?.name))) return true;
+  }
+  return false;
+}
+
+/**
+ * Fallback card, shown only while its todo list is current: the chat is
+ * streaming, or the todo call is in the latest user turn. A finished list is
+ * dropped once streaming stops.
+ */
 function fallbackCard(messages: ChatMessage[], isStreaming: boolean): TaskCard | null {
+  if (!isStreaming && !todosInLatestTurn(messages)) return null;
   let todos: ReturnType<typeof findLatestTodos> = null;
   try { todos = findLatestTodos(messages); } catch { return null; }
   if (!Array.isArray(todos) || todos.length === 0) return null;
@@ -79,6 +97,7 @@ function fallbackCard(messages: ChatMessage[], isStreaming: boolean): TaskCard |
   }));
   if (steps.length === 0) return null;
   const allComplete = steps.every((s) => s.state === 'done');
+  if (allComplete && !isStreaming) return null;
   const card: TaskCard = {
     id: 'current-work', source: 'fallback', title: 'Current work',
     status: allComplete ? 'done' : isStreaming ? 'running' : 'paused',

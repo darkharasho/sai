@@ -260,4 +260,31 @@ describe('deriveTaskBoard', () => {
     });
   });
 
+  describe('fallback card staleness', () => {
+    const todos = [
+      { id: '1', content: 'Write tests', status: 'completed' },
+      { id: '2', content: 'Implement', status: 'in_progress' },
+    ];
+    const userMsg = (ts: number): ChatMessage => ({ id: `u${++n}`, role: 'user', content: 'hi', timestamp: ts });
+    const old = () => [userMsg(0), msg([call({ todos }, 'TodoWrite')], 1), userMsg(2), msg([call({ command: 'ls' }, 'Bash')], 3)];
+
+    it('old todo history + newer user message + not streaming → no card', () => {
+      expect(deriveTaskBoard(old(), rt({ isStreaming: false })).cards).toHaveLength(0);
+    });
+
+    it('streaming keeps the card', () => {
+      expect(deriveTaskBoard(old(), rt({ isStreaming: true })).cards.map((c) => c.id)).toEqual(['current-work']);
+    });
+
+    it('todos in the latest user turn show while not streaming', () => {
+      const messages = [userMsg(0), msg([call({ todos }, 'TodoWrite')], 1)];
+      expect(deriveTaskBoard(messages, rt({ isStreaming: false })).cards[0]).toMatchObject({ id: 'current-work', status: 'paused' });
+    });
+
+    it('all todos complete and not streaming → no card', () => {
+      const done = todos.map((t) => ({ ...t, status: 'completed' }));
+      expect(deriveTaskBoard([userMsg(0), msg([call({ todos: done }, 'TodoWrite')], 1)], rt({ isStreaming: false })).cards).toHaveLength(0);
+    });
+  });
+
 });

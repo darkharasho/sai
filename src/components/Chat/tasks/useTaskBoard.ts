@@ -130,8 +130,14 @@ export function useTaskBoard({
     .map((c) => c.agent!.toolUseId!)
     .join('\u0000');
   const liveIds = useMemo<ReadonlySet<string>>(() => (liveKey ? new Set(liveKey.split('\u0000')) : EMPTY_SET), [liveKey]);
+  const finishedKey = baseBoard.cards
+    .filter((c) => (c.status === 'done' || c.status === 'failed') && c.agent?.toolUseId)
+    .map((c) => c.agent!.toolUseId!)
+    .join('\u0000');
+  const finishedIds = useMemo<ReadonlySet<string>>(
+    () => (finishedKey ? new Set(finishedKey.split('\u0000')) : EMPTY_SET), [finishedKey]);
 
-  const transcripts = useAgentTranscripts(enabled ? claudeSessionId : null, ids, liveIds);
+  const transcripts = useAgentTranscripts(enabled ? claudeSessionId : null, ids, liveIds, finishedIds);
 
   const agentInfo = useMemo(() => {
     if (transcripts.size === 0) return EMPTY_INFO;
@@ -155,7 +161,9 @@ export function useTaskBoard({
       const source = tid ? (transcripts.get(tid)?.messages ?? NO_MESSAGES)
         : isAgentBacked(card) ? NO_MESSAGES
         : messages.filter((m) => card.messageIds.includes(m.id));
-      out.set(card.id, buildTailLines(source));
+      let lines: TailLine[] = [];
+      try { lines = buildTailLines(source); } catch { /* display-only: never throw into render */ }
+      out.set(card.id, lines);
     }
     return out;
   }, [board, transcripts, messages]);
