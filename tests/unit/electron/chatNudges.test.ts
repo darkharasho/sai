@@ -47,13 +47,24 @@ vi.mock('@electron/services/swarmMcpConfig', () => ({
   writeSwarmMcpConfig: vi.fn(),
 }));
 
-import { CHAT_RENDER_NUDGE, CHAT_GITHUB_WATCH_NUDGE, CHAT_TASKS_NUDGE } from '../../../electron/services/chatNudges';
+import { CHAT_RENDER_NUDGE, CHAT_GITHUB_WATCH_NUDGE, CHAT_TASKS_NUDGE, CHAT_TASK_CARDS_NUDGE } from '../../../electron/services/chatNudges';
 import * as claude from '../../../electron/services/claude';
 
 describe('chatNudges', () => {
   it('exposes the render + github nudges as non-empty strings', () => {
     expect(CHAT_RENDER_NUDGE).toContain('render_html');
     expect(CHAT_GITHUB_WATCH_NUDGE).toContain('sai_watch_github_run');
+  });
+
+  // SDK chats get the sai_task task-card nudge in place of the tool-agnostic
+  // CHAT_TASKS_NUDGE (CLI and Codex keep CHAT_TASKS_NUDGE).
+  it('task-card nudge is the exact copy and names sai_task, agent, and the no-mention fallback', () => {
+    expect(CHAT_TASK_CARDS_NUDGE).toBe(
+      'When the user asks for several things in one message, or for multi-step work (3+ distinct steps, refactors, features, debugging sessions), track it with the sai_task tool: call it with action "create" BEFORE starting, with one task per distinct request and that task\'s real steps. Keep the cards honest as you go: set status "running" with the current step index when you start or advance a step, "done" with a one-line note when a task finishes, "failed" with the reason if it can\'t be finished. When you hand a task to a background agent, pass agent = the exact description you gave the Agent call so SAI can show that agent\'s live work on the card. SAI renders these as a persistent task panel the user watches; stale or skipped updates make it lie. Use sai_task instead of TaskCreate/TodoWrite. Skip it for single-step or conversational requests, and if the tool is not registered in this session, just do the work and do not mention the tool or its absence.',
+    );
+    expect(CHAT_TASK_CARDS_NUDGE).toContain('sai_task');
+    expect(CHAT_TASK_CARDS_NUDGE).toContain('agent');
+    expect(CHAT_TASK_CARDS_NUDGE).toMatch(/do not mention the tool or its absence/);
   });
 
   // Claude CLI 2.1.266 registers neither TaskCreate nor TodoWrite, and Codex has
