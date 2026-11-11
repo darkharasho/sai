@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
+import { validateSaiTaskInput } from './lib/saiTaskTool';
 import type { SlashCommandInfo } from './lib/slashCommands';
 import NavBar from './components/NavBar';
 import ChatPanel from './components/Chat/ChatPanel';
@@ -1714,6 +1715,15 @@ export default function App() {
           (result) => sai.respondSwarmTool(req.id, result),
           (err) => sai.respondSwarmToolError(req.id, err instanceof Error ? err.message : String(err)),
         );
+        return;
+      }
+
+      if (req.tool === 'task') {
+        // Display-only: the task rail derives cards from the transcript's tool
+        // calls. Just ack (or tell the model its input was bad).
+        const v = validateSaiTaskInput(req.input);
+        if (v.ok) sai.respondSwarmTool(req.id, { ok: true });
+        else sai.respondSwarmToolError(req.id, v.error);
         return;
       }
 

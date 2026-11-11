@@ -119,6 +119,28 @@ describe('ChatMessage', () => {
     expect(container.querySelector('.tool-call-card')).toBeTruthy();
   });
 
+  it('hides sai_task tool calls', () => {
+    const msg = makeMessage({
+      content: '',
+      toolCalls: [
+        { id: 'tc1', type: 'terminal_command', name: 'mcp__sai__sai_task', input: '{"action":"create"}' },
+        { id: 'tc2', type: 'terminal_command', name: 'Read', input: '{"file_path":"/a"}' },
+      ],
+    });
+    const { container } = render(<ChatMessage message={msg} />);
+    expect(container.querySelectorAll('.tool-call-card').length).toBe(1);
+  });
+
+  it('renders nothing for a message with only sai_task calls and empty text', () => {
+    const msg = makeMessage({
+      content: '',
+      toolCalls: [{ id: 'tc1', type: 'terminal_command', name: 'mcp__sai__sai_task', input: '{"action":"create"}' }],
+    });
+    const { container } = render(<ChatMessage message={msg} />);
+    expect(container.querySelector('[data-testid="chat-msg"]')).toBeNull();
+    expect(container.querySelector('.tool-call-card')).toBeNull();
+  });
+
   describe('reasoning animations quiet while a tool runs', () => {
     const reasoningMsg = (toolCalls?: ChatMessageType['toolCalls']) => makeMessage({
       reasoning: 'pondering deeply',
