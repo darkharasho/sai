@@ -1,0 +1,79 @@
+import { useEffect, useState } from 'react';
+import type { TaskBoard, TaskCard, TailLine } from './types';
+import { TaskCardView, formatElapsed } from './TaskCardView';
+import './tasks.css';
+
+export interface TaskRailProps {
+  board: TaskBoard;
+  tails: Map<string, TailLine[]>;
+  selectedId: string | null;
+  onSelect(id: string): void;
+  onOpenStream(id: string): void;
+  onStop(card: TaskCard): void;
+  onAnswer(option: string): void;
+  onReply(): void;
+}
+
+const NO_TAIL: TailLine[] = [];
+
+export function TaskRail({ board, tails, selectedId, onSelect, onOpenStream, onStop, onAnswer, onReply }: TaskRailProps) {
+  const [now, setNow] = useState(() => Date.now());
+  const [expanded, setExpanded] = useState(false);
+  const anyRunning = board.cards.some((c) => c.status === 'running');
+
+  // Reset the collapsed/expanded choice for each new batch.
+  useEffect(() => { setExpanded(false); }, [board.batchStartedAt]);
+
+  useEffect(() => {
+    if (!anyRunning) return;
+    setNow(Date.now());
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [anyRunning]);
+
+  const n = board.cards.length;
+  if (n === 0) return null;
+
+  const doneCount = board.cards.filter((c) => c.status === 'done').length;
+  const collapsed = board.allDone && !expanded;
+
+  let summary = '';
+  if (board.allDone) {
+    const ends = board.cards.map((c) => c.endedAt).filter((x): x is number => typeof x === 'number');
+    const dur = ends.length && board.batchStartedAt != null ? ` · ${formatElapsed(Math.max(...ends) - board.batchStartedAt)}` : '';
+    summary = `${n} task${n === 1 ? '' : 's'} done${dur}`;
+  }
+
+  return (
+    <aside className="task-rail" aria-label="Tasks">
+      {board.allDone ? (
+        <button type="button" className="task-rail__summary" aria-expanded={!collapsed} onClick={() => setExpanded((e) => !e)}>
+          {summary}
+        </button>
+      ) : (
+        <div className="task-rail__header">
+          <span className="task-rail__title">Tasks</span>
+          <span className="task-rail__count">{doneCount} of {n} done</span>
+        </div>
+      )}
+      {!collapsed && (
+        <div className="task-rail__cards">
+          {board.cards.map((c) => (
+            <TaskCardView
+              key={c.id}
+              card={c}
+              tail={tails.get(c.id) ?? NO_TAIL}
+              selected={c.id === selectedId}
+              now={now}
+              onSelect={onSelect}
+              onOpenStream={onOpenStream}
+              onStop={onStop}
+              onAnswer={onAnswer}
+              onReply={onReply}
+            />
+          ))}
+        </div>
+      )}
+    </aside>
+  );
+}
