@@ -54,10 +54,68 @@ describe('deriveTaskBoard', () => {
     expect(done.cards[0].status).toBe('done');
     expect(done.cards[0].totalCount).toBe(2);
 
-    const paused = deriveTaskBoard(messages, rt({ agentInfo: new Map([['toolu_A', { finished: false, steps }]]) }));
+    const paused = deriveTaskBoard(messages, rt({ isStreaming: false, agentInfo: new Map([['toolu_A', { finished: false, steps }]]) }));
     expect(paused.cards[0].status).toBe('paused');
     expect(paused.cards[0].steps.map((s) => s.label)).toEqual(['Read files', 'Summarize']);
     expect(paused.cards[0].result).toBeNull();
+  });
+
+  it('agent card with no detail and unfinished transcript is running while streaming, paused otherwise', () => {
+    const messages = [
+      msg([create([{ id: 'a', title: 'Research', steps: [] }])], 1),
+      msg([upd({ id: 'a', status: 'running', agent: 'Research auth' })], 2),
+      msg([agentCall('Research auth', 'toolu_A')], 3),
+    ];
+    expect(deriveTaskBoard(messages, rt({ isStreaming: true })).cards[0].status).toBe('running');
+    expect(deriveTaskBoard(messages, rt({ isStreaming: false })).cards[0].status).toBe('paused');
+  });
+
+  it('agent call matches a background task without tool_use_id by description', () => {
+    const messages = [
+      msg([create([{ id: 'a', title: 'Research', steps: [] }])], 1),
+      msg([upd({ id: 'a', status: 'running', agent: 'Research auth' })], 2),
+      msg([agentCall('Research auth', 'toolu_A')], 3),
+    ];
+    const board = deriveTaskBoard(messages, rt({
+      isStreaming: false,
+      backgroundTasks: [
+        bg({ id: 'h', description: 'Research auth', hidden: true }),
+        bg({ id: 'other', description: 'Research auth', toolUseId: 'toolu_OTHER', startedAt: 1 }),
+        bg({ id: 't1', description: 'Research auth', status: 'completed', toolUseId: null }),
+      ],
+    }));
+    const declared = board.cards.filter((c) => c.source === 'declared');
+    expect(declared).toHaveLength(1);
+    expect(declared[0].status).toBe('done');
+    expect(declared[0].agent).toEqual({ description: 'Research auth', toolUseId: 'toolu_A', taskId: 't1' });
+    expect(board.cards.map((c) => c.id)).toEqual(['a', 'bg:other']); // no duplicate bg:t1, hidden never shown
+  });
+
+  it('failed and stopped background tasks map to failed with result', () => {
+    const mk = (status: 'failed' | 'stopped') => {
+      const messages = [
+        msg([create([{ id: 'a', title: 'R', steps: [] }])], 1),
+        msg([upd({ id: 'a', status: 'running', agent: 'R' })], 2),
+        msg([agentCall('R', 'toolu_R')], 3),
+      ];
+      return deriveTaskBoard(messages, rt({
+        backgroundTasks: [bg({ id: 't', description: 'R', status, error: status === 'failed' ? 'boom' : null, toolUseId: 'toolu_R', endedAt: 7 })],
+      })).cards[0];
+    };
+    expect(mk('failed')).toMatchObject({ status: 'failed', result: 'boom', endedAt: 7 });
+    expect(mk('stopped')).toMatchObject({ status: 'failed', result: 'Stopped' });
+
+    const rtCard = deriveTaskBoard([], rt({ backgroundTasks: [bg({ id: 's', status: 'stopped' }), bg({ id: 'f', status: 'failed', error: 'nope' })] })).cards;
+    expect(rtCard.find((c) => c.id === 'bg:s')).toMatchObject({ status: 'failed', result: 'Stopped' });
+    expect(rtCard.find((c) => c.id === 'bg:f')).toMatchObject({ status: 'failed', result: 'nope' });
+  });
+
+  it('runtime cards are sorted by startedAt after declared cards', () => {
+    const messages = [msg([create([{ id: 'a', title: 'A', steps: [] }])], 1)];
+    const board = deriveTaskBoard(messages, rt({
+      backgroundTasks: [bg({ id: 'late', startedAt: 30 }), bg({ id: 'early', startedAt: 10 }), bg({ id: 'mid', startedAt: 20 })],
+    }));
+    expect(board.cards.map((c) => c.id)).toEqual(['a', 'bg:early', 'bg:mid', 'bg:late']);
   });
 
   it('running inline card is paused when not streaming', () => {

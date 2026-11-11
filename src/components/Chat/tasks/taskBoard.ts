@@ -110,10 +110,14 @@ export function deriveTaskBoard(messages: ChatMessage[], rt: BoardRuntime): Task
       if (card.agent) {
         const desc = card.agent.description;
         let toolUseId = callIds.get(desc) ?? null;
+        const free = (t: BackgroundTaskDetail) => !t.hidden && !matched.has(t.id);
         if (toolUseId) {
-          detail = tasks.find((t) => t.toolUseId === toolUseId);
+          // tool_use_id is optional on task frames: fall back to a description
+          // match among tasks that don't carry a conflicting id.
+          detail = tasks.find((t) => t.toolUseId === toolUseId) ??
+            tasks.find((t) => free(t) && (t.toolUseId == null || t.toolUseId === toolUseId) && text(t.description) === desc);
         } else {
-          detail = tasks.find((t) => text(t.description) === desc);
+          detail = tasks.find((t) => free(t) && text(t.description) === desc);
           toolUseId = detail ? (detail.toolUseId ?? null) : null;
         }
         if (detail) matched.add(detail.id);
@@ -134,7 +138,7 @@ export function deriveTaskBoard(messages: ChatMessage[], rt: BoardRuntime): Task
           card.startedAt = card.startedAt ?? detail.startedAt;
         } else if (info?.finished === true && card.status !== 'failed') {
           card.status = 'done';
-        } else if (info?.finished !== true && card.status === 'running') {
+        } else if (info?.finished !== true && card.status === 'running' && !isStreaming) {
           card.status = 'paused';
         }
         if (card.steps.length === 0) card.steps = agentSteps(runtime, toolUseId);
