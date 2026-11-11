@@ -89,6 +89,7 @@ import { buildHelpMessage } from './helpText';
 import McpAuthNudge from './McpAuthNudge';
 import { buildTaskRegistry, TaskRegistryContext } from './taskRegistry';
 import { parseAiError, looksLikeApiError } from './parseAiError';
+import { classifyToolType } from './tasks/toolType';
 import { buildMetaPreamble } from '../../lib/metaSystemPrompt';
 import { normalizeCodexEffort } from '../../lib/codexEffort';
 import {
@@ -1424,21 +1425,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
             tools.push({
               id: block.id,
               turnSeq: toolTurnSeq,
-              type: block.name?.includes('Edit') || block.name === 'Write' ? 'file_edit' :
-                    block.name?.includes('Bash') ? 'terminal_command' :
-                    block.name?.includes('Glob') || block.name?.includes('Grep') || block.name === 'ToolSearch' ? 'file_search' :
-                    block.name?.includes('Read') ? 'file_read' :
-                    block.name?.includes('WebFetch') || block.name?.includes('WebSearch') ? 'web_fetch' :
-                    block.name === 'TodoWrite' ? 'todo' :
-                    block.name === 'Agent' || block.name === 'SendUserMessage' ? 'agent' :
-                    block.name?.includes('Notebook') ? 'notebook' :
-                    block.name === 'AskUserQuestion' ? 'question' :
-                    block.name === 'EnterPlanMode' || block.name === 'ExitPlanMode' ? 'plan' :
-                    block.name === 'EnterWorktree' || block.name === 'ExitWorktree' ? 'worktree' :
-                    block.name === 'Skill' ? 'skill' :
-                    block.name === 'Monitor' || block.name === 'ScheduleWakeup' || block.name?.startsWith('Cron') ? 'schedule' :
-                    block.name === 'TaskOutput' || block.name === 'TaskStop' || block.name === 'RemoteTrigger' ? 'task' :
-                    block.name?.startsWith('mcp__') ? 'mcp' : 'other',
+              type: classifyToolType(block.name),
               name: block.name || 'tool',
               input: typeof block.input === 'string' ? block.input :
                      typeof block.input === 'object' ? JSON.stringify(block.input, null, 2) : '',
