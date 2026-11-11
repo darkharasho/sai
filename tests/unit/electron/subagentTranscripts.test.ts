@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
+import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { readSubagentTranscript, findSubagentId } from '../../../electron/services/claudeBackend/subagentTranscripts';
@@ -52,5 +53,28 @@ describe('subagentTranscripts', () => {
     writeMeta('-proj-a', 'sess-4', 'eee', { toolUseId: 'toolu_w' });
     const getMessages = vi.fn().mockRejectedValue(new Error('boom'));
     expect(await readSubagentTranscript('sess-4', 'toolu_w', 0, { projectsRoot: root, getMessages })).toBeNull();
+  });
+
+  it('does not rescan project dirs on later calls', async () => {
+    writeMeta('-proj-a', 'sess-5', 'fff', { toolUseId: 'toolu_c', finished: false });
+    writeMeta('-proj-b', 'sess-5', 'ggg', { toolUseId: 'toolu_d', finished: false });
+    const getMessages = vi.fn().mockResolvedValue([]);
+    const deps = { projectsRoot: root, getMessages };
+    await readSubagentTranscript('sess-5', 'toolu_d', 0, deps);
+    const spy = vi.spyOn(fsp, 'readdir');
+    expect((await readSubagentTranscript('sess-5', 'toolu_d', 0, deps))!.agentId).toBe('ggg');
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  it('drops the cache and returns null when the cached meta is gone, then re-scans', async () => {
+    writeMeta('-proj-a', 'sess-6', 'hhh', { toolUseId: 'toolu_e' });
+    const getMessages = vi.fn().mockResolvedValue([]);
+    const deps = { projectsRoot: root, getMessages };
+    await readSubagentTranscript('sess-6', 'toolu_e', 0, deps);
+    fs.rmSync(path.join(root, '-proj-a', 'sess-6'), { recursive: true });
+    expect(await readSubagentTranscript('sess-6', 'toolu_e', 0, deps)).toBeNull();
+    writeMeta('-proj-b', 'sess-6', 'hhh', { toolUseId: 'toolu_e' });
+    expect((await readSubagentTranscript('sess-6', 'toolu_e', 0, deps))!.agentId).toBe('hhh');
   });
 });

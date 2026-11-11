@@ -14,14 +14,15 @@ export interface SubagentTranscriptChunk {
 
 const defaultRoot = () => path.join(os.homedir(), '.claude', 'projects');
 
-// sessionId:toolUseId -> agentId. Only the id is cached; `finished` is re-read.
-const agentIdCache = new Map<string, string>();
+// sessionId:toolUseId -> agent id + resolved meta path, so polling re-reads
+// only that one meta file (for `finished`) instead of rescanning every project dir.
+const agentCache = new Map<string, { agentId: string; metaPath: string }>();
 
 async function scanForAgent(
   sessionId: string,
   toolUseId: string,
   projectsRoot: string,
-): Promise<{ agentId: string; finished: boolean } | null> {
+): Promise<{ agentId: string; metaPath: string; finished: boolean } | null> {
   const entries = await fs.readdir(projectsRoot);
   for (const entry of entries) {
     const dir = path.join(projectsRoot, entry, sessionId, 'subagents');
@@ -30,10 +31,11 @@ async function scanForAgent(
     for (const f of files) {
       const m = /^agent-(.+)\.meta\.json$/.exec(f);
       if (!m) continue;
+      const metaPath = path.join(dir, f);
       try {
-        const meta = JSON.parse(await fs.readFile(path.join(dir, f), 'utf8'));
+        const meta = JSON.parse(await fs.readFile(metaPath, 'utf8'));
         if (meta && meta.toolUseId === toolUseId) {
-          return { agentId: m[1], finished: meta.finished === true };
+          return { agentId: m[1], metaPath, finished: meta.finished === true };
         }
       } catch { /* unreadable meta: skip */ }
     }
@@ -41,30 +43,27 @@ async function scanForAgent(
   return null;
 }
 
-async function readFinished(sessionId: string, agentId: string, projectsRoot: string): Promise<boolean> {
-  const entries = await fs.readdir(projectsRoot);
-  for (const entry of entries) {
-    const file = path.join(projectsRoot, entry, sessionId, 'subagents', `agent-${agentId}.meta.json`);
-    try {
-      const meta = JSON.parse(await fs.readFile(file, 'utf8'));
-      return meta?.finished === true;
-    } catch { /* not in this project dir */ }
-  }
-  return false;
-}
-
 export async function findSubagentId(
   sessionId: string,
   toolUseId: string,
   projectsRoot: string = defaultRoot(),
 ): Promise<{ agentId: string; finished: boolean } | null> {
+  const key = `${sessionId}:${toolUseId}`;
   try {
-    const key = `${sessionId}:${toolUseId}`;
-    const cached = agentIdCache.get(key);
-    if (cached) return { agentId: cached, finished: await readFinished(sessionId, cached, projectsRoot) };
+    const cached = agentCache.get(key);
+    if (cached) {
+      try {
+        const meta = JSON.parse(await fs.readFile(cached.metaPath, 'utf8'));
+        return { agentId: cached.agentId, finished: meta?.finished === true };
+      } catch {
+        agentCache.delete(key); // next call re-scans
+        return null;
+      }
+    }
     const found = await scanForAgent(sessionId, toolUseId, projectsRoot);
-    if (found) agentIdCache.set(key, found.agentId);
-    return found;
+    if (!found) return null;
+    agentCache.set(key, { agentId: found.agentId, metaPath: found.metaPath });
+    return { agentId: found.agentId, finished: found.finished };
   } catch {
     return null;
   }
