@@ -3,13 +3,18 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { readSubagentTranscript, findSubagentId } from '../../../electron/services/claudeBackend/subagentTranscripts';
+import { readSubagentTranscript, findSubagentId, isValidTranscriptRequest } from '../../../electron/services/claudeBackend/subagentTranscripts';
 
 let root: string;
 function writeMeta(proj: string, sid: string, agentId: string, meta: object) {
   const dir = path.join(root, proj, sid, 'subagents');
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, `agent-${agentId}.meta.json`), JSON.stringify(meta));
+}
+function writeJsonl(proj: string, sid: string, agentId: string, body: string, mtime?: Date) {
+  const file = path.join(root, proj, sid, 'subagents', `agent-${agentId}.jsonl`);
+  fs.writeFileSync(file, body);
+  if (mtime) fs.utimesSync(file, mtime, mtime);
 }
 const msg = (n: number) => ({ type: 'assistant', uuid: `u${n}`, session_id: 's', message: {}, parent_tool_use_id: null });
 
@@ -76,5 +81,39 @@ describe('subagentTranscripts', () => {
     expect(await readSubagentTranscript('sess-6', 'toolu_e', 0, deps)).toBeNull();
     writeMeta('-proj-b', 'sess-6', 'hhh', { toolUseId: 'toolu_e' });
     expect((await readSubagentTranscript('sess-6', 'toolu_e', 0, deps))!.agentId).toBe('hhh');
+  });
+
+  it('skips the SDK when the transcript file is unchanged since the last read at that offset', async () => {
+    writeMeta('-proj-a', 'sess-7', 'iii', { toolUseId: 'toolu_f', finished: false });
+    writeJsonl('-proj-a', 'sess-7', 'iii', '{"a":1}\n', new Date(1_000_000));
+    const getMessages = vi.fn().mockResolvedValue([msg(1)]);
+    const deps = { projectsRoot: root, getMessages };
+    expect(await readSubagentTranscript('sess-7', 'toolu_f', 0, deps)).toMatchObject({ nextOffset: 1 });
+    const again = await readSubagentTranscript('sess-7', 'toolu_f', 1, deps);
+    expect(again).toMatchObject({ agentId: 'iii', finished: false, messages: [], nextOffset: 1 });
+    expect(getMessages).toHaveBeenCalledTimes(1);
+    // file grows: read again
+    writeJsonl('-proj-a', 'sess-7', 'iii', '{"a":1}\n{"b":2}\n', new Date(2_000_000));
+    getMessages.mockResolvedValue([msg(2)]);
+    expect(await readSubagentTranscript('sess-7', 'toolu_f', 1, deps)).toMatchObject({ nextOffset: 2 });
+    expect(getMessages).toHaveBeenCalledTimes(2);
+    // a different offset (e.g. a fresh renderer) always reads
+    await readSubagentTranscript('sess-7', 'toolu_f', 0, deps);
+    expect(getMessages).toHaveBeenCalledTimes(3);
+  });
+
+  it('isValidTranscriptRequest accepts a UUID session and plain ids, rejects path tricks', () => {
+    const sid = '0f8fad5b-d9cb-469f-a165-70867728950e';
+    expect(isValidTranscriptRequest(sid, 'toolu_01AbC', 0)).toBe(true);
+    expect(isValidTranscriptRequest(sid, 'toolu_01AbC', 12)).toBe(true);
+    expect(isValidTranscriptRequest('../etc', 'toolu_01AbC', 0)).toBe(false);
+    expect(isValidTranscriptRequest('sess-1', 'toolu_01AbC', 0)).toBe(false);
+    expect(isValidTranscriptRequest(sid, '../x', 0)).toBe(false);
+    expect(isValidTranscriptRequest(sid, 'a/b', 0)).toBe(false);
+    expect(isValidTranscriptRequest(sid, 'a\\b', 0)).toBe(false);
+    expect(isValidTranscriptRequest(sid, '', 0)).toBe(false);
+    expect(isValidTranscriptRequest(sid, 'toolu_x', -1)).toBe(false);
+    expect(isValidTranscriptRequest(sid, 'toolu_x', 1.5)).toBe(false);
+    expect(isValidTranscriptRequest(sid as any, 5 as any, 0)).toBe(false);
   });
 });

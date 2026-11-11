@@ -41,7 +41,7 @@ import { readCachedSlashCommands, writeCachedSlashCommands, type SlashCommandInf
 import { withScopeTag } from './loadGuard/scopeTag';
 import { withLoadNote } from './loadGuard/hook';
 import type { BackgroundTaskDetail } from './claudeBackend/backgroundTasks';
-import { readSubagentTranscript } from './claudeBackend/subagentTranscripts';
+import { readSubagentTranscript, isValidTranscriptRequest } from './claudeBackend/subagentTranscripts';
 export { CHAT_RENDER_NUDGE, CHAT_GITHUB_WATCH_NUDGE };
 
 
@@ -1636,6 +1636,7 @@ export function registerClaudeHandlers(win: BrowserWindow) {
 
   // claude:subagentTranscript — read a background subagent's transcript by its tool_use id.
   ipcMain.handle('claude:subagentTranscript', async (_event, sessionId: string, toolUseId: string, offset: number) => {
+    if (!isValidTranscriptRequest(sessionId, toolUseId, offset)) return null;
     return readSubagentTranscript(sessionId, toolUseId, offset);
   });
 
