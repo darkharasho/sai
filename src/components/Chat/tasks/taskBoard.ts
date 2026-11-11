@@ -51,17 +51,18 @@ function agentSteps(rt: BoardRuntime, toolUseId: string | null): TaskStep[] {
   return Array.isArray(steps) ? steps.filter((s) => s && typeof s.label === 'string').map((s) => ({ ...s })) : [];
 }
 
-/** description → tool_use id of the latest Agent/Task tool call carrying it. */
-function agentCallIds(messages: ChatMessage[]): Map<string, string> {
-  const out = new Map<string, string>();
+interface AgentCall { id: string; description: string; timestamp: number }
+
+/** Agent/Task tool calls in message order. */
+function agentCalls(messages: ChatMessage[]): AgentCall[] {
+  const out: AgentCall[] = [];
   for (const m of messages) {
     if (m?.role !== 'assistant' || !Array.isArray(m.toolCalls)) continue;
     for (const c of m.toolCalls) {
       if (!c || (c.name !== 'Agent' && c.name !== 'Task') || typeof c.id !== 'string' || !c.id) continue;
       try {
         const input = typeof c.input === 'string' ? JSON.parse(c.input) : c.input;
-        const desc = text(input?.description);
-        if (desc) out.set(desc, c.id);
+        out.push({ id: c.id, description: text(input?.description), timestamp: Number(m.timestamp) || 0 });
       } catch { /* malformed input */ }
     }
   }
@@ -99,29 +100,62 @@ export function deriveTaskBoard(messages: ChatMessage[], rt: BoardRuntime): Task
     const runtime: BoardRuntime = { backgroundTasks: tasks, isStreaming, pendingQuestion, agentInfo: rt?.agentInfo ?? new Map() };
 
     const declared = deriveDeclaredCards(msgs);
-    const callIds = agentCallIds(msgs);
+    const calls = agentCalls(msgs);
+    // description → tool_use id of the latest Agent/Task call carrying it.
+    const callIds = new Map<string, string>();
+    for (const c of calls) if (c.description) callIds.set(c.description, c.id);
     const matched = new Set<string>(); // background task ids claimed by a declared card
+    const free = (t: BackgroundTaskDetail) => !t.hidden && !matched.has(t.id);
+
+    // Rule 1: resolve agent bindings for every declared card up front.
+    const bindings = new Map<string, { toolUseId: string | null; detail?: BackgroundTaskDetail }>();
+    // Pass 1: exact description match.
+    for (const d of declared.cards) {
+      if (!d.agent) continue;
+      const desc = d.agent.description;
+      let detail: BackgroundTaskDetail | undefined;
+      let toolUseId = callIds.get(desc) ?? null;
+      if (toolUseId) {
+        // tool_use_id is optional on task frames: fall back to a description
+        // match among tasks that don't carry a conflicting id.
+        detail = tasks.find((t) => t.toolUseId === toolUseId) ??
+          tasks.find((t) => free(t) && (t.toolUseId == null || t.toolUseId === toolUseId) && text(t.description) === desc);
+      } else {
+        detail = tasks.find((t) => free(t) && text(t.description) === desc);
+        toolUseId = detail ? (detail.toolUseId ?? null) : null;
+      }
+      if (detail) matched.add(detail.id);
+      bindings.set(d.id, { toolUseId, detail });
+    }
+    // Pass 2: an agent declared under a different description than the Agent
+    // call the model actually made binds to the earliest unclaimed call that
+    // started within the batch.
+    if (declared.batchStartedAt !== null) {
+      const declaredDescs = new Set(declared.cards.map((d) => d.agent?.description).filter((x): x is string => !!x));
+      const bound = new Set<string>();
+      for (const b of bindings.values()) if (b.toolUseId) bound.add(b.toolUseId);
+      for (const d of declared.cards) {
+        const b = bindings.get(d.id);
+        if (!d.agent || !b || b.toolUseId || b.detail) continue;
+        const call = calls.find((c) =>
+          c.timestamp >= declared.batchStartedAt! && !bound.has(c.id) && !declaredDescs.has(c.description));
+        if (!call) continue;
+        bound.add(call.id);
+        const detail = tasks.find((t) => t.toolUseId === call.id) ??
+          tasks.find((t) => free(t) && t.toolUseId == null && call.description !== '' && text(t.description) === call.description);
+        if (detail) matched.add(detail.id);
+        bindings.set(d.id, { toolUseId: call.id, detail });
+      }
+    }
 
     const cards: TaskCard[] = declared.cards.map((orig) => {
       const card: TaskCard = { ...orig, steps: orig.steps.map((s) => ({ ...s })), messageIds: [...orig.messageIds] };
 
-      // Rule 1: resolve the agent's tool_use id (and background task).
       let detail: BackgroundTaskDetail | undefined;
       if (card.agent) {
-        const desc = card.agent.description;
-        let toolUseId = callIds.get(desc) ?? null;
-        const free = (t: BackgroundTaskDetail) => !t.hidden && !matched.has(t.id);
-        if (toolUseId) {
-          // tool_use_id is optional on task frames: fall back to a description
-          // match among tasks that don't carry a conflicting id.
-          detail = tasks.find((t) => t.toolUseId === toolUseId) ??
-            tasks.find((t) => free(t) && (t.toolUseId == null || t.toolUseId === toolUseId) && text(t.description) === desc);
-        } else {
-          detail = tasks.find((t) => free(t) && text(t.description) === desc);
-          toolUseId = detail ? (detail.toolUseId ?? null) : null;
-        }
-        if (detail) matched.add(detail.id);
-        card.agent = { description: desc, toolUseId, taskId: detail?.id ?? null };
+        const b = bindings.get(card.id);
+        detail = b?.detail;
+        card.agent = { description: card.agent.description, toolUseId: b?.toolUseId ?? null, taskId: detail?.id ?? null };
       }
 
       const backed = !!card.agent && (card.agent.toolUseId !== null || card.agent.taskId !== null);

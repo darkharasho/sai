@@ -199,4 +199,39 @@ describe('deriveTaskBoard', () => {
     expect(() => deriveTaskBoard(junk, rt({ backgroundTasks: [null as any, bg({ description: 7 as any })] }))).not.toThrow();
     expect(() => deriveTaskBoard(junk, null as any)).not.toThrow();
   });
+  describe('agent description drift fallback', () => {
+    const declare = (ts = 1) => [
+      msg([create([{ id: 'a', title: 'List', steps: [] }])], ts),
+      msg([upd({ id: 'a', status: 'running', agent: 'List tasks directory files' })], ts + 1),
+    ];
+
+    it('declared agent binds to a differently-described Agent call in the same batch, with no duplicate runtime card', () => {
+      const messages = [...declare(), msg([agentCall('List files in the tasks directory', 'toolu_X')], 3)];
+      const board = deriveTaskBoard(messages, rt({
+        backgroundTasks: [bg({ id: 't9', description: 'List files in the tasks directory', toolUseId: 'toolu_X' })],
+      }));
+      expect(board.cards).toHaveLength(1);
+      expect(board.cards[0].agent).toEqual({ description: 'List tasks directory files', toolUseId: 'toolu_X', taskId: 't9' });
+    });
+
+    it('fallback never steals an Agent call whose description exactly matches another declared card', () => {
+      const messages = [
+        msg([create([{ id: 'a', title: 'A', steps: [] }, { id: 'b', title: 'B', steps: [] }])], 1),
+        msg([upd({ id: 'a', status: 'running', agent: 'Drifted name' })], 2),
+        msg([upd({ id: 'b', status: 'running', agent: 'Exact name' })], 3),
+        msg([agentCall('Exact name', 'toolu_B')], 4),
+      ];
+      const board = deriveTaskBoard(messages, rt());
+      const byId = (id: string) => board.cards.find((c) => c.id === id)!;
+      expect(byId('b').agent!.toolUseId).toBe('toolu_B');
+      expect(byId('a').agent!.toolUseId).toBeNull();
+    });
+
+    it('fallback ignores Agent calls from before the batch started', () => {
+      const messages = [msg([agentCall('Something older', 'toolu_OLD')], 1), ...declare(5)];
+      const board = deriveTaskBoard(messages, rt());
+      expect(board.cards[0].agent!.toolUseId).toBeNull();
+    });
+  });
+
 });
