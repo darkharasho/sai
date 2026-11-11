@@ -351,4 +351,28 @@ describe('TodoProgress (ring + popover)', () => {
     expect(items[1].className).toContain('todo-ring-item--active');
     expect(items[2].className).toContain('todo-ring-item--pending');
   });
+  it('todos prop overrides derivation from messages', () => {
+    const messages = [buildTodosMsg([
+      { content: 'from messages', status: 'in_progress' },
+    ])];
+    const todos = [
+      { id: 't0', content: 'card step one', status: 'completed' as const },
+      { id: 't1', content: 'card step two', status: 'in_progress' as const },
+      { id: 't2', content: 'card step three', status: 'pending' as const },
+    ];
+    const { container, getByText, rerender } = render(<TodoProgress messages={messages as any} isStreaming={true} todos={todos} />);
+    expect(getByText('1/3')).toBeTruthy();
+    fireEvent.click(container.querySelector('[data-testid="todo-ring"]') as HTMLElement);
+    const popover = container.querySelector('[data-testid="todo-ring-popover"]');
+    expect(popover?.textContent).toContain('card step two');
+    expect(popover?.textContent).not.toContain('from messages');
+
+    // null overrides too: no ring even though messages carry todos.
+    rerender(<TodoProgress messages={messages as any} isStreaming={true} todos={null} />);
+    expect(container.querySelector('[data-testid="todo-ring"]')).toBeNull();
+
+    // undefined falls back to the messages.
+    rerender(<TodoProgress messages={messages as any} isStreaming={true} todos={undefined} />);
+    expect(container.querySelector('[data-testid="todo-ring"]')?.textContent).toContain('0/1');
+  });
 });
