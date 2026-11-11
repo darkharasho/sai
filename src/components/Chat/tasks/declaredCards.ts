@@ -66,7 +66,9 @@ export function deriveDeclaredCards(messages: ChatMessage[]): DeclaredCards {
             const card: TaskCard = {
               id: t.id, source: 'declared', title: t.title, status: 'queued', steps,
               doneCount: 0, totalCount: 0, currentLabel: null, startedAt: null, endedAt: null,
-              result: null, agent: null, messageIds: [], question: null,
+              result: null,
+              agent: typeof t.agent === 'string' && t.agent ? { description: t.agent, toolUseId: null, taskId: null } : null,
+              messageIds: [], question: null,
             };
             recount(card);
             cards.push(card);

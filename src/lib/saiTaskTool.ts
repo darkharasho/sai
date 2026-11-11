@@ -23,6 +23,7 @@ export const SAI_TASK_TOOL: SaiToolDef = {
             id: { type: 'string', description: 'Short stable id.' },
             title: { type: 'string', description: 'Short title.' },
             steps: { type: 'array', items: { type: 'string' }, description: 'The real steps, in order.' },
+            agent: { type: 'string', description: 'If a background agent will do this task: the exact `description` you will pass to the Agent tool.' },
           },
           required: ['id', 'title', 'steps'],
         },

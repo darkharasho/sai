@@ -23,6 +23,16 @@ describe('deriveDeclaredCards', () => {
     expect(r.batchStartedAt).toBe(100);
   });
 
+  it('create accepts a per-task agent string', () => {
+    const r = deriveDeclaredCards([msg([call(create([
+      { id: 'a', title: 'A', steps: ['1'] },
+      { id: 'b', title: 'B', steps: ['x'], agent: 'List files' },
+      { id: 'c', title: 'C', steps: ['y'], agent: 42 },
+    ]))], 100)]);
+    expect(r.cards.map((c) => c.agent?.description ?? null)).toEqual([null, 'List files', null]);
+    expect(r.cards[1].agent).toEqual({ description: 'List files', toolUseId: null, taskId: null });
+  });
+
   it('running with step marks earlier steps done', () => {
     const steps = ['s0', 's1', 's2', 's3', 's4'];
     const r = deriveDeclaredCards([
