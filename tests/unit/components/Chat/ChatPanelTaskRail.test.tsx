@@ -40,6 +40,18 @@ const taskHistory = (): any[] => [
   { id: 'a3', role: 'assistant', content: 'Alpha work in progress', timestamp: 5 },
 ];
 
+const gammaTask = {
+  id: 'bg1', description: 'Research gamma', kind: 'general-purpose', isShell: false, isAgent: true,
+  status: 'running' as const, startedAt: 10, endedAt: null, lastEventAt: 10, totalTokens: null, toolUses: null,
+  lastToolName: null, summary: null, error: null, toolUseId: 'toolu_g',
+};
+
+const askCall = (questions: unknown[]) => ({
+  id: 'a4', role: 'assistant', content: '', timestamp: 6,
+  toolCalls: [{ id: 'toolu_ask', name: 'AskUserQuestion', input: JSON.stringify({ questions }) }],
+});
+const pickQuestion = { question: 'Which DB?', header: 'DB', multiSelect: false, options: [{ label: 'Postgres', description: '' }, { label: 'SQLite', description: '' }] };
+
 describe('ChatPanel task rail integration', () => {
   let mockSai: ReturnType<typeof installMockSai>;
 
@@ -117,7 +129,9 @@ describe('ChatPanel task rail integration', () => {
   });
 
   it('renders no rail or tabs when taskUiEnabled is false even with sai_task history', async () => {
-    await mount({ ...baseProps(), taskUiEnabled: false });
+    await mount({ ...baseProps(), taskUiEnabled: false, claudeSessionId: 'claude-sess', backgroundTasks: [gammaTask] });
+    await act(async () => { await Promise.resolve(); });
+    expect((window.sai as any).claudeSubagentTranscript).not.toHaveBeenCalled();
     expect(screen.queryByRole('complementary', { name: 'Tasks' })).toBeNull();
     expect(document.querySelector('.task-tabs')).toBeNull();
     expect(document.querySelector('.task-rail')).toBeNull();
@@ -139,9 +153,13 @@ describe('ChatPanel task rail integration', () => {
     // The rail stays visible beside the stream.
     expect(screen.getByRole('complementary', { name: 'Tasks' })).toBeTruthy();
 
+    const pinnedBar = () => document.querySelector('.pinned-prompt-bar') as HTMLElement;
+    expect(pinnedBar().style.display).toBe('none');
+
     fireEvent.click(screen.getByText('← All'));
     expect(screen.queryByTestId('task-stream')).toBeNull();
     expect(messageList()).toBeVisible();
+    expect(pinnedBar().style.display).not.toBe('none');
     expect(msgTexts()).toEqual(all);
   });
 
@@ -164,16 +182,31 @@ describe('ChatPanel task rail integration', () => {
     await mount({
       ...baseProps(),
       onStopBackgroundTask: onStop,
-      backgroundTasks: [{
-        id: 'bg1', description: 'Research gamma', kind: 'general-purpose', isShell: false, isAgent: true,
-        status: 'running', startedAt: 10, endedAt: null, lastEventAt: 10, totalTokens: null, toolUses: null,
-        lastToolName: null, summary: null, error: null, toolUseId: 'toolu_g',
-      }],
+      backgroundTasks: [gammaTask],
     });
     await act(async () => {
       fireEvent.click(screen.getByTestId('task-card-bg:bg1').querySelector('.task-card__main')!);
     });
     fireEvent.click(screen.getByText('Stop'));
     expect(onStop).toHaveBeenCalledWith('bg1');
+  });
+  it('Answer on a waiting card calls claudeAnswerQuestion with the question and option', async () => {
+    (window.sai as any).claudeAnswerQuestion = vi.fn().mockResolvedValue(undefined);
+    await mount({ ...baseProps(), awaitingQuestion: true, initialMessages: [...taskHistory(), askCall([pickQuestion])] as any });
+    const alpha = screen.getByTestId('task-card-alpha');
+    expect(alpha.textContent).toContain('Which DB?');
+    fireEvent.click(within(alpha).getByRole('button', { name: 'SQLite' }));
+    expect((window.sai as any).claudeAnswerQuestion).toHaveBeenCalledWith('/project', 'toolu_ask', { 'Which DB?': 'SQLite' }, 'chat');
+  });
+
+  it('a multi-question AskUserQuestion shows Reply only, no quick answers', async () => {
+    await mount({
+      ...baseProps(), awaitingQuestion: true,
+      initialMessages: [...taskHistory(), askCall([pickQuestion, { ...pickQuestion, question: 'Which ORM?' }])] as any,
+    });
+    const alpha = screen.getByTestId('task-card-alpha');
+    expect(within(alpha).getByRole('button', { name: 'Reply…' })).toBeTruthy();
+    expect(within(alpha).queryByRole('button', { name: 'SQLite' })).toBeNull();
+    expect(alpha.textContent).not.toContain('Which DB?');
   });
 });

@@ -10,11 +10,13 @@ export interface TaskStreamViewProps {
   messages: ChatMessage[] | null;
   onBack(): void;
   renderMessage(m: ChatMessage): ReactNode;
+  /** Stop this card's background task (shown while it runs). */
+  onStop?(card: TaskCard): void;
 }
 
 const STICK_THRESHOLD_PX = 48;
 
-export function TaskStreamView({ card, messages, onBack, renderMessage }: TaskStreamViewProps) {
+export function TaskStreamView({ card, messages, onBack, renderMessage, onStop }: TaskStreamViewProps) {
   const bodyRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
   const count = messages?.length ?? 0;
@@ -49,6 +51,9 @@ export function TaskStreamView({ card, messages, onBack, renderMessage }: TaskSt
         <span className="task-stream__title">{card.title}</span>
         {card.totalCount > 0 && (
           <span className="task-stream__meta">{card.doneCount}/{card.totalCount}</span>
+        )}
+        {onStop && card.status === 'running' && !!card.agent?.taskId && (
+          <button type="button" className="task-card__link task-card__link--stop" onClick={() => onStop(card)}>Stop</button>
         )}
       </div>
       <div className="task-stream__body" ref={bodyRef}>

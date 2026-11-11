@@ -139,6 +139,7 @@
 .task-status--waiting .task-tabs__underline-fill { background: var(--orange); }
 .task-tabs__tab--active .task-tabs__underline { background: var(--border-strong); }
 .task-tabs__strip { display: flex; flex-direction: column; gap: 6px; padding: 8px 12px; border-top: 1px solid var(--border-subtle); background: var(--surface-0); }
+.task-tabs__strip > .task-card__link--stop { align-self: flex-end; }
 .task-tabs__pills { display: flex; flex-wrap: wrap; gap: 4px; }
 .task-tabs__pill { padding: 2px 8px; border-radius: 10px; font-size: var(--text-xs); border: 1px solid var(--border-subtle); color: var(--text-muted); }
 .task-tabs__pill--done { color: var(--green); }

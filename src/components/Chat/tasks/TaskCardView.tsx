@@ -90,7 +90,7 @@ export function TaskCardView({
       </div>
       {card.status === 'waiting' && card.question && (
         <div className="task-card__question">
-          <div className="task-card__question-text">{card.question.text}</div>
+          {card.question.text && <div className="task-card__question-text">{card.question.text}</div>}
           <div className="task-card__options">
             {card.question.options.map((o) => (
               <button key={o} type="button" className="task-card__btn" onClick={() => onAnswer?.(o)}>{o}</button>

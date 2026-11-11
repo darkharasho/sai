@@ -13,10 +13,13 @@ import { findLatestTodos, type Todo } from '../TodoProgress';
 
 export interface PendingTaskQuestion {
   toolUseId: string;
-  /** The first question's text; also the answers key. */
+  /** The question's text (also the answers key); '' unless exactly one question. */
   text: string;
+  /** Quick-answer labels; [] unless exactly one question (then the card offers Reply… only). */
   options: string[];
   multiSelect: boolean;
+  /** Exactly one question: a quick-answer option fully answers the call. */
+  answerable: boolean;
 }
 
 export interface UseTaskBoardArgs {
@@ -51,7 +54,7 @@ const NO_MESSAGES: ChatMessage[] = [];
 
 const str = (v: unknown): string => (typeof v === 'string' ? v : '');
 
-/** Latest unanswered AskUserQuestion call: first question's text and option labels. */
+/** Latest unanswered AskUserQuestion call. Text and options only for a single-question call. */
 export function findPendingTaskQuestion(messages: ChatMessage[]): PendingTaskQuestion | null {
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i];
@@ -62,13 +65,16 @@ export function findPendingTaskQuestion(messages: ChatMessage[]): PendingTaskQue
       try {
         const input = typeof tc.input === 'string' ? JSON.parse(tc.input || '{}') : tc.input;
         if (input?.answers && typeof input.answers === 'object' && Object.keys(input.answers).length > 0) continue;
-        const q = Array.isArray(input?.questions) ? input.questions[0] : null;
+        const questions = Array.isArray(input?.questions) ? input.questions : [];
+        if (questions.length === 0) continue;
+        if (questions.length !== 1) return { toolUseId: tc.id, text: '', options: [], multiSelect: false, answerable: false };
+        const q = questions[0];
         const text = str(q?.question);
         if (!text) continue;
         const options = (Array.isArray(q.options) ? q.options : [])
           .map((o: unknown) => (typeof o === 'string' ? o : str((o as { label?: unknown })?.label)))
           .filter(Boolean);
-        return { toolUseId: tc.id, text, options, multiSelect: q.multiSelect === true };
+        return { toolUseId: tc.id, text, options, multiSelect: q.multiSelect === true, answerable: true };
       } catch { /* malformed input */ }
     }
   }

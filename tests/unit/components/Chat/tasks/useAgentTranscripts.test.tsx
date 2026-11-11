@@ -143,4 +143,40 @@ describe('useAgentTranscripts', () => {
     await act(async () => { resolveSecond({ agentId: 'a', finished: false, messages: [text('u1', 'one')], nextOffset: 1 }); });
     expect(result.current.get('a')!.messages.map((m) => m.content)).toEqual(['one']);
   });
+  it('an id list change keeps loaded ids (no refetch from 0) and drops removed ones', async () => {
+    fetchFn.mockImplementation(async (_s: string, id: string, offset: number) =>
+      offset === 0 ? { agentId: id, finished: false, messages: [text(`${id}1`, id)], nextOffset: 1 } : { agentId: id, finished: false, messages: [], nextOffset: offset });
+    const { result, rerender } = renderHook(({ ids }) => useAgentTranscripts('sess', ids, new Set<string>()), {
+      initialProps: { ids: ['a'] },
+    });
+    await flush();
+    expect(result.current.get('a')!.messages).toHaveLength(1);
+    rerender({ ids: ['a', 'b'] });
+    await flush();
+    expect(fetchFn.mock.calls.filter((c) => c[1] === 'a')).toHaveLength(1);
+    expect(fetchFn).toHaveBeenCalledWith('sess', 'b', 0);
+    expect(result.current.get('a')!.messages).toHaveLength(1);
+    expect(result.current.get('b')!.messages).toHaveLength(1);
+    rerender({ ids: ['b'] });
+    await flush();
+    expect(result.current.has('a')).toBe(false);
+    expect(result.current.get('b')!.messages).toHaveLength(1);
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+  });
+
+  it('stops polling a live id once its transcript is finished, and empty chunks keep the same map', async () => {
+    fetchFn
+      .mockResolvedValueOnce({ agentId: 'x', finished: false, messages: [text('u1', 'one')], nextOffset: 1 })
+      .mockResolvedValueOnce({ agentId: 'x', finished: false, messages: [], nextOffset: 1 })
+      .mockResolvedValue({ agentId: 'x', finished: true, messages: [], nextOffset: 1 });
+    const { result } = renderHook(() => useAgentTranscripts('sess', ['a'], new Set(['a'])));
+    await flush();
+    const first = result.current;
+    await tick(2000); // empty chunk, nothing changed
+    expect(result.current).toBe(first);
+    await tick(2000); // finished flips
+    expect(result.current.get('a')!.finished).toBe(true);
+    await tick(6000);
+    expect(fetchFn).toHaveBeenCalledTimes(3);
+  });
 });

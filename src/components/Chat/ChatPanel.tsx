@@ -2485,7 +2485,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
   }, [onStopBackgroundTask]);
   const taskQuestion = taskBoard.pendingQuestion;
   const handleTaskAnswer = useCallback((option: string) => {
-    if (!taskQuestion) return;
+    if (!taskQuestion?.answerable) return;
     void handleAnswerQuestion(taskQuestion.toolUseId, { [taskQuestion.text]: taskQuestion.multiSelect ? [option] : option });
   }, [taskQuestion, handleAnswerQuestion]);
   const handleTaskReply = useCallback(() => {
@@ -2640,7 +2640,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
     <div className={`chat-panel${showTaskUi && taskView === 'rail' ? ' chat-panel--task-rail' : ''}`}>
       <LoadGuardBanner state={loadGuard} />
       {showTaskUi && taskView === 'tabs' && (
-        <TaskTabs board={taskBoard.board} tails={taskBoard.tails} activeId={openTaskCard?.id ?? null} onSelect={openTaskStream} />
+        <TaskTabs board={taskBoard.board} tails={taskBoard.tails} activeId={openTaskCard?.id ?? null} onSelect={openTaskStream} onStop={handleTaskStop} />
       )}
       <motion.div
         className="pinned-prompt-bar"
@@ -2648,7 +2648,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
         data-layout-id={pinnedUserMessage ? `pinned-${pinnedUserMessage.id}` : undefined}
         animate={{ height: pinnedUserMessage ? 32 : 0, opacity: pinnedUserMessage ? 1 : 0 }}
         transition={dockTransition}
-        style={{ overflow: 'hidden' }}
+        style={openTaskCard ? { overflow: 'hidden', display: 'none' } : { overflow: 'hidden' }}
       >
         {pinnedUserMessage && (
           <>
@@ -2672,6 +2672,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
           messages={taskBoard.streamMessages(openTaskCard)}
           onBack={() => setOpenTaskId(null)}
           renderMessage={renderTaskMessage}
+          onStop={handleTaskStop}
         />
       )}
       {/* Hidden, not unmounted, while a task stream is open: the scroll

@@ -1,4 +1,4 @@
-import type { TaskBoard, TailLine } from './types';
+import type { TaskBoard, TaskCard, TailLine } from './types';
 import './tasks.css';
 
 export interface TaskTabsProps {
@@ -7,12 +7,15 @@ export interface TaskTabsProps {
   /** null = All */
   activeId: string | null;
   onSelect(id: string | null): void;
+  /** Stop the active tab's background task (shown while it runs). */
+  onStop?(card: TaskCard): void;
 }
 
-export function TaskTabs({ board, tails, activeId, onSelect }: TaskTabsProps) {
+export function TaskTabs({ board, tails, activeId, onSelect, onStop }: TaskTabsProps) {
   if (board.cards.length === 0) return null;
   const active = activeId ? board.cards.find((c) => c.id === activeId) ?? null : null;
   const tail = active ? (tails.get(active.id) ?? []).slice(-4) : [];
+  const canStop = !!active && active.status === 'running' && !!active.agent?.taskId && !!onStop;
 
   return (
     <div className="task-tabs">
@@ -45,6 +48,9 @@ export function TaskTabs({ board, tails, activeId, onSelect }: TaskTabsProps) {
       </div>
       {active && (
         <div className="task-tabs__strip">
+          {canStop && (
+            <button type="button" className="task-card__link task-card__link--stop" onClick={() => onStop?.(active)}>Stop</button>
+          )}
           {active.steps.length > 0 && (
             <div className="task-tabs__pills">
               {active.steps.map((s, i) => (

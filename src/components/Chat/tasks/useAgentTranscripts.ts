@@ -32,12 +32,29 @@ export function useAgentTranscripts(
   const idsKey = toolUseIds.join('\u0000');
   const liveKey = toolUseIds.filter((id) => liveIds.has(id)).join('\u0000');
 
-  // New session or changed id list: drop state so unavailable ids are retried.
+  // New session: drop everything.
   useEffect(() => {
     sessionRef.current = sessionId;
     entries.current = new Map();
-    setTranscripts(new Map());
-  }, [sessionId, idsKey]);
+    setTranscripts((m) => (m.size ? new Map() : m));
+  }, [sessionId]);
+
+  // Changed id list: keep ids still present (no refetch from offset 0), drop removed ones.
+  useEffect(() => {
+    const keep = new Set(toolUseIds);
+    let removed = false;
+    for (const id of [...entries.current.keys()]) {
+      if (!keep.has(id)) { entries.current.delete(id); removed = true; }
+    }
+    if (!removed) return;
+    setTranscripts((m) => {
+      if (![...m.keys()].some((id) => !keep.has(id))) return m;
+      const next = new Map(m);
+      for (const id of m.keys()) if (!keep.has(id)) next.delete(id);
+      return next;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [idsKey]);
 
   useEffect(() => {
     if (!sessionId) return;
@@ -54,6 +71,7 @@ export function useAgentTranscripts(
         const chunk = (await (window as any).sai?.claudeSubagentTranscript?.(sessionId, id, prev?.offset ?? 0)) as Chunk | null | undefined;
         if (cancelled) return;
         let next: Entry;
+        let added = 0;
         if (!chunk) {
           const nulls = (prev?.nulls ?? 0) + 1;
           const unavailable = !isLive || nulls >= MAX_LIVE_NULLS;
@@ -62,13 +80,26 @@ export function useAgentTranscripts(
             transcript: { messages: prev?.transcript.messages ?? [], finished: false, unavailable },
           };
         } else {
-          const raw = [...(prev?.raw ?? []), ...(Array.isArray(chunk.messages) ? chunk.messages : [])];
+          const fresh = Array.isArray(chunk.messages) ? chunk.messages : [];
+          added = fresh.length;
+          const raw = [...(prev?.raw ?? []), ...fresh];
           next = {
             raw,
             nulls: 0,
             offset: typeof chunk.nextOffset === 'number' ? chunk.nextOffset : raw.length,
-            transcript: { messages: transcriptToChatMessages(raw), finished: chunk.finished === true, unavailable: false },
+            transcript: added || !prev
+              ? { messages: transcriptToChatMessages(raw), finished: chunk.finished === true, unavailable: false }
+              : { ...prev.transcript, finished: chunk.finished === true, unavailable: false },
           };
+        }
+        // Nothing visible changed (no new messages, same finished/unavailable): keep the
+        // old transcript object and skip the state update.
+        const unchanged = !!prev && added === 0 &&
+          prev.transcript.finished === next.transcript.finished &&
+          prev.transcript.unavailable === next.transcript.unavailable;
+        if (unchanged) {
+          entries.current.set(id, { ...next, transcript: prev!.transcript });
+          return;
         }
         entries.current.set(id, next);
         setTranscripts((m) => new Map(m).set(id, next.transcript));
@@ -81,7 +112,11 @@ export function useAgentTranscripts(
 
     for (const id of toolUseIds) if (!entries.current.has(id)) void poll(id, liveIds.has(id));
     const live = toolUseIds.filter((id) => liveIds.has(id));
-    const timer = live.length ? setInterval(() => { for (const id of live) void poll(id, true); }, POLL_MS) : null;
+    const timer = live.length
+      ? setInterval(() => {
+        for (const id of live) if (!entries.current.get(id)?.transcript.finished) void poll(id, true);
+      }, POLL_MS)
+      : null;
 
     return () => {
       cancelled = true;

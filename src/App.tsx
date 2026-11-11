@@ -465,8 +465,10 @@ export default function App() {
   const sessionLoadSeqRef = useRef(0);
   const [focusedChat, setFocusedChat] = useState(false);
   const [overlayEnabled, setOverlayEnabled] = useState(false);
-  // Task rail/tabs (Claude SDK chats only). The backend starts as 'cli' so a
-  // CLI user never sees a flash of task UI before settings load.
+  // Task rail/tabs (Claude SDK chats only). claudeBackendSetting is a load-time
+  // snapshot: the backend only switches after a restart, so a live settings
+  // change must not flip the task UI. It starts as 'cli' so a CLI user never
+  // sees a flash of task UI before settings load.
   const [taskView, setTaskView] = useState<'rail' | 'tabs'>('rail');
   const [claudeBackendSetting, setClaudeBackendSetting] = useState<'cli' | 'sdk'>('cli');
   // Session-scoped overlay mode from the inline control under the chat input.
@@ -5913,7 +5915,6 @@ export default function App() {
           if (key === 'focusedChat') { setFocusedChat(value); if (value) { setExpanded(['chat', 'terminal']); setSplitRatio(0.66); } }
           if (key === 'overlayEnabled') setOverlayEnabled(!!value);
           if (key === 'taskView') setTaskView(value === 'tabs' ? 'tabs' : 'rail');
-          if (key === 'claudeBackend') setClaudeBackendSetting(value === 'cli' ? 'cli' : 'sdk');
           if (key === 'defaultView') { /* persisted only, applies on next launch */ }
           if (key === 'sidebarWidth') document.documentElement.style.setProperty('--sidebar-width', `${value}px`);
           if (typeof key === 'string' && key.startsWith('swarm.')) {

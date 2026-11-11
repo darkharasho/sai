@@ -44,4 +44,18 @@ describe('TaskTabs', () => {
     expect(screen.getByText('line2')).toBeTruthy();
     expect(screen.getByText('line5')).toBeTruthy();
   });
+  it('active running agent tab shows Stop that calls onStop with the card', () => {
+    const agentCard = card({ id: 'g', title: 'Gamma', agent: { description: 'd', toolUseId: 'tu', taskId: 'bg1' } });
+    const onStop = vi.fn();
+    const { rerender } = render(<TaskTabs board={board([agentCard])} tails={new Map()} activeId="g" onSelect={() => {}} onStop={onStop} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
+    expect(onStop).toHaveBeenCalledWith(agentCard);
+    // No Stop for a finished card, an inline card, or without onStop.
+    rerender(<TaskTabs board={board([{ ...agentCard, status: 'done' }])} tails={new Map()} activeId="g" onSelect={() => {}} onStop={onStop} />);
+    expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull();
+    rerender(<TaskTabs board={board([card({ id: 'g' })])} tails={new Map()} activeId="g" onSelect={() => {}} onStop={onStop} />);
+    expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull();
+    rerender(<TaskTabs board={board([agentCard])} tails={new Map()} activeId="g" onSelect={() => {}} />);
+    expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull();
+  });
 });

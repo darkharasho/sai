@@ -37,4 +37,15 @@ describe('TaskStreamView', () => {
     fireEvent.click(screen.getByText('← All'));
     expect(onBack).toHaveBeenCalled();
   });
+  it('header Stop shows for a running agent card and calls onStop', () => {
+    const agentCard: TaskCard = { ...card, agent: { description: 'd', toolUseId: 'tu', taskId: 'bg1' } };
+    const onStop = vi.fn();
+    const { rerender } = render(<TaskStreamView card={agentCard} messages={msgs} onBack={() => {}} renderMessage={() => null} onStop={onStop} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
+    expect(onStop).toHaveBeenCalledWith(agentCard);
+    rerender(<TaskStreamView card={{ ...agentCard, status: 'done' }} messages={msgs} onBack={() => {}} renderMessage={() => null} onStop={onStop} />);
+    expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull();
+    rerender(<TaskStreamView card={card} messages={msgs} onBack={() => {}} renderMessage={() => null} onStop={onStop} />);
+    expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull();
+  });
 });
