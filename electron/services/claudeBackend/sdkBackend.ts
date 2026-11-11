@@ -16,7 +16,6 @@ import * as path from 'path';
 import * as os from 'os';
 import type { query as QueryFn, SDKUserMessage, PermissionResult, McpSdkServerConfigWithInstance, McpServerConfig, SdkPluginConfig } from '@anthropic-ai/claude-agent-sdk';
 import { enrichedEnv } from '../shellEnv';
-import { isSaiTaskToolName } from '../../../src/lib/saiTaskTool';
 import { CHAT_RENDER_NUDGE, CHAT_GITHUB_WATCH_NUDGE, CHAT_TASK_CARDS_NUDGE } from '../chatNudges';
 import {
   approveImpl,
@@ -1350,7 +1349,7 @@ export class SdkBackend implements ClaudeBackend {
       const toolUseId = opts.toolUseID;
       // sai_task is display-only bookkeeping for the task rail: never gate it
       // behind an approval card, and never mark the scope as awaiting input.
-      if (isSaiTaskToolName(toolName)) {
+      if (toolName === 'mcp__sai__sai_task') {
         return Promise.resolve({ behavior: 'allow', updatedInput: input });
       }
       const session = this.sessions.get(scopeKey);

@@ -734,6 +734,38 @@ describe('SdkBackend', () => {
     fakeQuery.close();
   });
 
+  it('a non-SAI tool ending in sai_task still goes through approval', async () => {
+    const fakeQuery = makeFakeQuery([], { hang: true });
+    let capturedOptions: any = null;
+    const queryFn = vi.fn((args: { prompt: any; options: any }) => {
+      capturedOptions = args.options;
+      return fakeQuery;
+    });
+    const backend = new SdkBackend({
+      queryFn,
+      emit: (p) => emits.push(p),
+      resolveClaudePath: () => undefined,
+    });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.send({ projectPath: PROJECT, message: 'run', scope: SCOPE, permMode: 'default' });
+    await new Promise<void>((resolve) => {
+      const check = () => (capturedOptions ? resolve() : setTimeout(check, 5));
+      setTimeout(check, 5);
+    });
+
+    void capturedOptions.canUseTool(
+      'mcp__other__sai_task',
+      { action: 'create' },
+      { toolUseID: 'tu-other', signal: new AbortController().signal },
+    );
+    await new Promise(r => setTimeout(r, 5));
+    const approval = emits.find(e => e.type === 'approval_needed');
+    expect(approval).toBeDefined();
+    expect(approval!.toolName).toBe('mcp__other__sai_task');
+
+    fakeQuery.close();
+  });
+
   it('(10) canUseTool for non-Bash has no command; approve(false) resolves deny', async () => {
     const fakeQuery = makeFakeQuery([], { hang: true });
 

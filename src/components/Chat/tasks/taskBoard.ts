@@ -127,7 +127,8 @@ export function deriveTaskBoard(messages: ChatMessage[], rt: BoardRuntime): Task
       if (detail) matched.add(detail.id);
       bindings.set(d.id, { toolUseId, detail });
     }
-    // Pass 2: an agent declared under a different description than the Agent
+    // Pass 2 (positional heuristic): binds call order to declaration order, so
+    // it can mis-pair when several agents drift. An agent declared under a different description than the Agent
     // call the model actually made binds to the earliest unclaimed call that
     // started within the batch.
     if (declared.batchStartedAt !== null) {

@@ -215,16 +215,42 @@ describe('deriveTaskBoard', () => {
     });
 
     it('fallback never steals an Agent call whose description exactly matches another declared card', () => {
+      // Two calls carry card b's exact description; the exact map keeps the
+      // latest, so the earlier one is only protected by the declaredDescs guard.
       const messages = [
         msg([create([{ id: 'a', title: 'A', steps: [] }, { id: 'b', title: 'B', steps: [] }])], 1),
         msg([upd({ id: 'a', status: 'running', agent: 'Drifted name' })], 2),
         msg([upd({ id: 'b', status: 'running', agent: 'Exact name' })], 3),
-        msg([agentCall('Exact name', 'toolu_B')], 4),
+        msg([agentCall('Exact name', 'toolu_B1')], 4),
+        msg([agentCall('Exact name', 'toolu_B2')], 5),
       ];
       const board = deriveTaskBoard(messages, rt());
       const byId = (id: string) => board.cards.find((c) => c.id === id)!;
-      expect(byId('b').agent!.toolUseId).toBe('toolu_B');
+      expect(byId('b').agent!.toolUseId).toBe('toolu_B2');
       expect(byId('a').agent!.toolUseId).toBeNull();
+    });
+
+    it('fallback is skipped when batchStartedAt is null', () => {
+      const messages = [
+        { ...declare()[0], timestamp: null as any },
+        declare()[1],
+        msg([agentCall('Different', 'toolu_X')], 3),
+      ];
+      const board = deriveTaskBoard(messages, rt());
+      expect(board.batchStartedAt).toBeNull();
+      expect(board.cards[0].agent!.toolUseId).toBeNull();
+    });
+
+    it('two drifting cards bind to in-batch calls in declaration order', () => {
+      const messages = [
+        msg([create([{ id: 'a', title: 'A', steps: [] }, { id: 'c', title: 'C', steps: [] }])], 1),
+        msg([upd({ id: 'a', status: 'running', agent: 'Drift one' })], 2),
+        msg([upd({ id: 'c', status: 'running', agent: 'Drift two' })], 3),
+        msg([agentCall('Actual one', 'toolu_X')], 4),
+        msg([agentCall('Actual two', 'toolu_Y')], 5),
+      ];
+      const board = deriveTaskBoard(messages, rt());
+      expect(board.cards.map((c) => c.agent!.toolUseId)).toEqual(['toolu_X', 'toolu_Y']);
     });
 
     it('fallback ignores Agent calls from before the batch started', () => {
