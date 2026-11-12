@@ -22,7 +22,7 @@ export const SAI_TOOL_SCHEMA: SaiToolDef[] = [
       type: 'object',
       properties: {
         html: { type: 'string', description: 'Self-contained snippet; may include <style> and <script>.' },
-        path: { type: 'string', description: 'Workspace file or folder to render as a live site (folder → index.html).' },
+        path: { type: 'string', description: 'File or folder to render as a live site (folder → index.html), inside the workspace or a temp dir (/tmp, /var/tmp). The card loads it from disk whenever it is shown or reopened, so leave the file in place afterwards; deleting it breaks the card.' },
         baseDir: { type: 'string', description: 'For inline `html`: workspace dir that relative assets resolve against.' },
         title: { type: 'string', description: 'Label shown on the card/panel.' },
         width: { type: 'number', description: 'Initial/minimum viewport width in px (default 360); the canvas grows to fit wider content.' },

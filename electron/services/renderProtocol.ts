@@ -183,8 +183,10 @@ function resolveContained(
 // Every temp dir a render target might legitimately live in. os.tmpdir() honours
 // TMPDIR, which SAI/agent processes may point somewhere other than /tmp — but a
 // CLI agent still writes scratch files to a literal /tmp path, so allow both.
+// /var/tmp is the other standard world-writable scratch dir (agents fall back to
+// it when /tmp is a quota-limited tmpfs), so it gets the same trust as /tmp.
 export function osTempRoots(): string[] {
-  const roots = [os.tmpdir(), process.env.TMPDIR, '/tmp'].filter(
+  const roots = [os.tmpdir(), process.env.TMPDIR, '/tmp', '/var/tmp'].filter(
     (r): r is string => typeof r === 'string' && r.length > 0,
   );
   return [...new Set(roots.map((r) => path.resolve(r)))];

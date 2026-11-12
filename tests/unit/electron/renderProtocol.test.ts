@@ -185,6 +185,10 @@ describe('osTempRoots', () => {
     }
   });
 
+  it('includes /var/tmp, the other standard scratch dir agents write to', () => {
+    expect(osTempRoots()).toContain('/var/tmp');
+  });
+
   it('dedupes', () => {
     const roots = osTempRoots();
     expect(new Set(roots).size).toBe(roots.length);
