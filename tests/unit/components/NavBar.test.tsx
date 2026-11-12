@@ -165,24 +165,9 @@ describe('NavBar', () => {
 
 });
 
-const defaultProps = {
-  activeSidebar: null as string | null,
-  onToggle: () => {},
-};
-
-describe('NavBar swarm button visibility', () => {
-  it('shows Swarm button when hasOrchestrator is true', () => {
-    render(<NavBar {...defaultProps} hasOrchestrator={true} />);
-    expect(screen.getByTitle('Swarm')).toBeInTheDocument();
-  });
-
-  it('hides Swarm button when hasOrchestrator is false', () => {
-    render(<NavBar {...defaultProps} hasOrchestrator={false} />);
-    expect(screen.queryByTitle('Swarm')).not.toBeInTheDocument();
-  });
-
-  it('shows Swarm button by default when prop is omitted', () => {
-    render(<NavBar {...defaultProps} />);
-    expect(screen.getByTitle('Swarm')).toBeInTheDocument();
+describe('NavBar without swarm', () => {
+  it('has no Swarm button', () => {
+    render(<NavBar activeSidebar={null} onToggle={() => {}} />);
+    expect(screen.queryByLabelText('Swarm')).toBeNull();
   });
 });

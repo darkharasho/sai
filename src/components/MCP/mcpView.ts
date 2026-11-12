@@ -24,7 +24,8 @@ export interface McpRow {
   removable: boolean;
 }
 
-/** SAI's own in-process servers — not user-manageable. */
+/** SAI's own in-process servers — not user-manageable. The CLI backend still
+ *  registers SAI's chat tool server under the legacy name 'swarm'. */
 export const HIDDEN_LIVE_NAMES: ReadonlySet<string> = new Set(['sai', 'swarm']);
 const PLUGIN_RE = /^plugin:([^:]+):(.+)$/;
 

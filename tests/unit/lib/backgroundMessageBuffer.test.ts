@@ -3,8 +3,8 @@ import {
   convertAssistantEnvelope,
   appendAssistantChunk,
   mergePersistedWithBuffer,
-} from '../../src/lib/swarmTaskMessageBuffer';
-import type { ChatMessage } from '../../src/types';
+} from '../../../src/lib/backgroundMessageBuffer';
+import type { ChatMessage } from '../../../src/types';
 
 describe('convertAssistantEnvelope', () => {
   it('returns null for non-assistant messages', () => {

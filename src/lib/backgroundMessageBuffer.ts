@@ -1,12 +1,11 @@
-// Per-(workspace, taskSessionId) buffer of assistant messages produced by
-// background swarm tasks. Background tasks have no ChatPanel mounted while
-// they run, so streaming `claude:message` envelopes never get translated into
-// ChatMessages and persisted. Without this buffer, clicking a completed task
-// shows only the injected user prompt — the assistant reply is lost.
+// Per-scope buffer of assistant messages produced by chats that stream while
+// no ChatPanel is listening (a background session, or the gap before a newly
+// mounted panel subscribes). Without it, streaming `claude:message` envelopes
+// never get translated into ChatMessages and persisted, and the reply is lost.
 //
 // This module is pure and synchronous; the App.tsx listener feeds it events
 // and, on done/result, flushes the accumulated messages to chatDb merged with
-// any messages already persisted (typically the injected user prompt).
+// any messages already persisted.
 
 import type { ChatMessage, ToolCall } from '../types';
 

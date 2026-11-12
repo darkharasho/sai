@@ -8,15 +8,10 @@ describe('saiTools registry', () => {
     expect(names).toContain('render_component');
   });
 
-  it('excludes chat-only tools from the orchestrator toolset', () => {
-    const names = toolsForToolset('orchestrator').map((t) => t.name);
-    expect(names).not.toContain('render_html');
-  });
-
   it('every tool declares an object input_schema and a toolset', () => {
     for (const t of SAI_TOOL_SCHEMA) {
       expect(t.input_schema.type).toBe('object');
-      expect(['chat', 'orchestrator', 'both']).toContain(t.toolset);
+      expect(['chat', 'both']).toContain(t.toolset);
     }
   });
 

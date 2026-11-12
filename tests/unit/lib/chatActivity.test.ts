@@ -79,11 +79,11 @@ describe('computeChatNotificationCount', () => {
   });
 
   it('counts only sessions the chats panel can display when visibleIds is given', () => {
-    // 'hidden' is flagged but filtered out of the panel (other provider /
-    // task kind) — a badge pointing at it would be unfindable.
+    // 'hidden' is flagged but filtered out of the panel (other provider) —
+    // a badge pointing at it would be unfindable.
     expect(computeChatNotificationCount({
       unread: new Set(['visible', 'hidden']),
-      awaiting: new Set(['hidden-swarm-scope']),
+      awaiting: new Set(['hidden-scope']),
       error: new Set(['hidden-errored']),
       visibleIds: new Set(['visible']),
     })).toBe(1);
@@ -166,7 +166,7 @@ describe('computeCompletedWorkspaces', () => {
 
   it('does NOT add a workspace whose errored session was viewed after the error', () => {
     // lastTurnErrored is only reset by the next completed turn in that same
-    // session — which may never come (dead orchestrator scopes, one-off codex
+    // session — which may never come (dead scopes, one-off codex
     // runs). If viewing didn't clear the roll-up, the titlebar would carry a
     // white done marker forever with nothing findable to clear.
     const out = computeCompletedWorkspaces({

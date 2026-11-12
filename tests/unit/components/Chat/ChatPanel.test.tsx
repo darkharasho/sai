@@ -631,13 +631,10 @@ describe('ChatPanel', () => {
   });
 
   it('preserves Codex scope and Claude-equivalent metadata across start, send, and stop', async () => {
-    const orchestratorContext = { workspaceName: 'SAI' };
     const props = {
       ...baseProps(),
       aiProvider: 'codex' as const,
       claudeScope: 'scope-a',
-      claudeKind: 'orchestrator' as const,
-      claudeOrchestratorContext: orchestratorContext,
       codexPermission: 'read-only' as const,
       codexModel: 'gpt-5.2-codex',
       effortLevel: 'max' as const,
@@ -660,9 +657,9 @@ describe('ChatPanel', () => {
     expect(mockSai.codexStart).toHaveBeenCalledWith(
       '/project',
       'scope-a',
-      'orchestrator',
-      orchestratorContext,
-      '/project',
+      'chat',
+      undefined,
+      undefined,
       expect.any(String),
       ['/repos/a', '/repos/b'],
     );

@@ -321,7 +321,6 @@ function ChatMessage({
   pinnedLayoutId,
   seedGrow,
   renderToolCall,
-  renderMessage,
   metaRuntime,
   onAnswerQuestion,
   onAnswerPlanReview,
@@ -345,8 +344,6 @@ function ChatMessage({
    *  from the tail thinking row — mount it with the grow-in entry (see
    *  seedGrow.ts) so the row visibly becomes the card. */
   renderToolCall?: (tc: import('../../types').ToolCall, defaultExpanded: boolean, seedGrow?: boolean) => React.ReactNode | null;
-  /** Optional whole-message override (e.g. for inline approval cards). Return `null` to use the default renderer. */
-  renderMessage?: (message: ChatMessageType) => React.ReactNode | null;
   /** Active meta-workspace runtime; when set, tool-call cards show a project chip. */
   metaRuntime?: MetaWorkspaceRuntime | null;
   /** Submit answers for an AskUserQuestion tool call. */
@@ -357,15 +354,8 @@ function ChatMessage({
    *  parent computes per-URL "first message" ownership to prevent duplicate cards. */
   watcherUrlAllowlist?: Set<string>;
 }) {
-  // Allow callers to substitute the entire message render for special meta
-  // types (e.g. inline approval cards). Done before any of the normal layout
-  // setup so we don't waste effort.
-  if (renderMessage) {
-    const custom = renderMessage(message);
-    if (custom != null) return <>{custom}</>;
-  }
   // Load-guard events: a message's loadGuard never changes, so this early
-  // return keeps hook order stable per message (same as renderMessage above).
+  // return keeps hook order stable per message.
   if (message.loadGuard) return <LoadGuardEventCard event={message.loadGuard} />;
   const visibleToolCalls = message.toolCalls?.filter(tc => !isSaiTaskToolName(String(tc.name ?? '')));
   const hiddenTaskOnly = !!message.toolCalls && message.toolCalls.length > 0 && visibleToolCalls!.length === 0
@@ -812,7 +802,7 @@ function ChatMessage({
   }, [isAssistantStreaming, message.id, message.role, message.content, message.timestamp, useMorphHead]);
   // When the parent passes an allowlist (main chat), only render watchers it explicitly
   // owns — prevents duplicates when the same run URL shows up in multiple messages. Other
-  // callers (orchestrator, tests) don't pass an allowlist and get the full set.
+  // callers (tests) don't pass an allowlist and get the full set.
   const watcherTargets = watcherUrlAllowlist
     ? watchTargetsFromMessage(message).filter(t => watcherUrlAllowlist.has(t.url))
     : watchTargetsFromMessage(message);
@@ -1279,7 +1269,6 @@ export default memo(ChatMessage, (prev, next) =>
   Boolean(prev.onRetry) === Boolean(next.onRetry) &&
   prev.onClearContext === next.onClearContext &&
   prev.renderToolCall === next.renderToolCall &&
-  prev.renderMessage === next.renderMessage &&
   prev.metaRuntime === next.metaRuntime &&
   prev.watcherUrlAllowlist === next.watcherUrlAllowlist
 );

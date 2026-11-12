@@ -22,7 +22,7 @@ export function parseRunUrl(url: string): GitHubWatchTarget | null {
 }
 
 // Matches both the bare tool name (live dispatch) and MCP-prefixed names
-// (mcp__swarm__sai_watch_github_run) seen on persisted tool calls.
+// (mcp__sai__sai_watch_github_run) seen on persisted tool calls.
 function isWatchToolCall(name: string): boolean {
   return name === 'watch_github_run' || name.endsWith('sai_watch_github_run');
 }

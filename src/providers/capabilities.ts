@@ -1,7 +1,6 @@
 import type { AIProvider } from '../types';
 
 export interface ProviderCapabilities {
-  hasOrchestrator: boolean;
   hasSlashCommands: boolean;
   hasEffortMode: boolean;
   hasConversationMode: boolean;
@@ -13,17 +12,8 @@ export interface ProviderCapabilities {
   hasPlugins: boolean;
 }
 
-/** Runtime-only capability evidence. Codex Swarm requires the isolated App
- * Server transport to have completed its experimental handshake; the static
- * provider table alone must never advertise it. */
-export interface ProviderCapabilityRuntime {
-  codexBackendMode?: 'sdk' | 'app-server';
-  codexSwarmStatus?: { available: boolean; reason?: string };
-}
-
 const CAPABILITIES: Record<AIProvider, ProviderCapabilities> = {
   claude: {
-    hasOrchestrator: true,
     hasSlashCommands: true,
     hasEffortMode: true,
     hasConversationMode: false,
@@ -35,7 +25,6 @@ const CAPABILITIES: Record<AIProvider, ProviderCapabilities> = {
     hasPlugins: true,
   },
   gemini: {
-    hasOrchestrator: false,
     hasSlashCommands: false,
     hasEffortMode: false,
     hasConversationMode: true,
@@ -47,7 +36,6 @@ const CAPABILITIES: Record<AIProvider, ProviderCapabilities> = {
     hasPlugins: false,
   },
   codex: {
-    hasOrchestrator: false,
     hasSlashCommands: false,
     hasEffortMode: true,
     hasConversationMode: false,
@@ -61,7 +49,6 @@ const CAPABILITIES: Record<AIProvider, ProviderCapabilities> = {
     hasPlugins: false,
   },
   kimi: {
-    hasOrchestrator: false,
     hasSlashCommands: false,
     hasEffortMode: false,
     hasConversationMode: false,
@@ -74,11 +61,6 @@ const CAPABILITIES: Record<AIProvider, ProviderCapabilities> = {
   },
 };
 
-export function getCapabilities(provider: AIProvider, runtime: ProviderCapabilityRuntime = {}): ProviderCapabilities {
-  const capabilities = CAPABILITIES[provider];
-  if (provider !== 'codex') return capabilities;
-  return {
-    ...capabilities,
-    hasOrchestrator: runtime.codexBackendMode === 'app-server' && runtime.codexSwarmStatus?.available === true,
-  };
+export function getCapabilities(provider: AIProvider): ProviderCapabilities {
+  return CAPABILITIES[provider];
 }

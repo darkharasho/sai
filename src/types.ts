@@ -35,13 +35,6 @@ export interface ChatMessage {
     details?: string;
     errorType?: string;
   };
-  /**
-   * Optional metadata for non-standard rendering (e.g. inline swarm approval
-   * cards injected into the orchestrator chat). Generic chat panels ignore
-   * this field; the orchestrator's renderToolCall / renderMessage hooks use
-   * it to render purpose-built cards instead of plain text.
-   */
-  meta?: ChatMessageMeta;
   /** Load-guard chat event (Stopped card / "System load:" note). role 'system',
    *  empty content; never sent to the AI. */
   loadGuard?: LoadGuardChatEvent;
@@ -57,21 +50,6 @@ export interface LoadGuardTopUser {
 export type LoadGuardChatEvent =
   | { kind: 'note'; text: string }
   | { kind: 'killed'; unitKind: 'command' | 'service' | 'agent'; label: string; sizeKb: number; memUsedPct: number; top: LoadGuardTopUser[]; toldAi: string };
-
-export type ChatMessageMeta = ApprovalChatMeta;
-
-export interface ApprovalChatMeta {
-  type: 'approval';
-  approvalId: string;
-  taskId: string;
-  taskTitle: string;
-  toolName: string;
-  command?: string;
-  branch?: string;
-  createdAt: number;
-  /** Set when the approval has been resolved; collapses the card. */
-  resolved?: 'approved' | 'denied';
-}
 
 export const AI_PROVIDERS = ['claude', 'codex', 'gemini', 'kimi'] as const;
 export type AIProvider = (typeof AI_PROVIDERS)[number];
@@ -118,8 +96,6 @@ export interface ChatSession {
   titleEdited?: boolean;
   messageCount: number;
   projectPath?: string;
-  kind?: SessionKind;        // default 'chat'
-  swarmTaskId?: string;      // populated for task / orchestrator sessions
 }
 
 export interface GitHubWatcherSnapshot {
@@ -514,7 +490,6 @@ declare global {
     geminiSetSessionId?: (projectPath: string, sessionId: string | undefined, scope?: string) => void;
     codexBackendModeGet?: () => Promise<'sdk' | 'app-server'>;
     codexBackendModeSet?: (mode: 'sdk' | 'app-server') => Promise<'sdk' | 'app-server'>;
-    codexSwarmStatus?: () => Promise<{ available: boolean; reason?: string }>;
     codexAppServerPreviewStatus?: () => Promise<{ available: boolean; reason?: string }>;
     codexMcpRuntimeStatus?: (
       projectPath: string,
@@ -544,15 +519,6 @@ declare global {
     ) => Promise<import('../electron/services/codexBackend').CodexApprovalResult>;
     searchRun?: SaiSearchApi['searchRun'];
     searchReplaceFile?: SaiSearchApi['searchReplaceFile'];
-    swarm?: {
-      worktreeAdd: (projectPath: string, taskId: string, branch: string, baseBranch: string) => Promise<string>;
-      worktreeRemove: (projectPath: string, worktreePath: string, branch: string) => Promise<void>;
-      canFastForward: (projectPath: string, source: string, target: string) => Promise<boolean>;
-      ffMerge: (projectPath: string, source: string) => Promise<void>;
-      diffStats: (cwd: string, baseBranch: string, branch: string) => Promise<{ additions: number; deletions: number; files: number }>;
-      branchDiff: (cwd: string, baseBranch: string, branch: string) => Promise<string>;
-      gc?: (projectPath: string, liveTaskIds: string[], liveBranches: string[]) => Promise<{ removedWorktrees: number; deletedBranches: number }>;
-    };
   }
 
   interface Window {
@@ -590,61 +556,3 @@ export interface SearchResults {
   durationMs: number;
 }
 
-export type SessionKind = 'chat' | 'task' | 'orchestrator';
-
-export type SwarmTaskStatus =
-  | 'queued'
-  | 'streaming'
-  | 'awaiting_approval'
-  | 'paused'
-  | 'done'
-  | 'failed'
-  | 'landed'
-  | 'discarded';
-
-export type ApprovalPolicy = 'auto' | 'auto-read' | 'always-ask';
-
-export interface SwarmTask {
-  id: string;
-  workspaceId: string;        // = projectPath
-  sessionId: string;          // FK to ChatSession.id
-  title: string;
-  prompt: string;
-  provider: AIProvider;
-  model: string;
-  /** Claude effort selected when this task was queued. */
-  effort?: EffortLevel;
-  approvalPolicy: ApprovalPolicy;
-  status: SwarmTaskStatus;
-  branch: string;
-  baseBranch: string;         // branch HEAD when task was spawned
-  worktreePath: string | null;
-  /** For meta workspaces: the real project root that owns this task's git worktree and cwd.
-   *  For normal workspaces: undefined (equivalent to workspaceId). */
-  projectPath?: string;
-  /** For meta workspaces: the human-readable link name shown in cards. */
-  projectLinkName?: string;
-  createdAt: number;
-  lastActivityAt: number;
-  costEstimate: number;
-  toolCallCount: number;
-}
-
-export interface SwarmApproval {
-  id: string;
-  taskId: string;
-  workspaceId: string;
-  toolName: string;
-  toolUseId: string;
-  command?: string;
-  description?: string;
-  input?: unknown;
-  /** App Server approvals are scoped by an opaque main-process handle. */
-  provider?: 'codex';
-  requestHandle?: string;
-  kind?: 'command' | 'file-change' | 'permissions';
-  availableDecisions?: string[];
-  /** Exact, JSON-safe permission values emitted by the App Server backend. */
-  requestedPermissions?: unknown[];
-  createdAt: number;
-}

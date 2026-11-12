@@ -10,7 +10,7 @@ function makeTc(width: number, kind: Kind): ToolCall {
     return {
       id: `tc-tall-html-${width}`,
       type: 'mcp',
-      name: 'mcp__swarm__sai_render_html',
+      name: 'mcp__sai__sai_render_html',
       input: JSON.stringify({ title: 'Tall Mock', width, html: '<style>body{margin:0}</style><div style="height:3000px;background:#0a0b0f;color:#fff">tall</div>' }),
     };
   }
@@ -18,7 +18,7 @@ function makeTc(width: number, kind: Kind): ToolCall {
     return {
       id: `tc-vh-html-${width}`,
       type: 'mcp',
-      name: 'mcp__swarm__sai_render_html',
+      name: 'mcp__sai__sai_render_html',
       input: JSON.stringify({ title: 'VH Mock', width, height: 800, html: '<style>body{margin:0}</style><div style="height:100vh;background:#0a0b0f;color:#fff">full</div>' }),
     };
   }
@@ -26,7 +26,7 @@ function makeTc(width: number, kind: Kind): ToolCall {
     return {
       id: `tc-choose-${width}`,
       type: 'mcp',
-      name: 'mcp__swarm__sai_choose',
+      name: 'mcp__sai__sai_choose',
       input: JSON.stringify({ message: 'Pick a color', options: ['Red', 'Green', 'Blue'], width }),
     };
   }
@@ -34,7 +34,7 @@ function makeTc(width: number, kind: Kind): ToolCall {
     return {
       id: `tc-confirm-${width}`,
       type: 'mcp',
-      name: 'mcp__swarm__sai_confirm',
+      name: 'mcp__sai__sai_confirm',
       input: JSON.stringify({ message: 'Proceed?', confirmLabel: 'Yes', cancelLabel: 'No', width }),
     };
   }
@@ -42,7 +42,7 @@ function makeTc(width: number, kind: Kind): ToolCall {
     return {
       id: `tc-form-${width}`,
       type: 'mcp',
-      name: 'mcp__swarm__sai_render_form',
+      name: 'mcp__sai__sai_render_form',
       input: JSON.stringify({
         title: 'Pick one',
         width,
@@ -55,7 +55,7 @@ function makeTc(width: number, kind: Kind): ToolCall {
     return {
       id: `tc-chart-${width}`,
       type: 'mcp',
-      name: 'mcp__swarm__sai_render_chart',
+      name: 'mcp__sai__sai_render_chart',
       input: JSON.stringify({
         title: 'Weekly task counts',
         width,
@@ -70,7 +70,7 @@ function makeTc(width: number, kind: Kind): ToolCall {
     return {
       id: `tc-diff-${width}`,
       type: 'mcp',
-      name: 'mcp__swarm__sai_render_diff',
+      name: 'mcp__sai__sai_render_diff',
       input: JSON.stringify({
         title: 'Button restyle',
         width,
@@ -87,7 +87,7 @@ function makeTc(width: number, kind: Kind): ToolCall {
     return {
       id: `tc-mermaid-${width}`,
       type: 'mcp',
-      name: 'mcp__swarm__sai_render_mermaid',
+      name: 'mcp__sai__sai_render_mermaid',
       input: JSON.stringify({ title: 'Flow', width, diagram: 'graph TD; A[Start]-->B[Next]; B-->C[Done]' }),
     };
   }
@@ -95,7 +95,7 @@ function makeTc(width: number, kind: Kind): ToolCall {
     return {
       id: `tc-theme-${width}`,
       type: 'mcp',
-      name: 'mcp__swarm__sai_render_theme',
+      name: 'mcp__sai__sai_render_theme',
       input: JSON.stringify({ title: 'Theme', width, vars: { '--accent': '#6aa9ff' }, components: ['WorkspaceSquircle'], props: { state: 'busy-done' } }),
     };
   }
@@ -109,7 +109,7 @@ function makeTc(width: number, kind: Kind): ToolCall {
   return {
     id: `tc-${width}`,
     type: 'mcp',
-    name: 'mcp__swarm__sai_render_html',
+    name: 'mcp__sai__sai_render_html',
     input: JSON.stringify({ title: 'Aurora Button', width, html }),
   };
 }

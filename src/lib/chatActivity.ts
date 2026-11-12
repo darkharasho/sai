@@ -73,7 +73,7 @@ export function computeCompletedWorkspaces(opts: {
     for (const s of ws.sessions) {
       // An error flags the workspace only until the session is viewed.
       // lastTurnErrored itself is reset by the NEXT completed turn in that
-      // session — which may never come (dead orchestrator scopes, one-off
+      // session — which may never come (dead scopes, one-off
       // runs) — so viewing must be able to retire the notice, or the marker
       // sticks forever. Unlike the unread rule below, a never-viewed errored
       // session (lastViewedAt undefined) still counts: the user hasn't seen

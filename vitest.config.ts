@@ -31,15 +31,6 @@ export default defineConfig({
           testTimeout: 15000,
         },
       },
-      {
-        extends: true,
-        test: {
-          name: 'swarm',
-          include: ['tests/swarm/**/*.test.{ts,tsx}'],
-          environment: 'node',
-          setupFiles: ['tests/setup/vitest.setup.ts'],
-        },
-      },
     ],
   },
   resolve: {

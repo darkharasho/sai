@@ -1,9 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import type { ModelChoice, EffortLevel, CodexEffort, CodexModelOption, ClaudeModelOption, AIProvider } from '../types';
 import { isAIProvider } from '../types';
-import { X, Check, ChevronDown, Settings as SettingsIcon, Monitor, Type, PanelLeft, Palette, HardDrive, Keyboard, Zap, Smartphone, Link, Globe } from 'lucide-react';
+import { X, Check, ChevronDown, Settings as SettingsIcon, Monitor, Type, PanelLeft, Palette, HardDrive, Keyboard, Smartphone, Link, Globe } from 'lucide-react';
 import KeybindingsPage from './Settings/KeybindingsPage';
-import SwarmSettings from './Settings/SwarmSettings';
 import RemoteSettings from './Settings/RemoteSettings';
 import BrowserSettings from './Settings/BrowserSettings';
 import IntegrationsPage from './Settings/IntegrationsPage';
@@ -78,7 +77,7 @@ const RETENTION_OPTIONS: { label: string; value: number | null }[] = [
 ];
 
 type SyncStatus = 'idle' | 'syncing' | 'synced' | 'error';
-type SettingsPage = 'general' | 'editor' | 'layout' | 'style' | 'storage' | 'provider' | 'claude' | 'codex' | 'gemini' | 'kimi' | 'swarm' | 'remote' | 'browser' | 'keybindings' | 'integrations';
+type SettingsPage = 'general' | 'editor' | 'layout' | 'style' | 'storage' | 'provider' | 'claude' | 'codex' | 'gemini' | 'kimi' | 'remote' | 'browser' | 'keybindings' | 'integrations';
 
 function formatRelative(ts: number): string {
   const secs = Math.floor((Date.now() - ts) / 1000);
@@ -543,27 +542,26 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
       const snapshot = await Promise.all([
         sai.settingsGet('claude', {}), sai.settingsGet('claudeShowReasoning', false),
         sai.settingsGet('claudeAgentProgressSummaries', true), sai.settingsGet('autoCompactThreshold', 0),
-        sai.settingsGet('swarm.concurrencyCap', 5), sai.settingsGet('swarm.orchestratorModel', ''),
-        sai.settingsGet('swarm.defaultTaskModel', ''), sai.settingsGet('claudeMaxBudgetUsd', 0),
+        sai.settingsGet('claudeMaxBudgetUsd', 0),
       ]);
       await sai.settingsSet('lowTokenModeSnapshot', snapshot);
       await Promise.all([
         sai.settingsSet('claude', { ...snapshot[0], model: 'sonnet', effort: 'medium', workspaceOverrides: {} }),
         sai.settingsSet('claudeShowReasoning', false), sai.settingsSet('claudeAgentProgressSummaries', false),
-        sai.settingsSet('autoCompactThreshold', 60), sai.settingsSet('swarm.concurrencyCap', 1),
-        sai.settingsSet('swarm.orchestratorModel', 'sonnet'), sai.settingsSet('swarm.defaultTaskModel', 'sonnet'),
+        sai.settingsSet('autoCompactThreshold', 60),
         sai.settingsSet('claudeMaxBudgetUsd', 0), sai.settingsSet('lowTokenMode', true),
       ]);
       onClaudeModelChange?.('sonnet'); onClaudeEffortChange?.('medium');
       setClaudeShowReasoning(false); setClaudeAgentProgressSummaries(false); setClaudeMaxBudgetUsd(0); setLowTokenMode(true);
     } else {
       const snapshot = await sai.settingsGet('lowTokenModeSnapshot', null) as unknown[] | null;
-      if (!Array.isArray(snapshot) || snapshot.length !== 8) return;
-      const [claude, reasoning, progress, compact, cap, orchestrator, taskModel, budget] = snapshot;
+      // 5 entries; legacy snapshots had 8 (three extra entries before the budget).
+      if (!Array.isArray(snapshot) || (snapshot.length !== 5 && snapshot.length !== 8)) return;
+      const [claude, reasoning, progress, compact] = snapshot;
+      const budget = snapshot[snapshot.length - 1];
       await Promise.all([
         sai.settingsSet('claude', claude), sai.settingsSet('claudeShowReasoning', reasoning), sai.settingsSet('claudeAgentProgressSummaries', progress),
-        sai.settingsSet('autoCompactThreshold', compact), sai.settingsSet('swarm.concurrencyCap', cap), sai.settingsSet('swarm.orchestratorModel', orchestrator),
-        sai.settingsSet('swarm.defaultTaskModel', taskModel), sai.settingsSet('claudeMaxBudgetUsd', budget), sai.settingsSet('lowTokenMode', false),
+        sai.settingsSet('autoCompactThreshold', compact), sai.settingsSet('claudeMaxBudgetUsd', budget), sai.settingsSet('lowTokenMode', false),
       ]);
       const c = claude as { model?: ModelChoice; effort?: EffortLevel };
       if (c.model) onClaudeModelChange?.(c.model); if (c.effort) onClaudeEffortChange?.(c.effort);
@@ -1421,7 +1419,7 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
       <div className="settings-row settings-row-spaced">
         <div className="settings-row-info">
           <div className="settings-row-name">Low token mode</div>
-          <div className="settings-row-desc">Use Sonnet with medium effort, compact context sooner, and disable extra Claude output. Turning it off restores your saved Claude and Swarm defaults.</div>
+          <div className="settings-row-desc">Use Sonnet with medium effort, compact context sooner, and disable extra Claude output. Turning it off restores your saved Claude defaults.</div>
         </div>
         <button className={`settings-toggle${lowTokenMode ? ' on' : ''}`} onClick={() => { void handleLowTokenModeChange(!lowTokenMode); }} role="switch" aria-checked={lowTokenMode}><span className="settings-toggle-thumb" /></button>
       </div>
@@ -1750,7 +1748,6 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
       case 'codex': return renderCodexPage();
       case 'gemini': return renderGeminiPage();
       case 'kimi': return renderKimiPage();
-      case 'swarm': return <SwarmSettings onSettingChange={onSettingChange} />;
       case 'remote': return <RemoteSettings />;
       case 'browser': return <BrowserSettings />;
       case 'keybindings': return <KeybindingsPage />;
@@ -1851,13 +1848,6 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
                 <span>{p.label}</span>
               </button>
             ))}
-            <button
-              className={`settings-nav-item${activePage === 'swarm' ? ' active' : ''}`}
-              onClick={() => setActivePage('swarm')}
-            >
-              <Zap size={14} />
-              <span>Swarm</span>
-            </button>
             <button
               className={`settings-nav-item${activePage === 'remote' ? ' active' : ''}`}
               onClick={() => setActivePage('remote')}
