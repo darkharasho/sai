@@ -12,6 +12,14 @@
   color: var(--text);
   font-size: var(--text-sm);
 }
+.task-rail__top { display: flex; align-items: center; gap: 4px; }
+.task-rail__top > :first-child { flex: 1; min-width: 0; }
+.task-rail__hide {
+  all: unset; box-sizing: border-box; cursor: pointer; flex: none; align-self: flex-start;
+  padding: 2px 6px; border-radius: 4px; line-height: 1; color: var(--text-muted);
+}
+.task-rail__hide:hover { color: var(--text); background: var(--surface-3); }
+.task-rail__hide:focus-visible { outline: 1px solid var(--border-strong); }
 .task-rail__header {
   display: flex; justify-content: space-between; align-items: baseline;
   padding: 0 4px 2px;
@@ -146,6 +154,15 @@
 }
 .task-tabs__list { display: flex; align-items: stretch; gap: 2px; flex: 1 1 auto; min-width: 0; overflow-x: auto; scrollbar-width: none; }
 .task-tabs__list::-webkit-scrollbar { display: none; }
+/* Chip that brings a hidden rail back, in the same Chat-bar slot. */
+.task-rail-reopen {
+  all: unset; box-sizing: border-box; cursor: pointer;
+  display: flex; align-items: center; gap: 5px; margin: 4px 0; padding: 0 8px;
+  border-radius: 4px; white-space: nowrap; color: var(--text-secondary);
+}
+.task-rail-reopen:hover { color: var(--text); background: var(--surface-3); }
+.task-rail-reopen:focus-visible { outline: 1px solid var(--border-strong); outline-offset: -1px; }
+.task-rail-reopen__icon { color: var(--text-muted); }
 /* Fallback mount (no bar slot): keep the old standalone strip. */
 .task-tabs-fallback { border-bottom: 1px solid var(--border-subtle); background: var(--surface-1); }
 .task-tabs-fallback .task-tabs { height: 32px; padding: 0 8px; }

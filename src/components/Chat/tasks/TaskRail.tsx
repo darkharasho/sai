@@ -13,11 +13,13 @@ export interface TaskRailProps {
   onStop(card: TaskCard): void;
   onAnswer(option: string): void;
   onReply(): void;
+  /** Dismiss the rail entirely (the Chat bar keeps a chip to bring it back). */
+  onHide?(): void;
 }
 
 const NO_TAIL: TailLine[] = [];
 
-export function TaskRail({ board, tails, selectedId, onSelect, onOpenStream, onStop, onAnswer, onReply }: TaskRailProps) {
+export function TaskRail({ board, tails, selectedId, onSelect, onOpenStream, onStop, onAnswer, onReply, onHide }: TaskRailProps) {
   const [now, setNow] = useState(() => Date.now());
   const [exp, setExp] = useState<{ batch: number | null; open: boolean }>({ batch: null, open: false });
   // Derived so a new batch is collapsed again without an effect.
@@ -41,16 +43,21 @@ export function TaskRail({ board, tails, selectedId, onSelect, onOpenStream, onS
 
   return (
     <aside className="task-rail" aria-label="Tasks">
-      {board.allDone ? (
-        <button type="button" className="task-rail__summary" aria-expanded={!collapsed} onClick={() => setExp({ batch: board.batchStartedAt, open: !expanded })}>
-          {summary}
-        </button>
-      ) : (
-        <div className="task-rail__header">
-          <span className="task-rail__title">Tasks</span>
-          <span className="task-rail__count">{doneCount} of {n} done</span>
-        </div>
-      )}
+      <div className="task-rail__top">
+        {board.allDone ? (
+          <button type="button" className="task-rail__summary" aria-expanded={!collapsed} onClick={() => setExp({ batch: board.batchStartedAt, open: !expanded })}>
+            {summary}
+          </button>
+        ) : (
+          <div className="task-rail__header">
+            <span className="task-rail__title">Tasks</span>
+            <span className="task-rail__count">{doneCount} of {n} done</span>
+          </div>
+        )}
+        {onHide && (
+          <button type="button" className="task-rail__hide" aria-label="Hide tasks" title="Hide tasks" onClick={onHide}>×</button>
+        )}
+      </div>
       {!collapsed && (
         <div className="task-rail__cards">
           {board.cards.map((c) => (
