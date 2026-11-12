@@ -214,6 +214,22 @@ describe('buildArgs — chat session MCP config', () => {
     expect(args).not.toContain('--append-system-prompt');
   });
 
+  it('does NOT include --system-prompt for chat sessions', () => {
+    const args = buildArgs({ kind: 'chat', readSetting: () => undefined });
+    expect(args).not.toContain('--system-prompt');
+  });
+
+  it('passes the user mcpConfigPath setting through for chat sessions', () => {
+    const args = buildArgs({
+      kind: 'chat',
+      readSetting: (k: string) => (k === 'mcpConfigPath' ? '/user/mcp.json' : undefined),
+    });
+    const idx = args.indexOf('--mcp-config');
+    expect(idx).toBeGreaterThan(-1);
+    expect(args[idx + 1]).toBe('/user/mcp.json');
+    expect(args).not.toContain('--strict-mcp-config');
+  });
+
   it('orchestrator still gets --strict-mcp-config and --tools', () => {
     const args = buildArgs({
       kind: 'orchestrator',
