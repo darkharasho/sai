@@ -24,7 +24,6 @@ import {
   type CodexMcpElicitationDecision,
   type CodexModelResult,
   type CodexSendArgs,
-  type CodexSessionKind,
   type CodexStartArgs,
   type CodexUserInputResponse,
 } from './types';
@@ -60,7 +59,6 @@ interface ScopeMeta {
   projectPath: string;
   scope: string;
   cwd: string;
-  kind: CodexSessionKind;
   metaPreamble?: string;
   additionalDirectories?: string[];
 }
@@ -147,7 +145,6 @@ export class SdkCodexBackend implements CodexBackend {
       projectPath: args.projectPath,
       scope,
       cwd: args.scopeCwd || args.projectPath,
-      kind: args.kind ?? 'chat',
       metaPreamble: args.metaPreamble,
       additionalDirectories: [...new Set((args.additionalDirectories ?? []).filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0))],
     };
@@ -156,7 +153,6 @@ export class SdkCodexBackend implements CodexBackend {
     const runtime = this.runtimes.get(key);
     if (runtime) {
       const changed = runtime.cwd !== nextMeta.cwd
-        || runtime.kind !== nextMeta.kind
         || runtime.metaPreamble !== nextMeta.metaPreamble;
       const directoriesChanged = JSON.stringify(runtime.additionalDirectories) !== JSON.stringify(nextMeta.additionalDirectories);
       Object.assign(runtime, nextMeta);
@@ -189,7 +185,7 @@ export class SdkCodexBackend implements CodexBackend {
       model: args.model,
       metaPreamble: runtime.metaPreamble,
       additionalDirectories: runtime.additionalDirectories,
-      clientConfig: runtime.kind === 'chat' ? this.buildChatMcpConfig?.(runtime.cwd) : undefined,
+      clientConfig: this.buildChatMcpConfig?.(runtime.cwd),
     });
     const configIdentity = JSON.stringify({ thread: built.thread, client: built.clientConfig });
     const active: ActiveTurn = {
@@ -331,7 +327,6 @@ export class SdkCodexBackend implements CodexBackend {
       projectPath,
       scope,
       cwd: projectPath,
-      kind: 'chat' as const,
     };
     const runtime: ScopeRuntime = { ...meta, turnSeq: 0 };
     this.runtimes.set(key, runtime);
@@ -423,7 +418,7 @@ export class SdkCodexBackend implements CodexBackend {
       if (pendingResult && this.isCurrent(runtime, active)) {
         this.emit(pendingResult);
       }
-      const shouldNotifyCompletion = Boolean(pendingResult) && runtime.kind === 'chat';
+      const shouldNotifyCompletion = Boolean(pendingResult);
       const wasCurrent = this.isCurrent(runtime, active);
       // At physical EOF no further collaboration events can arrive. Mark the
       // final envelope so the renderer can clear any child the CLI omitted a
@@ -431,7 +426,6 @@ export class SdkCodexBackend implements CodexBackend {
       this.finishTurn(runtime, active, { subagentsSettled: true });
       devlog('codex-sdk', 'turnEnd.decide', {
         projectPath: runtime.projectPath,
-        kind: runtime.kind,
         hasResult: Boolean(pendingResult),
         // Unlike every emit above, the notify is NOT gated on isCurrent —
         // logged so a stale turn firing a completion is visible in the log.

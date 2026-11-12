@@ -3,9 +3,9 @@
  * events the renderer should receive. A turn normally ends via a `result`
  * message (which clears `busy` before exit), so `wasBusy` is true here only
  * when the process died WITHOUT finishing its turn — i.e. a crash. A non-zero
- * exit code or a terminating signal in that case is a fatal error (so swarm
- * tasks mark `failed` rather than the previous false `done`). A clean exit
- * while busy still emits a plain `done`.
+ * exit code or a terminating signal in that case is a fatal error, so the
+ * crash never reads as a clean completion. A clean exit while busy still
+ * emits a plain `done`.
  */
 export interface ExitTerminalEvent {
   type: 'error' | 'done';

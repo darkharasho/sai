@@ -61,6 +61,14 @@ describe('electron preload bridge', () => {
   });
 });
 
+describe('swarm removal', () => {
+  it('exposes no swarm API', () => {
+    expect(exposed).toBeTruthy();
+    expect(exposed).not.toHaveProperty('swarm');
+    expect(exposed).not.toHaveProperty('codexSwarmStatus');
+  });
+});
+
 describe('characterization: existing IPC routing', () => {
   beforeEach(() => {
     send.mockClear();
@@ -77,10 +85,9 @@ describe('characterization: existing IPC routing', () => {
   });
 
   it('codexStart forwards the complete scoped tuple to codex:start', () => {
-    const context = { workspaceName: 'SAI' };
-    exposed.codexStart('/proj', 'scope-a', 'orchestrator', context, '/proj/worktree', 'meta', ['/repos/a']);
+    exposed.codexStart('/proj', 'scope-a', '/proj/worktree', 'meta', ['/repos/a']);
     expect(invoke).toHaveBeenCalledWith(
-      'codex:start', '/proj', 'scope-a', 'orchestrator', context, '/proj/worktree', 'meta', ['/repos/a']
+      'codex:start', '/proj', 'scope-a', '/proj/worktree', 'meta', ['/repos/a']
     );
   });
 
@@ -125,7 +132,7 @@ describe('characterization: existing IPC routing', () => {
     expect(invoke).toHaveBeenNthCalledWith(2, 'codex:mcpConfig:replace', request);
   });
 
-  it('keeps the legacy Swarm Codex approval call isolated from App Server decisions', async () => {
+  it('exposes only the App Server Codex approval call (no legacy codexApprove)', async () => {
     expect(exposed.codexApprove).toBeUndefined();
 
     await exposed.codexAppServerApprove('/proj', 'scope-a', 'request-1', {
@@ -147,15 +154,32 @@ describe('characterization: existing IPC routing', () => {
     expect(invoke).toHaveBeenCalledWith('codex:usage', { force: false });
   });
 
+  it('routes SAI chat tool calls over the sai-tool channels', () => {
+    const cb = vi.fn();
+    exposed.onSaiToolRequest(cb);
+    expect(on).toHaveBeenCalledWith('sai-tool:request', expect.any(Function));
+    exposed.respondSaiTool('id-1', { ok: true });
+    exposed.respondSaiToolError('id-2', 'boom');
+    expect(send).toHaveBeenNthCalledWith(1, 'sai-tool:response', 'id-1', { ok: true });
+    expect(send).toHaveBeenNthCalledWith(2, 'sai-tool:response-error', 'id-2', 'boom');
+  });
+
+  it('onRequestQuit listens on app:requestQuit', () => {
+    const off = exposed.onRequestQuit(() => {});
+    expect(on).toHaveBeenCalledWith('app:requestQuit', expect.any(Function));
+    off();
+    expect(removeListener).toHaveBeenCalledWith('app:requestQuit', expect.any(Function));
+  });
+
   it('geminiStart forwards to gemini:start', () => {
     exposed.geminiStart('/proj', 'meta');
     expect(invoke).toHaveBeenCalledWith('gemini:start', '/proj', 'meta');
   });
 
   it('claudeStart forwards to claude:start', () => {
-    exposed.claudeStart('/proj', 'chat', 'chat', undefined, undefined, 'meta');
+    exposed.claudeStart('/proj', 'chat', undefined, 'meta');
     expect(invoke).toHaveBeenCalledWith(
-      'claude:start', '/proj', 'chat', 'chat', undefined, undefined, 'meta'
+      'claude:start', '/proj', 'chat', undefined, 'meta'
     );
   });
 });
@@ -200,25 +224,23 @@ describe('window.sai.provider routing', () => {
 
   describe('provider.start', () => {
     it('routes claude to claude:start', () => {
-      exposed.provider.start('claude', '/proj', { scope: 'chat', kind: 'chat', metaPreamble: 'meta' });
+      exposed.provider.start('claude', '/proj', { scope: 'chat', metaPreamble: 'meta' });
       expect(invoke).toHaveBeenCalledWith(
-        'claude:start', '/proj', 'chat', 'chat', undefined, undefined, 'meta'
+        'claude:start', '/proj', 'chat', undefined, 'meta'
       );
     });
 
     it('routes Antigravity to the scoped gemini:start compatibility bridge', () => {
       exposed.provider.start('gemini', '/proj', { metaPreamble: 'meta' });
-      expect(invoke).toHaveBeenCalledWith('gemini:start', '/proj', undefined, undefined, undefined, undefined, 'meta');
+      expect(invoke).toHaveBeenCalledWith('gemini:start', '/proj', undefined, undefined, 'meta');
     });
 
     it('routes codex to codex:start', () => {
-      const orchestratorContext = { workspaceName: 'SAI' };
       exposed.provider.start('codex', '/proj', {
-        scope: 'scope-a', kind: 'orchestrator', orchestratorContext,
-        scopeCwd: '/proj/worktree', metaPreamble: 'meta', additionalDirectories: ['/repos/a'],
+        scope: 'scope-a', scopeCwd: '/proj/worktree', metaPreamble: 'meta', additionalDirectories: ['/repos/a'],
       });
       expect(invoke).toHaveBeenCalledWith(
-        'codex:start', '/proj', 'scope-a', 'orchestrator', orchestratorContext, '/proj/worktree', 'meta', ['/repos/a']
+        'codex:start', '/proj', 'scope-a', '/proj/worktree', 'meta', ['/repos/a']
       );
     });
   });

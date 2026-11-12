@@ -21,8 +21,8 @@ contextBridge.exposeInMainWorld('sai', {
     ipcRenderer.on('terminal:ctrl-c', listener);
     return () => ipcRenderer.removeListener('terminal:ctrl-c', listener);
   },
-  claudeStart: (cwd: string, scope?: string, kind?: string, orchestratorContext?: any, scopeCwd?: string, metaPreamble?: string) =>
-    ipcRenderer.invoke('claude:start', cwd, scope, kind, orchestratorContext, scopeCwd, metaPreamble),
+  claudeStart: (cwd: string, scope?: string, scopeCwd?: string, metaPreamble?: string) =>
+    ipcRenderer.invoke('claude:start', cwd, scope, scopeCwd, metaPreamble),
   claudeSend: (projectPath: string, message: string, imagePaths?: string[], permMode?: string, effort?: string, model?: string, scope?: string) => ipcRenderer.send('claude:send', projectPath, message, imagePaths, permMode, effort, model, scope),
   claudeGenerateCommitMessage: (cwd: string, aiProvider?: string) => ipcRenderer.invoke('claude:generateCommitMessage', cwd, aiProvider),
   claudeGenerateTitle: (cwd: string, userMessage: string, aiProvider?: string) => ipcRenderer.invoke('claude:generateTitle', cwd, userMessage, aiProvider),
@@ -84,7 +84,6 @@ contextBridge.exposeInMainWorld('sai', {
   codexBackendModeGet: () => ipcRenderer.invoke('codex:backendMode:get'),
   codexBackendModeSet: (mode: 'sdk' | 'app-server') => ipcRenderer.invoke('codex:backendMode:set', mode),
   codexAppServerPreviewStatus: () => ipcRenderer.invoke('codex:appServerPreviewStatus'),
-  codexSwarmStatus: () => ipcRenderer.invoke('codex:swarmStatus'),
   codexAppServerApprove: (
     projectPath: string,
     scope: string | undefined,
@@ -104,8 +103,8 @@ contextBridge.exposeInMainWorld('sai', {
     decision: import('./services/codexBackend').CodexMcpElicitationDecision,
   ) => ipcRenderer.invoke('codex:appServerResolveMcpElicitation', projectPath, scope, requestHandle, decision),
   codexModels: (forceRefresh?: boolean) => ipcRenderer.invoke('codex:models', forceRefresh),
-  codexStart: (cwd: string, scope?: string, kind?: string, orchestratorContext?: unknown, scopeCwd?: string, metaPreamble?: string, additionalDirectories?: string[]) =>
-    ipcRenderer.invoke('codex:start', cwd, scope, kind, orchestratorContext, scopeCwd, metaPreamble, additionalDirectories),
+  codexStart: (cwd: string, scope?: string, scopeCwd?: string, metaPreamble?: string, additionalDirectories?: string[]) =>
+    ipcRenderer.invoke('codex:start', cwd, scope, scopeCwd, metaPreamble, additionalDirectories),
   codexSend: (projectPath: string, message: string, imagePaths?: string[], permMode?: string, effort?: string, model?: string, scope?: string, origin?: 'desktop' | 'remote') =>
     ipcRenderer.send('codex:send', projectPath, message, imagePaths, permMode, effort, model, scope, origin),
   codexStop: (projectPath: string, scope?: string) => ipcRenderer.send('codex:stop', projectPath, scope),
@@ -137,17 +136,16 @@ contextBridge.exposeInMainWorld('sai', {
   // Existing window.sai.claudeSend / geminiSend / codexSend remain for backward compat.
   provider: {
     start(provider: string, cwd: string, opts: {
-      scope?: string; kind?: string; orchestratorContext?: unknown;
-      scopeCwd?: string; metaPreamble?: string; additionalDirectories?: string[];
+      scope?: string; scopeCwd?: string; metaPreamble?: string; additionalDirectories?: string[];
     } = {}) {
       if (provider === 'claude') {
-        return ipcRenderer.invoke('claude:start', cwd, opts.scope, opts.kind, opts.orchestratorContext, opts.scopeCwd, opts.metaPreamble);
+        return ipcRenderer.invoke('claude:start', cwd, opts.scope, opts.scopeCwd, opts.metaPreamble);
       } else if (provider === 'gemini') {
-        return ipcRenderer.invoke('gemini:start', cwd, opts.scope, opts.kind, opts.orchestratorContext, opts.scopeCwd, opts.metaPreamble);
+        return ipcRenderer.invoke('gemini:start', cwd, opts.scope, opts.scopeCwd, opts.metaPreamble);
       } else if (provider === 'kimi') {
         return ipcRenderer.invoke('kimi:start', cwd, opts.metaPreamble);
       } else {
-        return ipcRenderer.invoke('codex:start', cwd, opts.scope, opts.kind, opts.orchestratorContext, opts.scopeCwd, opts.metaPreamble, opts.additionalDirectories);
+        return ipcRenderer.invoke('codex:start', cwd, opts.scope, opts.scopeCwd, opts.metaPreamble, opts.additionalDirectories);
       }
     },
     send(provider: string, projectPath: string, message: string, opts: {
@@ -344,8 +342,8 @@ contextBridge.exposeInMainWorld('sai', {
   confirmQuit: () => ipcRenderer.send('app:confirmQuit'),
   onRequestQuit: (callback: () => void) => {
     const listener = () => callback();
-    ipcRenderer.on('swarm:request-quit', listener);
-    return () => ipcRenderer.removeListener('swarm:request-quit', listener);
+    ipcRenderer.on('app:requestQuit', listener);
+    return () => ipcRenderer.removeListener('app:requestQuit', listener);
   },
   windowOnMaximizedChange: (callback: (maximized: boolean) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, maximized: boolean) => callback(maximized);
@@ -483,10 +481,10 @@ contextBridge.exposeInMainWorld('sai', {
     ipcRenderer.on('mcp:runtime-status', listener);
     return () => ipcRenderer.removeListener('mcp:runtime-status', listener);
   },
-  onSwarmToolRequest: (cb: (req: { id: string; tool: string; input: any; workspace: string }) => void) => {
+  onSaiToolRequest: (cb: (req: { id: string; tool: string; input: any; workspace: string }) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, req: { id: string; tool: string; input: any; workspace: string }) => cb(req);
-    ipcRenderer.on('swarm:tool-request', listener);
-    return () => ipcRenderer.removeListener('swarm:tool-request', listener);
+    ipcRenderer.on('sai-tool:request', listener);
+    return () => ipcRenderer.removeListener('sai-tool:request', listener);
   },
   browserStatus: () => ipcRenderer.invoke('browser:status'),
   browserCall: (method: string, params?: unknown) => ipcRenderer.invoke('browser:call', method, params),
@@ -499,30 +497,8 @@ contextBridge.exposeInMainWorld('sai', {
       ipcRenderer.invoke('browser:deploy:open-extensions', browserId),
     revealExtensionFolder: () => ipcRenderer.invoke('browser:deploy:reveal'),
   },
-  respondSwarmTool: (id: string, result: unknown) => ipcRenderer.send('swarm:tool-response', id, result),
-  respondSwarmToolError: (id: string, error: string) => ipcRenderer.send('swarm:tool-response-error', id, error),
-  swarmSetOrchestratorSession: (workspace: string, sessionId: string) =>
-    ipcRenderer.invoke('swarm:set-orchestrator-session', workspace, sessionId),
-  swarmEmitCard: (workspace: string, kind: string, input: any) =>
-    ipcRenderer.invoke('swarm:emit-card', { workspace, kind, input }),
-  swarmEmitCardResult: (workspace: string, id: string, result: any, isError?: boolean) =>
-    ipcRenderer.send('swarm:emit-card-result', { workspace, id, result, isError }),
-  swarm: {
-    worktreeAdd: (projectPath: string, taskId: string, branch: string, baseBranch: string) =>
-      ipcRenderer.invoke('swarm:worktree-add', projectPath, taskId, branch, baseBranch),
-    worktreeRemove: (projectPath: string, worktreePath: string, branch: string) =>
-      ipcRenderer.invoke('swarm:worktree-remove', projectPath, worktreePath, branch),
-    canFastForward: (projectPath: string, source: string, target: string) =>
-      ipcRenderer.invoke('swarm:can-ff', projectPath, source, target),
-    ffMerge: (projectPath: string, source: string) =>
-      ipcRenderer.invoke('swarm:ff-merge', projectPath, source),
-    diffStats: (cwd: string, baseBranch: string, branch: string) =>
-      ipcRenderer.invoke('swarm:diff-stats', cwd, baseBranch, branch),
-    branchDiff: (cwd: string, baseBranch: string, branch: string) =>
-      ipcRenderer.invoke('swarm:branch-diff', cwd, baseBranch, branch),
-    gc: (projectPath: string, liveTaskIds: string[], liveBranches: string[]) =>
-      ipcRenderer.invoke('swarm:gc', projectPath, liveTaskIds, liveBranches),
-  },
+  respondSaiTool: (id: string, result: unknown) => ipcRenderer.send('sai-tool:response', id, result),
+  respondSaiToolError: (id: string, error: string) => ipcRenderer.send('sai-tool:response-error', id, error),
   remote: {
     setEnabled: (enabled: boolean) => ipcRenderer.invoke('remote:setEnabled', enabled),
     status:     () => ipcRenderer.invoke('remote:status'),

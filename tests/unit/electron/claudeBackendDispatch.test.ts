@@ -91,12 +91,12 @@ vi.mock('@electron/services/shellEnv', () => ({
   withNodeMemoryCap: vi.fn((env: any) => env),
 }));
 
-vi.mock('@electron/services/swarmMcpHost', () => ({
+vi.mock('@electron/services/saiMcpHost', () => ({
   start: vi.fn().mockReturnValue({ socketPath: '/tmp/sock', secret: 'x' }),
 }));
 
-vi.mock('@electron/services/swarmMcpConfig', () => ({
-  writeSwarmMcpConfig: vi.fn().mockReturnValue('/tmp/mcp.json'),
+vi.mock('@electron/services/saiMcpConfig', () => ({
+  writeSaiMcpConfig: vi.fn().mockReturnValue('/tmp/mcp.json'),
 }));
 
 vi.mock('@electron/services/gemini', () => ({

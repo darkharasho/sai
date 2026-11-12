@@ -3,7 +3,7 @@
  *
  * The relay is spawned by Chrome, not by SAI, so it cannot be told where to
  * look — the locations have to be derivable from $HOME alone. That rules out
- * the PID-suffixed socket that swarmMcpHost uses, so the bridge gets a stable
+ * the PID-suffixed socket that saiMcpHost uses, so the bridge gets a stable
  * path plus a rotating token file for auth.
  *
  * Must not import electron: the relay runs as a bare Node process.

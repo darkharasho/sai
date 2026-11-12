@@ -5,14 +5,12 @@ import {
   getCodexMcpRuntimeStatus,
   getCodexMcpConfig,
   replaceCodexMcpConfig,
-  getCodexSwarmStatus,
   getCodexBackendMode,
   setCodexBackendMode,
   type CodexBackendMode,
   type CodexApprovalResult,
   type CodexPermission,
   type CodexReasoningEffort,
-  type CodexSessionKind,
   type CodexMcpRuntimeStatus,
   isCodexReasoningEffort,
   isCodexApprovalDecision,
@@ -24,8 +22,6 @@ import { CodexTelemetryService } from './codexTelemetry';
 
 type StartIpcTail = [
   scope?: string,
-  kind?: CodexSessionKind,
-  orchestratorContext?: Record<string, unknown> | null,
   scopeCwd?: string,
   metaPreamble?: string,
   additionalDirectories?: string[],
@@ -71,7 +67,6 @@ export function registerCodexHandlers(): void {
     return setCodexBackendMode(normalized);
   });
   ipcMain.handle('codex:appServerPreviewStatus', () => getCodexAppServerPreviewStatus());
-  ipcMain.handle('codex:swarmStatus', () => getCodexSwarmStatus());
   ipcMain.handle(
     'codex:mcpRuntimeStatus',
     (_event, projectPath: unknown, scope: unknown): Promise<CodexMcpRuntimeStatus> | CodexMcpRuntimeStatus => {
@@ -143,11 +138,9 @@ export function registerCodexHandlers(): void {
       return getCodexBackend().start({
         projectPath,
         scope: legacy ? undefined : tail[0],
-        kind: legacy ? undefined : tail[1],
-        orchestratorContext: legacy ? undefined : tail[2],
-        scopeCwd: legacy ? undefined : tail[3],
-        metaPreamble: legacy ? tail[0] : tail[4],
-        additionalDirectories: legacy ? undefined : normalizeDirectories(tail[5]),
+        scopeCwd: legacy ? undefined : tail[1],
+        metaPreamble: legacy ? tail[0] : tail[2],
+        additionalDirectories: legacy ? undefined : normalizeDirectories(tail[3]),
       });
     },
   );

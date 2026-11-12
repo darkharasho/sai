@@ -1,7 +1,6 @@
 import type { Options, EffortLevel, CanUseTool, SdkPluginConfig, HookCallback } from '@anthropic-ai/claude-agent-sdk';
 
 export interface SdkOptionInputs {
-  kind: 'chat' | 'task' | 'orchestrator';
   permMode?: string;           // 'bypass' | 'default' | undefined
   effort?: string;             // 'low'|'medium'|'high'|'xhigh'|'max'
   model?: string;
@@ -9,10 +8,9 @@ export interface SdkOptionInputs {
   sessionId?: string;          // when set → resume
   claudeExecutablePath?: string;
   appendSystemPrompt?: string; // CHAT_RENDER_NUDGE + CHAT_GITHUB_WATCH_NUDGE + metaPreamble, joined
-  systemPromptOverride?: string; // full-replacement system prompt (orchestrator); overrides the preset+append form
   canUseTool?: CanUseTool;     // tool-approval callback; not set in bypass mode
   mcpServers?: Record<string, unknown>; // in-process SDK MCP servers (chat tools); set only for chat
-  plugins?: SdkPluginConfig[]; // installed Claude Code plugins (skills/agents/hooks/MCP), chat+task only
+  plugins?: SdkPluginConfig[]; // installed Claude Code plugins (skills/agents/hooks/MCP)
   env?: Record<string, string | undefined>; // subprocess env (enriched login-shell + memory cap)
   stderr?: (data: string) => void; // subprocess stderr (auth failures, crash diagnostics)
   /** "Show reasoning" setting: request summarized thinking text (Opus 4.7+/Fable
@@ -30,7 +28,7 @@ export interface SdkOptionInputs {
    *  runtime's in-flight work ledger — which is the authoritative way to tell
    *  "session done" from "session paused waiting for background work". */
   stopHook?: HookCallback;
-  /** Sudo gate for Bash (chat/task kinds). Fires in every permission mode —
+  /** Sudo gate for Bash. Fires in every permission mode —
    *  including bypass — unlike canUseTool, which pre-approved tools skip. */
   preToolUseHook?: HookCallback;
   /** Load-guard note delivery: PreToolUse (every tool) + UserPromptSubmit,
@@ -56,7 +54,6 @@ const VALID_EFFORT = new Set<string>(['low', 'medium', 'high', 'xhigh', 'max']);
  */
 export function buildSdkOptions(input: SdkOptionInputs): Options {
   const {
-    kind,
     permMode,
     effort,
     model,
@@ -64,7 +61,6 @@ export function buildSdkOptions(input: SdkOptionInputs): Options {
     sessionId,
     claudeExecutablePath,
     appendSystemPrompt,
-    systemPromptOverride,
     canUseTool,
     mcpServers,
     plugins,
@@ -80,17 +76,13 @@ export function buildSdkOptions(input: SdkOptionInputs): Options {
     loadGuardHook,
   } = input;
 
-  const permissionMode: Options['permissionMode'] =
-    kind === 'orchestrator' || permMode === 'bypass'
-      ? 'bypassPermissions'
-      : 'acceptEdits';
+  const isBypass = permMode === 'bypass';
+  const permissionMode: Options['permissionMode'] = isBypass ? 'bypassPermissions' : 'acceptEdits';
 
   const systemPrompt: Options['systemPrompt'] =
-    systemPromptOverride && systemPromptOverride.length > 0
-      ? systemPromptOverride
-      : appendSystemPrompt && appendSystemPrompt.length > 0
-        ? { type: 'preset', preset: 'claude_code', append: appendSystemPrompt }
-        : { type: 'preset', preset: 'claude_code' };
+    appendSystemPrompt && appendSystemPrompt.length > 0
+      ? { type: 'preset', preset: 'claude_code', append: appendSystemPrompt }
+      : { type: 'preset', preset: 'claude_code' };
 
   const opts: Options = {
     permissionMode,
@@ -176,13 +168,7 @@ export function buildSdkOptions(input: SdkOptionInputs): Options {
     opts.hooks = hooks;
   }
 
-  if (kind === 'orchestrator') {
-    opts.tools = [];
-    opts.disallowedTools = ['Skill', 'Task', 'Agent', 'TodoWrite'];
-  }
-
   // canUseTool is never set in bypass mode (bypassPermissions handles all tools automatically)
-  const isBypass = kind === 'orchestrator' || permMode === 'bypass';
   if (canUseTool && !isBypass) {
     opts.canUseTool = canUseTool;
   }

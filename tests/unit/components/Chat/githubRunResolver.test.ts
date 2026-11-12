@@ -7,6 +7,11 @@ import {
   type GitHubApiGet,
 } from '../../../../src/components/Chat/githubRunResolver';
 
+// Legacy-history fixture: CLI-backend chats saved before the swarm removal
+// recorded SAI tools as mcp__swarm__sai_* (the server is now registered as
+// 'sai'). Matching is by suffix, so that persisted history must keep working.
+const LEGACY_WATCH_TOOL = 'mcp__swarm__sai_watch_github_run';
+
 describe('parseRunUrl', () => {
   it('parses a real run URL', () => {
     expect(parseRunUrl('https://github.com/darkharasho/sai/actions/runs/123456')).toEqual({
@@ -45,7 +50,7 @@ describe('watchTargetFromToolCall', () => {
       url: 'https://github.com/o/r/actions/runs/99', status: 'in_progress',
     });
     expect(watchTargetFromToolCall({
-      name: 'mcp__swarm__sai_watch_github_run',
+      name: LEGACY_WATCH_TOOL,
       input: JSON.stringify({ owner: 'o', repo: 'r', branch: 'main' }),
       output: out,
     })).toEqual({
@@ -56,7 +61,7 @@ describe('watchTargetFromToolCall', () => {
 
   it('falls back to parsing the input url when there is no output yet', () => {
     expect(watchTargetFromToolCall({
-      name: 'mcp__swarm__sai_watch_github_run',
+      name: LEGACY_WATCH_TOOL,
       input: JSON.stringify({ url: 'https://github.com/o/r/actions/runs/7' }),
       output: undefined,
     })).toMatchObject({ owner: 'o', repo: 'r', runId: '7' });
@@ -82,7 +87,7 @@ describe('watchTargetFromToolCall', () => {
 describe('watchTargetsFromMessage', () => {
   it('collects targets from watch tool calls, deduped by url', () => {
     const out = JSON.stringify({ owner: 'o', repo: 'r', runId: '5', url: 'https://github.com/o/r/actions/runs/5' });
-    const tc = { id: 'a', type: 'mcp' as const, name: 'mcp__swarm__sai_watch_github_run', input: '{}', output: out };
+    const tc = { id: 'a', type: 'mcp' as const, name: LEGACY_WATCH_TOOL, input: '{}', output: out };
     const msg = { toolCalls: [tc, { ...tc, id: 'b' }] };
     const targets = watchTargetsFromMessage(msg);
     expect(targets).toHaveLength(1);

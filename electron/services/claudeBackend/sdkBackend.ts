@@ -48,7 +48,6 @@ import { loadExternalMcpForSdk } from './externalMcp';
 import { recordMcpRuntimeStatus, getMcpRuntimeStatus, isMcpSignInWaiting, notifyMcpInitFrame } from './mcpRuntimeStatus';
 import { buildSdkOptions } from './sdkOptions';
 import { buildSudoPreToolUseHook, getSudoBroker } from '../sudo';
-import { buildOrchestratorSystemPrompt, resolveOrchestratorPromptContext, type OrchestratorPromptContext } from '../../../src/lib/orchestratorSystemPrompt';
 import { mapSdkMessage, type MapperState } from './sdkMessageMap';
 import { sweepIdleScopes, IDLE_SCOPE_MS, SWEEP_INTERVAL_MS } from '../idleScopeSweep';
 import type {
@@ -84,7 +83,6 @@ interface ScopeSession {
   /** Mapper state threaded through the drain loop */
   mapperState: MapperState;
   cwd: string;
-  kind: 'chat' | 'task' | 'orchestrator';
   appendSystemPrompt?: string;
   /** Epoch ms of last user/assistant activity; used by the idle sweep. */
   lastActivityAt: number;
@@ -103,7 +101,7 @@ interface ScopeSession {
    *  changes apply. */
   config: { permMode: string; effort: string; model: string; features: string };
   /** True when canUseTool is active for this session (non-bypass). When false
-   *  (bypass / orchestrator), question/plan cards come from drain detection. */
+   *  (bypass), question/plan cards come from drain detection. */
   gated: boolean;
   /** toolUseIds of canUseTool promises currently held for this session. */
   heldToolUses: Set<string>;
@@ -355,17 +353,11 @@ export interface SdkBackendDeps {
   notify?: SdkNotify;
   /**
    * Build the in-process SAI chat MCP server for a given workspace.
-   * Called only for `kind === 'chat'` scopes. If omitted or returns undefined
+   * Called for every session. If omitted or returns undefined
    * (e.g. the renderer round-trip hasn't been registered yet), no MCP server
    * is attached for that session.
    */
   buildChatMcpServer?: (workspace: string) => McpSdkServerConfigWithInstance | undefined;
-  /**
-   * Build the in-process swarm MCP server for a given workspace.
-   * Called only for `kind === 'orchestrator'` scopes. If omitted or returns
-   * undefined (e.g. dispatch not yet registered), no swarm server is attached.
-   */
-  buildSwarmMcpServer?: (workspace: string) => McpSdkServerConfigWithInstance | undefined;
   /**
    * Where to broadcast plan rate-limit windows fetched from the runtime's
    * get_usage control request. Default: usage.ts publishUsage (the same
@@ -393,8 +385,8 @@ export class SdkBackend implements ClaudeBackend {
   private readonly sessions = new Map<string, ScopeSession>();
   /** Remembered session IDs for the next send after setSessionId */
   private readonly pendingResume = new Map<string, string>();
-  /** Per-scope pending cwd/kind/appendSystemPrompt set by start() */
-  private readonly scopeMeta = new Map<string, { cwd: string; kind: 'chat' | 'task' | 'orchestrator'; appendSystemPrompt?: string; orchestratorContext?: Record<string, unknown> | null }>();
+  /** Per-scope pending cwd/appendSystemPrompt set by start() */
+  private readonly scopeMeta = new Map<string, { cwd: string; appendSystemPrompt?: string }>();
   /** Held canUseTool promises (approvals, questions, plan reviews) keyed by toolUseId */
   private readonly pendingGates = new Map<string, PendingGate>();
 
@@ -404,7 +396,6 @@ export class SdkBackend implements ClaudeBackend {
   private readonly _resolveClaudePath: () => string | undefined;
   private readonly _notify: SdkNotify;
   private readonly _buildChatMcpServer?: (workspace: string) => McpSdkServerConfigWithInstance | undefined;
-  private readonly _buildSwarmMcpServer?: (workspace: string) => McpSdkServerConfigWithInstance | undefined;
   private readonly _publishUsage: (data: Record<string, unknown>) => void;
   private idleSweepTimer: ReturnType<typeof setInterval> | null = null;
   /** Epoch ms of the last get_usage control request (all scopes). */
@@ -427,7 +418,6 @@ export class SdkBackend implements ClaudeBackend {
     this._resolveClaudePath = deps?.resolveClaudePath ?? resolveClaudePath;
     this._notify = deps?.notify ?? defaultNotify;
     this._buildChatMcpServer = deps?.buildChatMcpServer;
-    this._buildSwarmMcpServer = deps?.buildSwarmMcpServer;
     this._publishUsage = deps?.publishUsage ?? defaultPublishUsage;
     this._startIdleSweep();
   }
@@ -435,10 +425,10 @@ export class SdkBackend implements ClaudeBackend {
   // ─── start ─────────────────────────────────────────────────────────────────
 
   start(args: StartArgs): { slashCommands: SlashCommandInfo[] } {
-    const { projectPath, scope, scopeCwd, kind = 'chat', metaPreamble, orchestratorContext } = args;
+    const { projectPath, scope, scopeCwd, metaPreamble } = args;
     const scopeKey = toScopeKey(projectPath, scope);
     const cwd = scopeCwd ?? projectPath;
-    this.scopeMeta.set(scopeKey, { cwd, kind, appendSystemPrompt: metaPreamble, orchestratorContext });
+    this.scopeMeta.set(scopeKey, { cwd, appendSystemPrompt: metaPreamble });
     // Register with the workspace registry — the titlebar dropdown lists only
     // registered-active workspaces (CLI parity: startImpl's getOrCreate).
     try { getOrCreateWorkspace(projectPath); } catch { /* workspace registry unavailable (tests) */ }
@@ -447,7 +437,7 @@ export class SdkBackend implements ClaudeBackend {
     // A workspace opened for the first time has nothing cached, and the SDK
     // only reports its commands once a query exists. Spin one up now so the
     // slash menu is populated before the first turn instead of after it.
-    if (cached.length === 0 && kind === 'chat') this._warmForCommands(scopeKey, projectPath, scope);
+    if (cached.length === 0) this._warmForCommands(scopeKey, projectPath, scope);
     return { slashCommands: cached };
   }
 
@@ -479,8 +469,8 @@ export class SdkBackend implements ClaudeBackend {
 
   /** MCP config changed on disk (panel add/edit/remove/enable). The SDK can't
    *  hot-swap file-sourced servers — setMcpServers replaces ALL dynamic
-   *  servers, SAI's in-process ones included — so every live session (every
-   *  kind loads the project .mcp.json via settingSources; only `projectPath`'s
+   *  servers, SAI's in-process ones included — so every live session (each
+   *  loads the project .mcp.json via settingSources; only `projectPath`'s
    *  with `projectOnly`, for a project .mcp.json edit) is flagged and
    *  resume-respawns on its next send that finds it idle. The panel's own
    *  scope restarts right away when idle, so the panel reflects the edit
@@ -1060,7 +1050,6 @@ export class SdkBackend implements ClaudeBackend {
     devlog('claude-sdk', 'beginTurn', {
       projectPath,
       scope: effectiveScope,
-      kind: session.kind,
       wasInterrupt,
       turnSeq: session.turnSeq,
       activeTurnSeq: session.activeTurnSeq,
@@ -1128,7 +1117,6 @@ export class SdkBackend implements ClaudeBackend {
   ): ScopeSession {
     const meta = this.scopeMeta.get(scopeKey);
     const cwd = meta?.cwd ?? projectPath;
-    const kind = meta?.kind ?? 'chat';
     const appendSystemPrompt = meta?.appendSystemPrompt;
 
     // Check for a pending resume session ID
@@ -1136,58 +1124,35 @@ export class SdkBackend implements ClaudeBackend {
     this.pendingResume.delete(scopeKey);
 
     // Build canUseTool callback (only when not bypass)
-    const isBypass = kind === 'orchestrator' || queryArgs.permMode === 'bypass';
+    const isBypass = queryArgs.permMode === 'bypass';
     const canUseTool = isBypass ? undefined : this._buildCanUseTool(projectPath, scope);
 
-    // Chat scopes get the in-process SAI tool MCP server + the render/github
-    // nudges (deferred since Phase 1). Other kinds (task/orchestrator) do not.
+    // Every session gets the in-process SAI tool MCP server + the render/github
+    // nudges.
     let mcpServers: Record<string, McpServerConfig> | undefined;
-    let chatAppendSystemPrompt = appendSystemPrompt;
-    let systemPromptOverride: string | undefined;
-
-    if (kind === 'orchestrator') {
-      const server = this._buildSwarmMcpServer?.(cwd);
-      if (server) {
-        mcpServers = { swarm: server };
-      }
-      // Build the full orchestrator system prompt (full replacement, not append),
-      // mirroring claude.ts buildArgs: derive workspacePath/Name from cwd when absent.
-      const raw = (meta?.orchestratorContext ?? {}) as Partial<OrchestratorPromptContext>;
-      const ctx = resolveOrchestratorPromptContext({
-        ...raw,
-        workspacePath: raw.workspacePath || cwd,
-        workspaceName: raw.workspaceName || (cwd ? cwd.split(/[\\/]/).filter(Boolean).pop() || cwd : undefined),
-      });
-      systemPromptOverride = buildOrchestratorSystemPrompt(ctx);
+    const server = this._buildChatMcpServer?.(cwd);
+    if (server) {
+      mcpServers = { sai: server };
     }
+    const nudges = [CHAT_RENDER_NUDGE, CHAT_GITHUB_WATCH_NUDGE, CHAT_TASK_CARDS_NUDGE];
+    const existing = appendSystemPrompt && appendSystemPrompt.trim() ? [appendSystemPrompt] : [];
+    const chatAppendSystemPrompt = [...nudges, ...existing].join('\n\n');
 
-    if (kind === 'chat') {
-      const server = this._buildChatMcpServer?.(cwd);
-      if (server) {
-        mcpServers = { sai: server };
-      }
-      const nudges = [CHAT_RENDER_NUDGE, CHAT_GITHUB_WATCH_NUDGE, CHAT_TASK_CARDS_NUDGE];
-      const existing = appendSystemPrompt && appendSystemPrompt.trim() ? [appendSystemPrompt] : [];
-      chatAppendSystemPrompt = [...nudges, ...existing].join('\n\n');
-    }
-
+    // ~/.claude.json servers (minus the disabled list) + installed plugins —
+    // the same external surface the CLI path forwards. mcpConfigPath entries
+    // are an explicit override, so they win over .claude.json on collision.
     let plugins: SdkPluginConfig[] | undefined;
-    if (kind === 'chat' || kind === 'task') {
-      // ~/.claude.json servers (minus the disabled list) + installed plugins —
-      // the same external surface the CLI path forwards. mcpConfigPath entries
-      // are an explicit override, so they win over .claude.json on collision.
-      const external = loadExternalMcpForSdk();
-      const overrideServers = parseUserMcpConfigPaths(
-        readSaiSetting('mcpConfigPath'),
-        (p) => fs.readFileSync(p, 'utf-8'),
-      );
-      const userServers = { ...external.servers, ...overrideServers };
-      if (Object.keys(userServers).length > 0) {
-        mcpServers = { ...userServers as Record<string, McpServerConfig>, ...(mcpServers ?? {}) }; // SAI's `sai` key wins on collision
-      }
-      if (external.plugins.length > 0) {
-        plugins = external.plugins;
-      }
+    const external = loadExternalMcpForSdk();
+    const overrideServers = parseUserMcpConfigPaths(
+      readSaiSetting('mcpConfigPath'),
+      (p) => fs.readFileSync(p, 'utf-8'),
+    );
+    const userServers = { ...external.servers, ...overrideServers };
+    if (Object.keys(userServers).length > 0) {
+      mcpServers = { ...userServers as Record<string, McpServerConfig>, ...(mcpServers ?? {}) }; // SAI's `sai` key wins on collision
+    }
+    if (external.plugins.length > 0) {
+      plugins = external.plugins;
     }
 
     const effectiveScope = scope ?? 'chat';
@@ -1210,10 +1175,9 @@ export class SdkBackend implements ClaudeBackend {
       return {};
     };
 
-    // Sudo gate: chat/task only (orchestrator keeps its restricted toolset and
-    // stays out of scope). Null broker = service disabled (Windows/init failure).
+    // Sudo gate. Null broker = service disabled (Windows/init failure).
     const sudoBroker = getSudoBroker();
-    const sudoHook = kind !== 'orchestrator' && sudoBroker
+    const sudoHook = sudoBroker
       ? buildSudoPreToolUseHook({
           projectPath,
           scope: effectiveScope,
@@ -1223,7 +1187,6 @@ export class SdkBackend implements ClaudeBackend {
       : undefined;
 
     const options = buildSdkOptions({
-      kind,
       permMode: queryArgs.permMode,
       effort: queryArgs.effort,
       model: queryArgs.model,
@@ -1231,7 +1194,6 @@ export class SdkBackend implements ClaudeBackend {
       sessionId: resumeId,
       claudeExecutablePath: this._resolveClaudePath(),
       appendSystemPrompt: chatAppendSystemPrompt,
-      systemPromptOverride,
       canUseTool,
       mcpServers,
       plugins,
@@ -1247,7 +1209,7 @@ export class SdkBackend implements ClaudeBackend {
       thinkingSummarized: readSaiSetting('claudeShowReasoning') === true,
       maxBudgetUsd: Number(readSaiSetting('claudeMaxBudgetUsd')) || undefined,
       oneMContext: readSaiSetting('claude1MContext') === true,
-      promptSuggestions: kind === 'chat',
+      promptSuggestions: true,
       agentProgressSummaries: readSaiSetting('claudeAgentProgressSummaries') !== false,
       stopHook,
       preToolUseHook: sudoHook,
@@ -1302,7 +1264,6 @@ export class SdkBackend implements ClaudeBackend {
       sessionId: resumeId,
       mapperState: { streaming: false, sessionIdSeen: false },
       cwd,
-      kind,
       appendSystemPrompt,
       lastActivityAt: Date.now(),
       awaitingInput: false,
@@ -1533,7 +1494,6 @@ export class SdkBackend implements ClaudeBackend {
     if (session.backgroundWaitOpen) {
       devlog('claude-sdk', 'backgroundWait.close', {
         scope: session._scopeName,
-        kind: session.kind,
         stage: 'presentation',
         idleMs,
         settled,
@@ -1554,27 +1514,22 @@ export class SdkBackend implements ClaudeBackend {
         turnSeq: null,
       });
       // This close IS the turn end for the user — the runtime never sent one,
-      // so the result path's notification never fired. Same chat-kind gate as
-      // there (task/orchestrator scopes have their own opt-in path in the
-      // renderer). No duration/turns/cost: there is no result frame to read.
-      if (session.kind === 'chat') {
-        this._notify.completion(session._projectPath, { provider: 'Claude' }, {
-          site: 'closeBackgroundWait',
-          scope: session._scopeName,
-          kind: session.kind,
-          turnSeq: session.turnSeq,
-          activeTurnSeq: session.activeTurnSeq,
-          settled,
-          abandoned,
-        });
-      }
+      // so the result path's notification never fired. No duration/turns/cost:
+      // there is no result frame to read.
+      this._notify.completion(session._projectPath, { provider: 'Claude' }, {
+        site: 'closeBackgroundWait',
+        scope: session._scopeName,
+        turnSeq: session.turnSeq,
+        activeTurnSeq: session.activeTurnSeq,
+        settled,
+        abandoned,
+      });
     }
 
     // ── Stage 2: the session stops being held open ─────────────────────────
     if (abandoned) {
       devlog('claude-sdk', 'backgroundWait.close', {
         scope: session._scopeName,
-        kind: session.kind,
         stage: 'pin',
         idleMs,
         liveTasks: session.liveTasks.size,
@@ -1796,23 +1751,19 @@ export class SdkBackend implements ClaudeBackend {
                 }
               }).catch(() => { /* API-key session or older runtime — poller stands */ });
             }
-            // Only notify on a genuine completion — waits stay silent. Only
-            // chat-kind scopes are a "turn end" for the user: task/orchestrator
-            // scopes finishing must not fire the turn-end notification (swarm
-            // tasks have their own opt-in notification in the renderer).
+            // Only notify on a genuine completion — waits stay silent.
             devlog('claude-sdk', 'turnEnd.decide', {
               projectPath,
               scope: effectiveScope,
-              kind: session.kind,
               wasStreaming,
               superseded,
               producedNothing,
               waitKind: wait?.kind ?? null,
               turnSeq: session.turnSeq,
               supersededFrom,
-              willNotify: Boolean(wasStreaming && !superseded && !producedNothing && wait?.kind === 'none' && session.kind === 'chat'),
+              willNotify: Boolean(wasStreaming && !superseded && !producedNothing && wait?.kind === 'none'),
             });
-            if (wasStreaming && !superseded && !producedNothing && wait?.kind === 'none' && session.kind === 'chat') {
+            if (wasStreaming && !superseded && !producedNothing && wait?.kind === 'none') {
               const info = {
                 provider: 'Claude',
                 duration: rawMsg.duration_ms as number | undefined,
@@ -1861,7 +1812,7 @@ export class SdkBackend implements ClaudeBackend {
 
           // Inspect assistant tool_use blocks: scheduling-tool tracking (wait
           // classification) always; question/plan cards only for UNGATED
-          // sessions (bypass/orchestrator) — gated sessions emit those from
+          // sessions (bypass) — gated sessions emit those from
           // canUseTool, where the promise hold actually blocks the model.
           if (rawMsg?.type === 'assistant' && Array.isArray(rawMsg?.message?.content)) {
             for (const block of rawMsg.message.content as Array<Record<string, unknown>>) {
@@ -1914,8 +1865,8 @@ export class SdkBackend implements ClaudeBackend {
         }
       } catch (err) {
         const text = err instanceof Error ? err.message : String(err);
-        // fatal: swarm status mirroring marks the task failed (not done) on a
-        // crash — without the flag a dead drain reads as a clean completion.
+        // fatal: marks the crash as a failure — without the flag a dead drain
+        // reads as a clean completion.
         // done stamped with turnSeq (renderer-expected seq), not activeTurnSeq —
         // a crash right after an interrupt/chained send would otherwise emit a
         // lagging seq the stale-turn guard drops, stranding the thinking

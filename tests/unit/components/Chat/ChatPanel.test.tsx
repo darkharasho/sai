@@ -657,8 +657,6 @@ describe('ChatPanel', () => {
     expect(mockSai.codexStart).toHaveBeenCalledWith(
       '/project',
       'scope-a',
-      'chat',
-      undefined,
       undefined,
       expect.any(String),
       ['/repos/a', '/repos/b'],

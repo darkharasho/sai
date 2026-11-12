@@ -314,7 +314,7 @@ describe('SdkBackend', () => {
       emit: (p) => emits.push(p),
       resolveClaudePath: () => undefined,
     });
-    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT });
     backend.send({ projectPath: PROJECT, message: 'go', scope: SCOPE, permMode: 'bypass' });
     await new Promise<void>((resolve) => {
       const check = () => { if (emits.some(e => e.type === 'done')) resolve(); else setTimeout(check, 5); };
@@ -349,7 +349,7 @@ describe('SdkBackend', () => {
       emit: (p) => emits.push(p),
       resolveClaudePath: () => undefined,
     });
-    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT });
     backend.send({ projectPath: PROJECT, message: 'go', scope: SCOPE, permMode: 'bypass' });
     await new Promise<void>((resolve) => {
       const check = () => { if (emits.some(e => e.type === 'done')) resolve(); else setTimeout(check, 5); };
@@ -651,7 +651,7 @@ describe('SdkBackend', () => {
       resolveClaudePath: () => undefined,
     });
 
-    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT });
     backend.send({ projectPath: PROJECT, message: 'run', scope: SCOPE, permMode: 'default' });
 
     // Wait for session to be created (options captured)
@@ -713,7 +713,7 @@ describe('SdkBackend', () => {
       emit: (p) => emits.push(p),
       resolveClaudePath: () => undefined,
     });
-    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT });
     backend.send({ projectPath: PROJECT, message: 'run', scope: SCOPE, permMode: 'default' });
     await new Promise<void>((resolve) => {
       const check = () => (capturedOptions ? resolve() : setTimeout(check, 5));
@@ -746,7 +746,7 @@ describe('SdkBackend', () => {
       emit: (p) => emits.push(p),
       resolveClaudePath: () => undefined,
     });
-    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT });
     backend.send({ projectPath: PROJECT, message: 'run', scope: SCOPE, permMode: 'default' });
     await new Promise<void>((resolve) => {
       const check = () => (capturedOptions ? resolve() : setTimeout(check, 5));
@@ -781,7 +781,7 @@ describe('SdkBackend', () => {
       resolveClaudePath: () => undefined,
     });
 
-    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT });
     backend.send({ projectPath: PROJECT, message: 'run', scope: SCOPE, permMode: 'default' });
 
     await new Promise<void>((resolve) => {
@@ -855,7 +855,7 @@ describe('SdkBackend', () => {
     let capturedOptions: any = null;
     const queryFn = vi.fn((args: { prompt: any; options: any }) => { capturedOptions = args.options; return fakeQuery; });
     const backend = new SdkBackend({ queryFn, emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
-    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT });
     backend.send({ projectPath: PROJECT, message: 'ask', scope: SCOPE, permMode: 'default' });
     await new Promise<void>((resolve) => { const check = () => { if (capturedOptions) resolve(); else setTimeout(check, 5); }; setTimeout(check, 5); });
 
@@ -894,7 +894,7 @@ describe('SdkBackend', () => {
     let capturedOptions: any = null;
     const queryFn = vi.fn((args: { prompt: any; options: any }) => { capturedOptions = args.options; return fakeQuery; });
     const backend = new SdkBackend({ queryFn, emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
-    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT });
     backend.send({ projectPath: PROJECT, message: 'plan', scope: SCOPE, permMode: 'default' });
     await new Promise<void>((resolve) => { const check = () => { if (capturedOptions) resolve(); else setTimeout(check, 5); }; setTimeout(check, 5); });
 
@@ -1238,7 +1238,7 @@ describe('SdkBackend', () => {
     const fakeServer = { type: 'sdk', name: 'sai', instance: {} } as any;
     const buildChatMcpServer = vi.fn(() => fakeServer);
     const backend = new SdkBackend({ queryFn, emit: (p) => emits.push(p), resolveClaudePath: () => undefined, buildChatMcpServer });
-    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT });
     backend.send({ projectPath: PROJECT, message: 'hi', scope: SCOPE, permMode: 'default' });
     await new Promise<void>((resolve) => { const check = () => { if (capturedOptions) resolve(); else setTimeout(check, 5); }; setTimeout(check, 5); });
 
@@ -1253,22 +1253,21 @@ describe('SdkBackend', () => {
     fakeQuery.close();
   });
 
-  it('(18) non-chat scope does not attach mcpServers', async () => {
+  it('(18) a bypass session in a non-default scope still gets the sai server + nudges', async () => {
     const fakeQuery = makeFakeQuery([], { hang: true });
     let capturedOptions: any = null;
     const queryFn = vi.fn((args: { prompt: any; options: any }) => { capturedOptions = args.options; return fakeQuery; });
-    const buildChatMcpServer = vi.fn(() => ({ type: 'sdk', name: 'sai', instance: {} } as any));
+    const fakeServer = { type: 'sdk', name: 'sai', instance: {} } as any;
+    const buildChatMcpServer = vi.fn(() => fakeServer);
     const backend = new SdkBackend({ queryFn, emit: (p) => emits.push(p), resolveClaudePath: () => undefined, buildChatMcpServer });
-    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'orchestrator' });
-    backend.send({ projectPath: PROJECT, message: 'hi', scope: SCOPE, permMode: 'bypass' });
+    backend.start({ projectPath: PROJECT, scope: 'session-abc', scopeCwd: PROJECT });
+    backend.send({ projectPath: PROJECT, message: 'hi', scope: 'session-abc', permMode: 'bypass' });
     await new Promise<void>((resolve) => { const check = () => { if (capturedOptions) resolve(); else setTimeout(check, 5); }; setTimeout(check, 5); });
 
-    expect(buildChatMcpServer).not.toHaveBeenCalled();
-    expect(capturedOptions.mcpServers).toBeUndefined();
-
-    // Verify chat nudges are also absent for non-chat scope
-    const appended = (capturedOptions.systemPrompt && capturedOptions.systemPrompt.append) || '';
-    expect(appended).not.toContain('render_html');
+    expect(buildChatMcpServer).toHaveBeenCalledWith(PROJECT);
+    expect(capturedOptions.mcpServers).toEqual({ sai: fakeServer });
+    expect(capturedOptions.permissionMode).toBe('bypassPermissions');
+    expect(capturedOptions.systemPrompt.append).toContain('render_html');
 
     fakeQuery.close();
   });
@@ -1284,7 +1283,7 @@ describe('SdkBackend', () => {
       return fakeQuery;
     });
     const backend = new SdkBackend({ queryFn, emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
-    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT });
     backend.send({ projectPath: PROJECT, message: 'look', scope: SCOPE, permMode: 'default', imagePaths: ['/tmp/a.png', '/tmp/b.png'] });
     await new Promise<void>((r) => setTimeout(r, 20));
 
@@ -1299,7 +1298,7 @@ describe('SdkBackend', () => {
     const fakeQuery = makeFakeQuery([initMsg], { hang: true });
     const queryFn = vi.fn(() => fakeQuery);
     const backend = new SdkBackend({ queryFn, emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
-    const ret = backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    const ret = backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT });
     expect(ret).toEqual({ slashCommands: ['/clear', '/compact'] });
 
     backend.send({ projectPath: PROJECT, message: 'hi', scope: SCOPE, permMode: 'default' });
@@ -1312,7 +1311,7 @@ describe('SdkBackend', () => {
     const fakeQuery = makeFakeQuery([], { hang: true });
     const queryFn = vi.fn(() => fakeQuery);
     const backend = new SdkBackend({ queryFn, emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
-    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT });
     backend.send({ projectPath: PROJECT, message: 'hi', scope: SCOPE, permMode: 'default' });
     await new Promise<void>((r) => setTimeout(r, 10));
 
@@ -1343,7 +1342,7 @@ describe('SdkBackend', () => {
     const fakeQuery = makeFakeQuery([], { hang: true });
     const queryFn = vi.fn(() => fakeQuery);
     const backend = new SdkBackend({ queryFn, emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
-    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT });
     backend.send({ projectPath: PROJECT, message: 'hi', scope: SCOPE, permMode: 'default' });
     await new Promise<void>((r) => setTimeout(r, 10));
 
@@ -1368,7 +1367,7 @@ describe('SdkBackend', () => {
     const fakeQuery = makeFakeQuery([], { hang: true });
     const queryFn = vi.fn(() => fakeQuery);
     const backend = new SdkBackend({ queryFn, emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
-    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT });
     backend.send({ projectPath: PROJECT, message: 'hi', scope: SCOPE, permMode: 'default' });
     await new Promise<void>((r) => setTimeout(r, 10));
     const session: any = (backend as any).sessions.get(`${PROJECT} ${SCOPE}`);
@@ -1391,7 +1390,7 @@ describe('SdkBackend', () => {
       },
     };
     const backend = new SdkBackend({ queryFn: vi.fn(() => throwingQuery), emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
-    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT });
     backend.send({ projectPath: PROJECT, message: 'hi', scope: SCOPE, permMode: 'default' });
     await new Promise<void>((r) => setTimeout(r, 10));
     const session: any = (backend as any).sessions.get(`${PROJECT} ${SCOPE}`);
@@ -1409,7 +1408,7 @@ describe('SdkBackend', () => {
   it('suspendScope drops an open background-wait pill (done turnSeq null) and its timer', async () => {
     const fakeQuery = makeFakeQuery([], { hang: true });
     const backend = new SdkBackend({ queryFn: vi.fn(() => fakeQuery), emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
-    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT });
     backend.send({ projectPath: PROJECT, message: 'hi', scope: SCOPE, permMode: 'default' });
     await new Promise<void>((r) => setTimeout(r, 10));
     const session: any = (backend as any).sessions.get(`${PROJECT} ${SCOPE}`);
@@ -1429,7 +1428,7 @@ describe('SdkBackend', () => {
   it('suspendWorkspace drops an open background-wait pill (done turnSeq null) and its timer', async () => {
     const fakeQuery = makeFakeQuery([], { hang: true });
     const backend = new SdkBackend({ queryFn: vi.fn(() => fakeQuery), emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
-    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT });
     backend.send({ projectPath: PROJECT, message: 'hi', scope: SCOPE, permMode: 'default' });
     await new Promise<void>((r) => setTimeout(r, 10));
     const session: any = (backend as any).sessions.get(`${PROJECT} ${SCOPE}`);
@@ -1454,7 +1453,7 @@ describe('SdkBackend', () => {
     const queryFn = vi.fn((args: any) => { capturedOptions = args.options; return fakeQuery; });
     const buildChatMcpServer = vi.fn(() => ({ type: 'sdk', name: 'sai', instance: {} } as any));
     const backend = new SdkBackend({ queryFn, emit: (p) => emits.push(p), resolveClaudePath: () => undefined, buildChatMcpServer });
-    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT });
     backend.send({ projectPath: PROJECT, message: 'hi', scope: SCOPE, permMode: 'default' });
     await new Promise<void>((r) => { const c = () => capturedOptions ? r() : setTimeout(c, 5); setTimeout(c, 5); });
     expect(capturedOptions.mcpServers.foo).toEqual({ type: 'stdio', command: 'foo' });
@@ -1477,7 +1476,7 @@ describe('SdkBackend', () => {
       return fakeQuery;
     });
     const backend = new SdkBackend({ queryFn, emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
-    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT });
     backend.compact({ projectPath: PROJECT, scope: SCOPE });
     await new Promise<void>((r) => setTimeout(r, 20));
 
@@ -1506,7 +1505,7 @@ describe('SdkBackend', () => {
     let capturedOptions: any = null;
     const queryFn = vi.fn((args: any) => { capturedOptions = args.options; return fakeQuery; });
     const backend = new SdkBackend({ queryFn, emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
-    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT });
     backend.send({ projectPath: PROJECT, message: 'hi', scope: SCOPE, permMode: 'bypass', origin: 'remote' });
     await new Promise<void>((r) => { const c = () => capturedOptions ? r() : setTimeout(c, 5); setTimeout(c, 5); });
     expect(capturedOptions.permissionMode).toBe('acceptEdits'); // clamped away from bypass
@@ -1519,45 +1518,10 @@ describe('SdkBackend', () => {
     let capturedOptions: any = null;
     const queryFn = vi.fn((args: any) => { capturedOptions = args.options; return fakeQuery; });
     const backend = new SdkBackend({ queryFn, emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
-    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT });
     backend.send({ projectPath: PROJECT, message: 'hi', scope: SCOPE, permMode: 'bypass', origin: 'remote' });
     await new Promise<void>((r) => { const c = () => capturedOptions ? r() : setTimeout(c, 5); setTimeout(c, 5); });
     expect(capturedOptions.permissionMode).toBe('bypassPermissions'); // no ceiling → unchanged
-    fakeQuery.close();
-  });
-
-  it('(26) orchestrator scope attaches mcpServers.swarm + full orchestrator systemPrompt (plain string)', async () => {
-    const fakeQuery = makeFakeQuery([], { hang: true });
-    let capturedOptions: any = null;
-    const queryFn = vi.fn((args: any) => { capturedOptions = args.options; return fakeQuery; });
-    const fakeSwarm = { type: 'sdk', name: 'swarm', instance: {} } as any;
-    const buildSwarmMcpServer = vi.fn(() => fakeSwarm);
-    const backend = new SdkBackend({ queryFn, emit: (p) => emits.push(p), resolveClaudePath: () => undefined, buildSwarmMcpServer });
-    backend.start({ projectPath: PROJECT, scope: 'orch', scopeCwd: PROJECT, kind: 'orchestrator', orchestratorContext: { defaultModel: 'opus', concurrencyCap: 3 } });
-    backend.send({ projectPath: PROJECT, message: 'go', scope: 'orch', permMode: 'bypass' });
-    await new Promise<void>((r) => { const c = () => capturedOptions ? r() : setTimeout(c, 5); setTimeout(c, 5); });
-
-    expect(buildSwarmMcpServer).toHaveBeenCalledWith(PROJECT);
-    expect(capturedOptions.mcpServers).toEqual({ swarm: fakeSwarm });
-    expect(typeof capturedOptions.systemPrompt).toBe('string'); // full replacement, not preset object
-    expect(capturedOptions.systemPrompt.length).toBeGreaterThan(50); // the built orchestrator prompt
-    expect(capturedOptions.tools).toEqual([]);
-    expect(capturedOptions.permissionMode).toBe('bypassPermissions');
-    fakeQuery.close();
-  });
-
-  it('(27) chat scope does not attach the swarm server', async () => {
-    const fakeQuery = makeFakeQuery([], { hang: true });
-    let capturedOptions: any = null;
-    const queryFn = vi.fn((args: any) => { capturedOptions = args.options; return fakeQuery; });
-    const buildSwarmMcpServer = vi.fn(() => ({ type: 'sdk', name: 'swarm', instance: {} } as any));
-    const backend = new SdkBackend({ queryFn, emit: (p) => emits.push(p), resolveClaudePath: () => undefined, buildSwarmMcpServer });
-    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
-    backend.send({ projectPath: PROJECT, message: 'hi', scope: SCOPE, permMode: 'default' });
-    await new Promise<void>((r) => { const c = () => capturedOptions ? r() : setTimeout(c, 5); setTimeout(c, 5); });
-
-    expect(buildSwarmMcpServer).not.toHaveBeenCalled();
-    expect(capturedOptions.mcpServers?.swarm).toBeUndefined();
     fakeQuery.close();
   });
 
@@ -1567,7 +1531,7 @@ describe('SdkBackend', () => {
     const fakeQuery = makeFakeQuery([], { hang: true });
     const queryFn = vi.fn(() => fakeQuery);
     const backend = new SdkBackend({ queryFn, emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
-    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT });
     backend.send({ projectPath: PROJECT, message: 'hello from phone', scope: SCOPE, permMode: 'default', origin: 'remote' });
     await new Promise(r => setTimeout(r, 10));
 
@@ -1596,7 +1560,7 @@ describe('SdkBackend', () => {
     };
     const queryFn = vi.fn(() => fakeQuery);
     const backend = new SdkBackend({ queryFn, emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
-    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT });
 
     // Turn 1 starts and stays in flight (no result yet)
     backend.send({ projectPath: PROJECT, message: 'first', scope: SCOPE, permMode: 'default' });
@@ -1689,7 +1653,7 @@ describe('SdkBackend', () => {
     let capturedOptions: any = null;
     const queryFn = vi.fn((args: any) => { capturedOptions = args.options; return fakeQuery; });
     const backend = new SdkBackend({ queryFn, emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
-    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT });
     backend.send({ projectPath: PROJECT, message: 'work', scope: SCOPE, permMode: 'default' });
     await new Promise<void>((r) => { const c = () => capturedOptions ? r() : setTimeout(c, 5); setTimeout(c, 5); });
 
@@ -1729,7 +1693,7 @@ describe('SdkBackend', () => {
       [Symbol.asyncIterator]() { return iterator; },
     };
     const backend = new SdkBackend({ queryFn: vi.fn(() => fakeQuery), emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
-    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT });
 
     // Turn 1 in flight → user hits Stop → immediate done(1)
     backend.send({ projectPath: PROJECT, message: 'first', scope: SCOPE, permMode: 'default' });
@@ -1797,7 +1761,7 @@ describe('SdkBackend', () => {
     // Turn 1 stays in flight forever (its result never drains — worst case).
     const fakeQuery = makeFakeQuery([], { hang: true });
     const backend = new SdkBackend({ queryFn: vi.fn(() => fakeQuery), emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
-    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT });
 
     backend.send({ projectPath: PROJECT, message: 'first', scope: SCOPE, permMode: 'default' });
     await new Promise(r => setTimeout(r, 10));
@@ -1855,7 +1819,7 @@ describe('SdkBackend', () => {
       [Symbol.asyncIterator]() { return iterator; },
     };
     const backend = new SdkBackend({ queryFn: vi.fn(() => fakeQuery), emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
-    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT });
 
     backend.send({ projectPath: PROJECT, message: 'first', scope: SCOPE, permMode: 'default' });
     await new Promise(r => setTimeout(r, 10));
@@ -1922,7 +1886,7 @@ describe('SdkBackend', () => {
     let capturedOptions: any = null;
     const queryFn = vi.fn((args: any) => { capturedOptions = args.options; return fakeQuery; });
     const backend = new SdkBackend({ queryFn, emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
-    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT });
     backend.send({ projectPath: PROJECT, message: 'hi', scope: SCOPE, permMode: 'default' });
     await new Promise<void>((r) => { const c = () => capturedOptions ? r() : setTimeout(c, 5); setTimeout(c, 5); });
 
@@ -1965,7 +1929,7 @@ describe('SdkBackend', () => {
       return calls === 1 ? fakeQuery1 : fakeQuery2;
     });
     const backend = new SdkBackend({ queryFn, emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
-    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT });
 
     backend.send({ projectPath: PROJECT, message: 'a', scope: SCOPE, permMode: 'default', model: 'model-a' });
     await new Promise(r => setTimeout(r, 10));
@@ -1997,7 +1961,7 @@ describe('SdkBackend', () => {
       return fakeQuery;
     });
     const backend = new SdkBackend({ queryFn, emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
-    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT });
     // No send() first — mirrors the post-idle-sweep state.
     backend.compact({ projectPath: PROJECT, scope: SCOPE });
     await new Promise((r) => setTimeout(r, 20));
@@ -2019,7 +1983,7 @@ describe('SdkBackend', () => {
       return calls === 1 ? fakeQuery1 : fakeQuery2;
     });
     const backend = new SdkBackend({ queryFn, emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
-    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT });
     backend.send({ projectPath: PROJECT, message: 'a', scope: SCOPE, permMode: 'default' });
     await new Promise(r => setTimeout(r, 10));
 
@@ -2145,7 +2109,7 @@ describe('SdkBackend', () => {
       return fakeQuery;
     });
     const backend = new SdkBackend({ queryFn, emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
-    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT });
     backend.send({ projectPath: PROJECT, message: 'look', scope: SCOPE, permMode: 'default', imagePaths: ['/tmp/shot.png'] });
     await new Promise((r) => setTimeout(r, 20));
 
@@ -2165,7 +2129,7 @@ describe('SdkBackend', () => {
     const queryFn = vi.fn(() => fakeQuery);
     const backend = new SdkBackend({ queryFn, emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
 
-    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT });
     expect(mockGetOrCreateWorkspace).toHaveBeenCalledWith(PROJECT);
 
     mockGetOrCreateWorkspace.mockClear();
@@ -2233,9 +2197,8 @@ describe('SdkBackend', () => {
     fakeQuery.close();
   });
 
-  // ── Completion notification gating: only chat-kind scopes are a "turn end"
-  //    for the user — task/orchestrator results must not fire the OS
-  //    completion notification (tasks have their own opt-in path in App.tsx).
+  // ── Completion notification: a finished turn in any chat scope fires the OS
+  //    completion notification.
 
   function makeNotifySpy() {
     return {
@@ -2246,7 +2209,7 @@ describe('SdkBackend', () => {
     };
   }
 
-  async function runTurnWithKind(kind: 'chat' | 'task' | 'orchestrator', scope: string) {
+  async function runTurnInScope(scope: string) {
     const notify = makeNotifySpy();
     const fakeQuery = makeFakeQuery([
       { type: 'result', stop_reason: 'end_turn', num_turns: 1, duration_ms: 100 },
@@ -2258,26 +2221,21 @@ describe('SdkBackend', () => {
       resolveClaudePath: () => undefined,
       notify,
     });
-    backend.start({ projectPath: PROJECT, scope, scopeCwd: PROJECT, kind });
+    backend.start({ projectPath: PROJECT, scope, scopeCwd: PROJECT });
     await collectUntilDone(backend, emits, { projectPath: PROJECT, message: 'go', scope, permMode: 'bypass' });
     // completion is scheduled with a 500ms setTimeout — wait past it.
     await new Promise((r) => setTimeout(r, 600));
     return notify;
   }
 
-  it('(44) chat-kind result fires the completion notification', async () => {
-    const notify = await runTurnWithKind('chat', 'chat');
+  it('(44) chat result fires the completion notification', async () => {
+    const notify = await runTurnInScope('chat');
     expect(notify.completion).toHaveBeenCalledTimes(1);
   });
 
-  it('(45) task-kind result does NOT fire the completion notification', async () => {
-    const notify = await runTurnWithKind('task', 'swarm-task-1');
-    expect(notify.completion).not.toHaveBeenCalled();
-  });
-
-  it('(46) orchestrator result does NOT fire the completion notification', async () => {
-    const notify = await runTurnWithKind('orchestrator', 'orchestrator-1');
-    expect(notify.completion).not.toHaveBeenCalled();
+  it('(45) a session-scoped chat result fires the completion notification too', async () => {
+    const notify = await runTurnInScope('session-abc');
+    expect(notify.completion).toHaveBeenCalledTimes(1);
   });
 
   // ── Superseded turns: the user sending mid-stream starts a NEW turn while
@@ -2320,7 +2278,7 @@ describe('SdkBackend', () => {
       resolveClaudePath: () => undefined,
       notify,
     });
-    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT });
     backend.send({ projectPath: PROJECT, message: 'first', scope: SCOPE, permMode: 'bypass' });
     await new Promise((r) => setTimeout(r, 20));
     // User sends again mid-turn — a new turn begins, the old result is in flight.
@@ -2342,7 +2300,7 @@ describe('SdkBackend', () => {
       resolveClaudePath: () => undefined,
       notify,
     });
-    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT });
     backend.send({ projectPath: PROJECT, message: 'first', scope: SCOPE, permMode: 'bypass' });
     await new Promise((r) => setTimeout(r, 20));
     q.push({ type: 'result', stop_reason: 'end_turn', num_turns: 1, duration_ms: 100 });
@@ -2374,7 +2332,7 @@ describe('SdkBackend', () => {
       resolveClaudePath: () => undefined,
       notify,
     });
-    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT });
     backend.send({ projectPath: PROJECT, message: 'first', scope: SCOPE, permMode: 'bypass' });
     await new Promise((r) => setTimeout(r, 20));
     // Shape taken verbatim from the live log: long duration, zero turns, no text.
@@ -2394,7 +2352,7 @@ describe('SdkBackend', () => {
       resolveClaudePath: () => undefined,
       notify,
     });
-    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT });
     backend.send({ projectPath: PROJECT, message: 'first', scope: SCOPE, permMode: 'bypass' });
     await new Promise((r) => setTimeout(r, 20));
     q.push({ type: 'result', stop_reason: 'end_turn', num_turns: 0, duration_ms: 100, result: 'Done.' });
@@ -2555,7 +2513,7 @@ describe('SdkBackend', () => {
   async function runBackgroundWaitTurn(
     tasks: unknown,
     after: any[] = [],
-    opts: { scope?: string; kind?: 'chat' | 'task' | 'orchestrator'; before?: any[]; emitTasks?: (p: any) => void } = {},
+    opts: { scope?: string; before?: any[]; emitTasks?: (p: any) => void } = {},
   ) {
     const scope = opts.scope ?? SCOPE;
     let capturedOptions: any = null;
@@ -2604,7 +2562,6 @@ describe('SdkBackend', () => {
       notify,
       ...(opts.emitTasks ? { emitTasks: opts.emitTasks } : {}),
     });
-    if (opts.kind) backend.start({ projectPath: PROJECT, scope, scopeCwd: PROJECT, kind: opts.kind });
     await collectUntilDone(backend, emits, { projectPath: PROJECT, message: 'go', scope, permMode: 'bypass' });
     await new Promise((r) => setTimeout(r, 30)); // let the trailing frames drain
     return { backend, fakeQuery, notify, scope };
@@ -2973,15 +2930,15 @@ describe('SdkBackend', () => {
     backend.destroy();
   });
 
-  it('(59) a task-kind scope closing a wait stays silent (same gate as the result path)', async () => {
+  it('(59) a session-scoped chat closing a wait notifies once (same as the result path)', async () => {
     const { backend, notify } = await runBackgroundWaitTurn(
       [{ id: 't-1', status: 'running' }],
       [TASK_START('t-1'), TASK_DONE('t-1')],
-      { scope: 'swarm-task-1', kind: 'task' },
+      { scope: 'session-abc' },
     );
     backend._sweepOnce(Date.now() + BACKGROUND_WAIT_SETTLE_MS + 1_000);
     expect(emits.filter(e => e.type === 'done' && e.wait == null)).toHaveLength(1);
-    expect(notify.completion).not.toHaveBeenCalled();
+    expect(notify.completion).toHaveBeenCalledTimes(1);
     backend.destroy();
   });
   // ── slash commands ───────────────────────────────────────────────────────
@@ -2999,7 +2956,7 @@ describe('SdkBackend', () => {
     const queryFn = vi.fn(() => fakeQuery);
     const backend = new SdkBackend({ queryFn, emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
 
-    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT });
     expect(queryFn).toHaveBeenCalledTimes(1);
     await new Promise<void>((r) => setTimeout(r, 10));
 
@@ -3019,17 +2976,7 @@ describe('SdkBackend', () => {
     const queryFn = vi.fn(() => makeFakeQuery([], { hang: true }));
     const backend = new SdkBackend({ queryFn, emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
 
-    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
-    expect(queryFn).not.toHaveBeenCalled();
-    backend.destroy();
-  });
-
-  it('(62) start does not warm a task/orchestrator scope', async () => {
-    mockReadCachedSlashCommands.mockReturnValue([]);
-    const queryFn = vi.fn(() => makeFakeQuery([], { hang: true }));
-    const backend = new SdkBackend({ queryFn, emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
-
-    backend.start({ projectPath: PROJECT, scope: 'swarm-task-1', scopeCwd: PROJECT, kind: 'task' });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT });
     expect(queryFn).not.toHaveBeenCalled();
     backend.destroy();
   });
@@ -3040,7 +2987,7 @@ describe('SdkBackend', () => {
     const backend = new SdkBackend({ queryFn, emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
 
     backend.setSessionId(PROJECT, 'sess-history', SCOPE);
-    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT });
 
     expect(queryFn).not.toHaveBeenCalled();
     expect((backend as any).pendingResume.get(`${PROJECT} ${SCOPE}`)).toBe('sess-history');
@@ -3055,7 +3002,7 @@ describe('SdkBackend', () => {
     const queryFn = vi.fn(() => (call++ === 0 ? warm : real));
     const backend = new SdkBackend({ queryFn, emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
 
-    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT, kind: 'chat' });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT });
     await new Promise<void>((r) => setTimeout(r, 10));
     // The warm session picked up a session id from its init frame.
     expect((backend as any).sessions.get(`${PROJECT} ${SCOPE}`).sessionId).toBe('warm-sess');
@@ -3238,14 +3185,13 @@ describe('SdkBackend live MCP control', () => {
       backend.destroy();
     });
 
-    it('a busy orchestrator is flagged stale but a send does not respawn it', async () => {
+    it('a busy session is flagged stale but a send does not respawn it', async () => {
       const { backend, queryFn, queries } = setup();
-      backend.start({ projectPath: '/p', scope: 'orch', scopeCwd: '/p', kind: 'orchestrator' });
-      backend.send({ projectPath: '/p', message: 'a', scope: 'orch' } as any);
+      backend.send({ projectPath: '/p', message: 'a', scope: 'busy' } as any);
       await tick();
       backend.markMcpStale('/p', 's1');
-      expect((backend as any).sessions.get('/p orch').mcpStale).toBe(true);
-      backend.send({ projectPath: '/p', message: 'b', scope: 'orch' } as any);
+      expect((backend as any).sessions.get('/p busy').mcpStale).toBe(true);
+      backend.send({ projectPath: '/p', message: 'b', scope: 'busy' } as any);
       await tick();
       expect(queryFn).toHaveBeenCalledTimes(1);
       expect(queries[0].closeSpy).not.toHaveBeenCalled();

@@ -1,25 +1,24 @@
 /**
- * SAI Swarm MCP Server
+ * SAI chat-tools MCP Server
  *
- * A standalone Node script (built to dist-electron/swarm-mcp-server.js) that
- * speaks the Model Context Protocol over stdio. It is spawned by Claude CLI
- * when SAI launches a Claude orchestrator session with the SAI-managed
- * --mcp-config.
+ * A standalone Node script (built to dist-electron/sai-mcp-server.js) that
+ * speaks the Model Context Protocol over stdio. The Claude CLI backend (via
+ * the SAI-managed --mcp-config) and the Codex SDK backend spawn it for every
+ * chat so the model gets SAI's `sai_*` tools (render, capture, browser, ...).
  *
- * Task 3 wires `tools/call` over a Unix socket / Windows named pipe to the
- * SAI host process. The dispatch is abstracted through SwarmCallTransport so
- * tests can inject a mock without spinning up a real socket.
+ * `tools/call` is forwarded over a Unix socket / Windows named pipe to the
+ * SAI host process (services/saiMcpHost). The dispatch is abstracted through
+ * SaiCallTransport so tests can inject a mock without a real socket.
  */
 
 import { createInterface } from 'node:readline';
 import * as net from 'node:net';
 import * as crypto from 'node:crypto';
-import { SWARM_TOOL_SCHEMA } from '../src/lib/swarmOrchestratorTools';
-import { toolsForToolset, SAI_TOOL_NAMES, type SaiToolset } from '../src/lib/saiTools';
+import { toolsForToolset } from '../src/lib/saiTools';
 import { toMcpSuccessContent, toMcpErrorContent } from './services/mcpToolContent';
 
-let toolset: SaiToolset = (process.env.SAI_MCP_TOOLSET as SaiToolset) || 'orchestrator';
-export function setToolset(t: SaiToolset): void { toolset = t; }
+const CHAT_TOOLS = toolsForToolset('chat');
+const CHAT_TOOL_NAMES = new Set(CHAT_TOOLS.map((t) => t.name));
 
 export interface JsonRpcRequest {
   jsonrpc: '2.0';
@@ -42,40 +41,32 @@ export interface JsonRpcError {
 
 export type JsonRpcResponse = JsonRpcSuccess | JsonRpcError;
 
-export interface SwarmMcpEnv {
+export interface SaiMcpEnv {
   socketPath: string;
   secret: string;
   workspace: string;
 }
 
-export interface SwarmCallTransport {
+export interface SaiCallTransport {
   call(tool: string, input: unknown): Promise<unknown>;
 }
 
-let envState: SwarmMcpEnv | null = null;
+let envState: SaiMcpEnv | null = null;
 
-export function setEnv(env: SwarmMcpEnv | null): void {
+export function setEnv(env: SaiMcpEnv | null): void {
   envState = env;
 }
 
-export function getEnv(): SwarmMcpEnv | null {
+export function getEnv(): SaiMcpEnv | null {
   return envState;
 }
 
 const PROTOCOL_VERSION = '2024-11-05';
-const SWARM_TOOL_NAMES = new Set(SWARM_TOOL_SCHEMA.map((t) => t.name));
 
 function listTools() {
-  const tools: Array<{ name: string; description: string; inputSchema: unknown }> = [];
-  if (toolset === 'orchestrator') {
-    for (const tool of SWARM_TOOL_SCHEMA) {
-      tools.push({ name: `swarm_${tool.name}`, description: tool.description, inputSchema: tool.input_schema });
-    }
-  }
-  for (const tool of toolsForToolset(toolset)) {
-    tools.push({ name: `sai_${tool.name}`, description: tool.description, inputSchema: tool.input_schema });
-  }
-  return { tools };
+  return {
+    tools: CHAT_TOOLS.map((tool) => ({ name: `sai_${tool.name}`, description: tool.description, inputSchema: tool.input_schema })),
+  };
 }
 
 /**
@@ -87,7 +78,7 @@ function listTools() {
  */
 export async function handleRequest(
   req: JsonRpcRequest,
-  transport: SwarmCallTransport,
+  transport: SaiCallTransport,
 ): Promise<JsonRpcResponse | null> {
   const isNotification = req.id === undefined || req.id === null;
   const id = (req.id ?? null) as number | string | null;
@@ -101,7 +92,7 @@ export async function handleRequest(
         result: {
           protocolVersion: PROTOCOL_VERSION,
           capabilities: { tools: {} },
-          serverInfo: { name: 'sai-swarm', version: '1.0.0' },
+          serverInfo: { name: 'sai', version: '1.0.0' },
         },
       };
 
@@ -122,16 +113,11 @@ export async function handleRequest(
       const fullName = typeof params.name === 'string' ? params.name : '';
       const input = (params.arguments ?? {}) as unknown;
 
-      // Only dispatch tools the current toolset actually advertises in
-      // tools/list — a buggy or hostile client must not be able to invoke an
-      // unlisted tool (e.g. swarm_spawn_task from a chat session).
-      let toolName: string | null = null;
-      if (toolset === 'orchestrator' && fullName.startsWith('swarm_') && SWARM_TOOL_NAMES.has(fullName.slice(6))) {
-        toolName = fullName.slice(6);
-      } else if (fullName.startsWith('sai_') && SAI_TOOL_NAMES.has(fullName.slice(4))
-                 && toolsForToolset(toolset).some((t) => t.name === fullName.slice(4))) {
-        toolName = fullName.slice(4);
-      }
+      // Only dispatch tools advertised in tools/list — a buggy or hostile
+      // client must not be able to invoke an unlisted tool.
+      const toolName = fullName.startsWith('sai_') && CHAT_TOOL_NAMES.has(fullName.slice(4))
+        ? fullName.slice(4)
+        : null;
       if (!toolName) {
         return { jsonrpc: '2.0', id, error: { code: -32602, message: `unknown tool: ${fullName}` } };
       }
@@ -167,13 +153,13 @@ function writeParseError(id: number | string | null = null): void {
   });
 }
 
-function readEnvOrExit(): SwarmMcpEnv {
-  const socketPath = process.env.SAI_SWARM_SOCKET_PATH;
-  const secret = process.env.SAI_SWARM_SECRET;
-  const workspace = process.env.SAI_SWARM_WORKSPACE;
+function readEnvOrExit(): SaiMcpEnv {
+  const socketPath = process.env.SAI_MCP_SOCKET_PATH;
+  const secret = process.env.SAI_MCP_SECRET;
+  const workspace = process.env.SAI_MCP_WORKSPACE;
 
   if (!socketPath || !secret || !workspace) {
-    process.stderr.write('missing SAI_SWARM_* env vars\n');
+    process.stderr.write('missing SAI_MCP_* env vars\n');
     process.exit(2);
   }
 
@@ -188,7 +174,7 @@ export interface SocketTransportOptions {
   exitOnClose?: boolean;
 }
 
-export interface SocketTransport extends SwarmCallTransport {
+export interface SocketTransport extends SaiCallTransport {
   ready(): Promise<void>;
   close(): void;
 }
@@ -201,13 +187,13 @@ export interface SocketTransport extends SwarmCallTransport {
  * NDJSON `call` frames and resolve when the matching `result` frame arrives
  * (or reject on `error`).
  *
- * Options default to env vars (SAI_SWARM_SOCKET_PATH/SECRET/WORKSPACE) so
+ * Options default to env vars (SAI_MCP_SOCKET_PATH/SECRET/WORKSPACE) so
  * main() can call this without args. Tests pass explicit overrides.
  */
 export function makeSocketTransport(opts: SocketTransportOptions = {}): SocketTransport {
-  const socketPath = opts.socketPath ?? process.env.SAI_SWARM_SOCKET_PATH ?? '';
-  const secret = opts.secret ?? process.env.SAI_SWARM_SECRET ?? '';
-  const workspace = opts.workspace ?? process.env.SAI_SWARM_WORKSPACE ?? '';
+  const socketPath = opts.socketPath ?? process.env.SAI_MCP_SOCKET_PATH ?? '';
+  const secret = opts.secret ?? process.env.SAI_MCP_SECRET ?? '';
+  const workspace = opts.workspace ?? process.env.SAI_MCP_WORKSPACE ?? '';
   const exitOnClose = opts.exitOnClose ?? true;
 
   let socket: net.Socket | null = null;
@@ -293,7 +279,7 @@ export function makeSocketTransport(opts: SocketTransportOptions = {}): SocketTr
       readyReject(new Error('socket closed before welcome'));
       rejectAllPending('socket closed');
       if (exitOnClose) {
-        process.stderr.write('swarm host socket closed unexpectedly\n');
+        process.stderr.write('SAI host socket closed unexpectedly\n');
         process.exit(4);
       }
     });
@@ -375,14 +361,13 @@ export function startStdioLoop(
 export async function main(): Promise<void> {
   const env = readEnvOrExit();
   setEnv(env);
-  setToolset((process.env.SAI_MCP_TOOLSET as SaiToolset) || 'orchestrator');
 
   const transport = makeSocketTransport();
   try {
     await transport.ready();
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    process.stderr.write(`swarm host rejected handshake: ${msg}\n`);
+    process.stderr.write(`SAI host rejected handshake: ${msg}\n`);
     process.exit(3);
   }
 

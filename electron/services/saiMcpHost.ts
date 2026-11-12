@@ -1,28 +1,33 @@
+/**
+ * Main-process socket host for the sai-mcp-server subprocess: authenticates
+ * each connection and forwards its `call` frames to the registered tool
+ * handler (main.ts routes them to the renderer).
+ */
 import * as net from 'node:net';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import * as crypto from 'node:crypto';
 
-export interface SwarmToolCallRequest {
+export interface SaiToolCallRequest {
   id: string;
   tool: string;
   input: any;
   workspace: string;
 }
 
-export interface SwarmToolCallResponse {
+export interface SaiToolCallResponse {
   id: string;
   result?: unknown;
   error?: string;
 }
 
-export interface SwarmMcpHostHandle {
+export interface SaiMcpHostHandle {
   socketPath: string;
   secret: string;
 }
 
-type ToolCallHandler = (req: SwarmToolCallRequest) => Promise<unknown>;
+type ToolCallHandler = (req: SaiToolCallRequest) => Promise<unknown>;
 
 interface ConnState {
   workspace: string | null;
@@ -32,7 +37,7 @@ interface ConnState {
 
 interface HostInstance {
   server: net.Server;
-  handle: SwarmMcpHostHandle;
+  handle: SaiMcpHostHandle;
   connections: Map<net.Socket, ConnState>;
 }
 
@@ -41,8 +46,8 @@ let handler: ToolCallHandler | null = null;
 
 function defaultSocketPath(): string {
   return process.platform === 'win32'
-    ? `\\\\.\\pipe\\sai-swarm-${process.pid}`
-    : path.join(os.tmpdir(), `sai-swarm-${process.pid}.sock`);
+    ? `\\\\.\\pipe\\sai-mcp-${process.pid}`
+    : path.join(os.tmpdir(), `sai-mcp-${process.pid}.sock`);
 }
 
 function defaultSecret(): string {
@@ -156,7 +161,7 @@ interface StartOptions {
   secret?: string;
 }
 
-function startInternal(opts: StartOptions = {}): SwarmMcpHostHandle {
+function startInternal(opts: StartOptions = {}): SaiMcpHostHandle {
   if (instance) return instance.handle;
 
   const socketPath = opts.socketPath ?? defaultSocketPath();
@@ -169,7 +174,7 @@ function startInternal(opts: StartOptions = {}): SwarmMcpHostHandle {
   const server = net.createServer((socket) => attachConnection(socket));
   server.on('error', (err) => {
     // Avoid crashing main on listen errors; log only
-    console.error('[swarm-mcp-host] server error:', err);
+    console.error('[sai-mcp-host] server error:', err);
   });
   server.listen(socketPath);
 
@@ -181,12 +186,12 @@ function startInternal(opts: StartOptions = {}): SwarmMcpHostHandle {
   return instance.handle;
 }
 
-export function start(): SwarmMcpHostHandle {
+export function start(): SaiMcpHostHandle {
   return startInternal();
 }
 
 /** @internal */
-export function _test_start(opts: StartOptions = {}): SwarmMcpHostHandle {
+export function _test_start(opts: StartOptions = {}): SaiMcpHostHandle {
   return startInternal(opts);
 }
 
@@ -204,7 +209,7 @@ export function stop(): void {
   }
 }
 
-export function onToolCall(h: (req: SwarmToolCallRequest) => Promise<unknown>): void {
+export function onToolCall(h: ToolCallHandler): void {
   handler = h;
 }
 

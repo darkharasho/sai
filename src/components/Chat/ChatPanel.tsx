@@ -871,8 +871,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
       projects: activeMetaRuntime.projects,
     } : null);
     const startArgs: any[] = aiProvider === 'claude' || aiProvider === 'codex'
-      ? [projectPath || '', claudeScope, 'chat', undefined /* unused context slot */,
-        undefined /* scopeCwd */, metaPreamble, aiProvider === 'codex' && activeMetaRuntime
+      ? [projectPath || '', claudeScope, undefined /* scopeCwd */, metaPreamble, aiProvider === 'codex' && activeMetaRuntime
         ? [...new Set(activeMetaRuntime.projects.filter(project => project.status === 'ok' && project.path.trim()).map(project => project.path))]
         : undefined]
       : [projectPath || '', metaPreamble];

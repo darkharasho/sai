@@ -141,29 +141,29 @@ async function settle(): Promise<void> {
 }
 
 describe('SdkCodexBackend', () => {
-  it('injects SAI chat MCP configuration only for chat scopes', async () => {
+  it('injects SAI chat MCP configuration for every scope', async () => {
     const buildChatMcpConfig = vi.fn(() => ({
-      mcp_servers: { sai: { command: '/electron', args: ['/app/swarm-mcp-server.js'] } },
+      mcp_servers: { sai: { command: '/electron', args: ['/app/sai-mcp-server.js'] } },
       developer_instructions: 'Use SAI chat tools.',
     }));
     const h = harness([], { buildChatMcpConfig });
 
-    h.backend.start({ projectPath: '/chat', scope: 'chat', kind: 'chat' });
+    h.backend.start({ projectPath: '/chat', scope: 'chat' });
     h.backend.send({ projectPath: '/chat', scope: 'chat', message: 'hello' });
     await settle();
 
     expect(buildChatMcpConfig).toHaveBeenCalledWith('/chat');
     expect(h.clients[0]?.options.config).toMatchObject({
-      mcp_servers: { sai: { command: '/electron', args: ['/app/swarm-mcp-server.js'] } },
+      mcp_servers: { sai: { command: '/electron', args: ['/app/sai-mcp-server.js'] } },
       developer_instructions: 'Use SAI chat tools.',
     });
 
-    h.backend.start({ projectPath: '/task', scope: 'task', kind: 'task' });
-    h.backend.send({ projectPath: '/task', scope: 'task', message: 'hello' });
+    h.backend.start({ projectPath: '/other', scope: 'session-abc' });
+    h.backend.send({ projectPath: '/other', scope: 'session-abc', message: 'hello' });
     await settle();
 
-    expect(buildChatMcpConfig).toHaveBeenCalledTimes(1);
-    expect(h.clients[1]?.options.config).toEqual({});
+    expect(buildChatMcpConfig).toHaveBeenCalledTimes(2);
+    expect(buildChatMcpConfig).toHaveBeenLastCalledWith('/other');
   });
   it('returns typed unsupported results for App Server-only input requests', () => {
     const h = harness();
@@ -437,12 +437,6 @@ describe('SdkCodexBackend', () => {
 
   it.each([
     {
-      label: 'a task turn',
-      scope: 'task:1',
-      events: completedEvents(),
-      interrupt: false,
-    },
-    {
       label: 'a failed chat turn',
       scope: 'chat',
       events: [{ type: 'turn.failed', error: { message: 'boom' } }] satisfies ThreadEvent[],
@@ -457,7 +451,7 @@ describe('SdkCodexBackend', () => {
   ])('does not notify for $label', async ({ scope, events, interrupt }) => {
     const stream = pendingStream();
     const h = harness([interrupt ? stream.events : streamOf(events)]);
-    h.backend.start({ projectPath: '/a', scope: scope as string, kind: scope === 'chat' ? 'chat' : 'task' });
+    h.backend.start({ projectPath: '/a', scope: scope as string });
     h.backend.send({ projectPath: '/a', scope: scope as string, message: 'go' });
     await settle();
     if (interrupt) h.backend.interrupt('/a', scope as string);

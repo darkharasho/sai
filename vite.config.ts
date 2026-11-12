@@ -29,7 +29,7 @@ export default defineConfig({
         },
       },
       {
-        entry: 'electron/swarm-mcp-server.ts',
+        entry: 'electron/sai-mcp-server.ts',
         vite: {
           build: {
             rollupOptions: {

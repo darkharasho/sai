@@ -2,7 +2,7 @@ import { emitChatMessage, getMainWin } from '../claude';
 import path from 'node:path';
 import { notifyCompletion } from '../notify';
 import { registerWorkspaceBackendHooks } from '../workspace';
-import * as swarmMcpHost from '../swarmMcpHost';
+import * as saiMcpHost from '../saiMcpHost';
 import { fetchBundledCodexModels } from './bundledModels';
 import { AppServerBackend } from './appServerBackend';
 import { buildCodexChatMcpConfig } from './chatMcpConfig';
@@ -91,9 +91,9 @@ interface AppServerPreviewBackend extends CodexBackend {
 }
 
 function codexMcpServerScriptPath(): string {
-  // vite-electron emits the main bundle and swarm-mcp-server bundle together
+  // vite-electron emits the main bundle and sai-mcp-server bundle together
   // in development and packaged builds.
-  return path.join(__dirname, 'swarm-mcp-server.js');
+  return path.join(__dirname, 'sai-mcp-server.js');
 }
 
 function makeSdkBackend(): CodexBackend {
@@ -105,7 +105,7 @@ function makeSdkBackend(): CodexBackend {
       if (win) notifyCompletion(win, projectPath, info, ctx);
     },
     buildChatMcpConfig: (workspace) => {
-      const handle = swarmMcpHost.start();
+      const handle = saiMcpHost.start();
       return buildCodexChatMcpConfig({
         socketPath: handle.socketPath,
         secret: handle.secret,
@@ -234,21 +234,6 @@ class ScopedCodexBackend implements CodexBackend {
     return backend.replaceMcpConfig(expectedVersion, servers);
   }
 
-  async getSwarmStatus(): Promise<CodexAppServerPreviewStatus> {
-    if (requestedMode !== 'app-server') {
-      return { available: false, reason: 'Codex Swarm requires the App Server preview backend; the SDK backend is selected.' };
-    }
-    const preview = this.backends['app-server'] ?? (this.backends['app-server'] = createAppServerBackend());
-    if (!isAppServerPreviewBackend(preview)) {
-      return { available: false, reason: 'Codex Swarm requires an App Server backend with Dynamic Tools support.' };
-    }
-    if (!preview.previewStatus.available) return preview.previewStatus;
-    if (!preview.getSwarmStatus) {
-      return { available: false, reason: 'Codex App Server Swarm bridge is unavailable.' };
-    }
-    return preview.getSwarmStatus();
-  }
-
   approve(projectPath: string, scope: string | undefined, requestHandle: string, decision: CodexApprovalDecision): CodexApprovalResult {
     const mode = this.assignments.get(codexScopeKey(projectPath, scope));
     // Never route a decision to a newly selected backend: a request is valid
@@ -348,13 +333,6 @@ export function getCodexAppServerPreviewStatus(): CodexAppServerPreviewStatus {
   if (active instanceof ScopedCodexBackend) return active.previewStatus;
   if (isAppServerPreviewBackend(active)) return active.previewStatus;
   return { available: true };
-}
-
-/** Runtime capability check for the isolated App Server Dynamic Tools bridge. */
-export async function getCodexSwarmStatus(): Promise<CodexAppServerPreviewStatus> {
-  const backend = getCodexBackend();
-  if (backend instanceof ScopedCodexBackend) return backend.getSwarmStatus();
-  return { available: false, reason: 'Codex Swarm requires the App Server preview backend.' };
 }
 
 /** Read-only MCP runtime state is intentionally separate from Claude's MCP IPC. */

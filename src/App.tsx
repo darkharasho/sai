@@ -685,9 +685,9 @@ export default function App() {
   // main process's MCP host into the renderer, then return the result over IPC.
   useEffect(() => {
     const sai = window.sai as any;
-    if (typeof sai?.onSwarmToolRequest !== 'function') return; // mocks / tests
+    if (typeof sai?.onSaiToolRequest !== 'function') return; // mocks / tests
 
-    const unsub = sai.onSwarmToolRequest((req: { id: string; tool: string; input: any; workspace: string }) => {
+    const unsub = sai.onSaiToolRequest((req: { id: string; tool: string; input: any; workspace: string }) => {
       if (req.tool === 'inspect_element' || req.tool === 'capture_app') {
         const saiAny = sai as { captureRegion?: (r: { x: number; y: number; width: number; height: number }) => Promise<string | null> };
         void handleSaiQueryToolRequest(
@@ -696,9 +696,9 @@ export default function App() {
         ).then(
           (result) =>
             result === null
-              ? sai.respondSwarmToolError(req.id, `unhandled query tool: ${req.tool}`)
-              : sai.respondSwarmTool(req.id, result),
-          (err) => sai.respondSwarmToolError(req.id, err instanceof Error ? err.message : String(err)),
+              ? sai.respondSaiToolError(req.id, `unhandled query tool: ${req.tool}`)
+              : sai.respondSaiTool(req.id, result),
+          (err) => sai.respondSaiToolError(req.id, err instanceof Error ? err.message : String(err)),
         );
         return;
       }
@@ -706,8 +706,8 @@ export default function App() {
       if (isBrowserTool(req.tool)) {
         const saiAny = sai as { browserCall?: (method: string, params?: unknown) => Promise<unknown> };
         void handleBrowserToolRequest(req, { browserCall: saiAny.browserCall }).then(
-          (result) => sai.respondSwarmTool(req.id, result),
-          (err) => sai.respondSwarmToolError(req.id, err instanceof Error ? err.message : String(err)),
+          (result) => sai.respondSaiTool(req.id, result),
+          (err) => sai.respondSaiToolError(req.id, err instanceof Error ? err.message : String(err)),
         );
         return;
       }
@@ -715,12 +715,12 @@ export default function App() {
       if (req.tool === 'capture_window') {
         const saiAny = sai as { captureWindow?: (o: { target?: string; workspace?: string; display?: boolean }) => Promise<{ ok: boolean; [k: string]: unknown }> };
         if (typeof saiAny.captureWindow !== 'function') {
-          sai.respondSwarmToolError(req.id, 'capture_window is unavailable in this build');
+          sai.respondSaiToolError(req.id, 'capture_window is unavailable in this build');
           return;
         }
         void saiAny.captureWindow({ target: req.input?.target, workspace: req.workspace, display: req.input?.display === true }).then(
-          (result) => sai.respondSwarmTool(req.id, result),
-          (err) => sai.respondSwarmToolError(req.id, err instanceof Error ? err.message : String(err)),
+          (result) => sai.respondSaiTool(req.id, result),
+          (err) => sai.respondSaiToolError(req.id, err instanceof Error ? err.message : String(err)),
         );
         return;
       }
@@ -729,16 +729,16 @@ export default function App() {
         // Display-only: the task rail derives cards from the transcript's tool
         // calls. Just ack (or tell the model its input was bad).
         const v = validateSaiTaskInput(req.input);
-        if (v.ok) sai.respondSwarmTool(req.id, { ok: true });
-        else sai.respondSwarmToolError(req.id, v.error);
+        if (v.ok) sai.respondSaiTool(req.id, { ok: true });
+        else sai.respondSaiToolError(req.id, v.error);
         return;
       }
 
       if (req.tool === 'watch_github_run') {
         const saiAny = sai as { githubApiGet?: (p: string) => Promise<{ ok: boolean; status: number; body: any }> };
         void resolveWatchRun(req.input ?? {}, saiAny.githubApiGet).then(
-          (result) => sai.respondSwarmTool(req.id, result),
-          (err) => sai.respondSwarmToolError(req.id, err instanceof Error ? err.message : String(err)),
+          (result) => sai.respondSaiTool(req.id, result),
+          (err) => sai.respondSaiToolError(req.id, err instanceof Error ? err.message : String(err)),
         );
         return;
       }
@@ -765,8 +765,8 @@ export default function App() {
           { tool: req.tool, input: req.input, renderId: req.id },
           deps,
         ).then(
-          (result) => sai.respondSwarmTool(req.id, result),
-          (err) => sai.respondSwarmToolError(req.id, err instanceof Error ? err.message : String(err)),
+          (result) => sai.respondSaiTool(req.id, result),
+          (err) => sai.respondSaiToolError(req.id, err instanceof Error ? err.message : String(err)),
         );
         return;
       }
@@ -794,8 +794,8 @@ export default function App() {
           { tool: req.tool, input: req.input, renderId: req.id },
           deps,
         ).then(
-          (result) => sai.respondSwarmTool(req.id, result),
-          (err) => sai.respondSwarmToolError(req.id, err instanceof Error ? err.message : String(err)),
+          (result) => sai.respondSaiTool(req.id, result),
+          (err) => sai.respondSaiToolError(req.id, err instanceof Error ? err.message : String(err)),
         );
         return;
       }
@@ -812,9 +812,9 @@ export default function App() {
         ).then(
           (result) =>
             result === null
-              ? sai.respondSwarmToolError(req.id, `unhandled native tool: ${req.tool}`)
-              : sai.respondSwarmTool(req.id, result),
-          (err) => sai.respondSwarmToolError(req.id, err instanceof Error ? err.message : String(err)),
+              ? sai.respondSaiToolError(req.id, `unhandled native tool: ${req.tool}`)
+              : sai.respondSaiTool(req.id, result),
+          (err) => sai.respondSaiToolError(req.id, err instanceof Error ? err.message : String(err)),
         );
         return;
       }
@@ -822,8 +822,8 @@ export default function App() {
       if (req.tool === 'render_form' || req.tool === 'confirm' || req.tool === 'choose') {
         const { promise } = registerPendingForm(formTimeoutMs(req.input));
         void promise.then(
-          (result) => sai.respondSwarmTool(req.id, result),
-          (err) => sai.respondSwarmToolError(req.id, err instanceof Error ? err.message : String(err)),
+          (result) => sai.respondSaiTool(req.id, result),
+          (err) => sai.respondSaiToolError(req.id, err instanceof Error ? err.message : String(err)),
         );
         return;
       }
@@ -895,12 +895,12 @@ export default function App() {
           { tool: req.tool, input: dispatchInput, renderId: req.id },
           deps,
         ).then(
-          (result) => sai.respondSwarmTool(req.id, result),
-          (err) => sai.respondSwarmToolError(req.id, err instanceof Error ? err.message : String(err)),
+          (result) => sai.respondSaiTool(req.id, result),
+          (err) => sai.respondSaiToolError(req.id, err instanceof Error ? err.message : String(err)),
         );
         return;
       }
-      sai.respondSwarmToolError(req.id, `unknown tool: ${req.tool}`);
+      sai.respondSaiToolError(req.id, `unknown tool: ${req.tool}`);
     });
     return unsub;
   }, []);

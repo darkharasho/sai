@@ -1,6 +1,5 @@
-// SAI's MCP stdio server + socket host. The CLI backend uses them for every
-// normal chat (toolset=chat) to expose the sai_* tools; only the chat toolset
-// is covered here.
+// SAI's chat-tools MCP stdio server + socket host. The Claude CLI and Codex
+// SDK backends spawn it for every chat to expose the sai_* tools.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as net from 'node:net';
 import * as os from 'node:os';
@@ -9,15 +8,14 @@ import * as crypto from 'node:crypto';
 import {
   handleRequest,
   makeSocketTransport,
-  setToolset,
   type JsonRpcRequest,
   type JsonRpcSuccess,
   type JsonRpcError,
-  type SwarmCallTransport,
-} from '../../../electron/swarm-mcp-server';
-import * as swarmMcpHost from '../../../electron/services/swarmMcpHost';
+  type SaiCallTransport,
+} from '../../../electron/sai-mcp-server';
+import * as saiMcpHost from '../../../electron/services/saiMcpHost';
 
-const noopTransport: SwarmCallTransport = {
+const noopTransport: SaiCallTransport = {
   call: () => Promise.reject(new Error('transport not used in this test')),
 };
 
@@ -36,8 +34,6 @@ function asError(res: unknown): JsonRpcError {
 }
 
 describe('SAI MCP server protocol', () => {
-  beforeEach(() => setToolset('chat'));
-
   it('responds to initialize with protocol version and server info', async () => {
     const req: JsonRpcRequest = { jsonrpc: '2.0', id: 1, method: 'initialize', params: {} };
     const res = asSuccess(await handleRequest(req, noopTransport));
@@ -47,7 +43,7 @@ describe('SAI MCP server protocol', () => {
       result: {
         protocolVersion: '2024-11-05',
         capabilities: { tools: {} },
-        serverInfo: { name: 'sai-swarm', version: '1.0.0' },
+        serverInfo: { name: 'sai', version: '1.0.0' },
       },
     });
   });
@@ -67,11 +63,9 @@ describe('SAI MCP server protocol', () => {
 });
 
 describe('tools/call dispatch', () => {
-  beforeEach(() => setToolset('chat'));
-
   function makeMockTransport(impl: (tool: string, input: unknown) => Promise<unknown>) {
     const calls: Array<{ tool: string; input: unknown }> = [];
-    const transport: SwarmCallTransport = {
+    const transport: SaiCallTransport = {
       call: (tool, input) => {
         calls.push({ tool, input });
         return impl(tool, input);
@@ -182,29 +176,29 @@ function connectClient(socketPath: string): Promise<TestClient> {
 
 function tmpSocketPath(label: string): string {
   if (process.platform === 'win32') {
-    return `\\\\.\\pipe\\sai-swarm-test-${process.pid}-${label}-${crypto.randomBytes(4).toString('hex')}`;
+    return `\\\\.\\pipe\\sai-mcp-test-${process.pid}-${label}-${crypto.randomBytes(4).toString('hex')}`;
   }
-  return path.join(os.tmpdir(), `sai-swarm-test-${process.pid}-${label}-${crypto.randomBytes(4).toString('hex')}.sock`);
+  return path.join(os.tmpdir(), `sai-mcp-test-${process.pid}-${label}-${crypto.randomBytes(4).toString('hex')}.sock`);
 }
 
-describe('swarmMcpHost socket', () => {
+describe('saiMcpHost socket', () => {
   let handle: { socketPath: string; secret: string };
 
   beforeEach(() => {
-    swarmMcpHost._resetForTests();
-    handle = swarmMcpHost._test_start({
+    saiMcpHost._resetForTests();
+    handle = saiMcpHost._test_start({
       socketPath: tmpSocketPath('host'),
       secret: 'a'.repeat(64),
     });
   });
 
   afterEach(() => {
-    swarmMcpHost._resetForTests();
+    saiMcpHost._resetForTests();
   });
 
   it('handshake success → call → result', async () => {
     let capturedReq: any = null;
-    swarmMcpHost.onToolCall(async (req) => {
+    saiMcpHost.onToolCall(async (req) => {
       capturedReq = req;
       return { ok: true, echo: req.input };
     });
@@ -252,7 +246,7 @@ describe('swarmMcpHost socket', () => {
   });
 
   it('handler throws → error frame with message', async () => {
-    swarmMcpHost.onToolCall(async () => {
+    saiMcpHost.onToolCall(async () => {
       throw new Error('boom');
     });
     const client = await connectClient(handle.socketPath);
@@ -265,7 +259,7 @@ describe('swarmMcpHost socket', () => {
   });
 
   it('multiple connections → each gets its own results', async () => {
-    swarmMcpHost.onToolCall(async (req) => ({ workspace: req.workspace, id: req.id }));
+    saiMcpHost.onToolCall(async (req) => ({ workspace: req.workspace, id: req.id }));
     const a = await connectClient(handle.socketPath);
     const b = await connectClient(handle.socketPath);
     a.send({ type: 'hello', secret: handle.secret, workspace: '/ws/a' });
@@ -287,24 +281,20 @@ describe('swarmMcpHost socket', () => {
 });
 
 describe('sai tools over MCP', () => {
-  const noopTransport: SwarmCallTransport = { call: async () => ({ ok: true }) };
+  const noopTransport: SaiCallTransport = { call: async () => ({ ok: true }) };
 
-  beforeEach(() => setToolset('chat'));
-
-  it('lists sai_render_html when toolset=chat', async () => {
-    setToolset('chat');
+  it('lists only the sai_ chat tools', async () => {
     const res: any = await handleRequest({ jsonrpc: '2.0', id: 1, method: 'tools/list' }, noopTransport);
     const names = res.result.tools.map((t: any) => t.name);
     expect(names).toContain('sai_render_html');
     expect(names).toContain('sai_render_chart');
     expect(names).toContain('sai_render_diff');
-    expect(names).not.toContain('swarm_spawn_task');
+    expect(names.every((n: string) => n.startsWith('sai_'))).toBe(true);
   });
 
   it('dispatches a sai_ tool call through the transport', async () => {
-    setToolset('chat');
     const calls: Array<{ tool: string; input: unknown }> = [];
-    const transport: SwarmCallTransport = {
+    const transport: SaiCallTransport = {
       call: async (tool: string, input: unknown) => { calls.push({ tool, input }); return { ok: true }; },
     };
     const res: any = await handleRequest(
@@ -316,23 +306,21 @@ describe('sai tools over MCP', () => {
     expect(JSON.parse(res.result.content[0].text)).toEqual({ ok: true });
   });
 
-  it('refuses to dispatch a swarm_ tool when toolset=chat (unlisted)', async () => {
-    setToolset('chat');
+  it('refuses to dispatch an unlisted sai_ tool', async () => {
     const calls: string[] = [];
-    const transport: SwarmCallTransport = {
+    const transport: SaiCallTransport = {
       call: async (tool: string) => { calls.push(tool); return { ok: true }; },
     };
     const res: any = await handleRequest(
-      { jsonrpc: '2.0', id: 9, method: 'tools/call', params: { name: 'swarm_spawn_task', arguments: { prompt: 'x' } } },
+      { jsonrpc: '2.0', id: 9, method: 'tools/call', params: { name: 'sai_not_a_real_tool', arguments: { prompt: 'x' } } },
       transport,
     );
     expect(calls).toEqual([]);
-    expect(res.error).toEqual({ code: -32602, message: 'unknown tool: swarm_spawn_task' });
+    expect(res.error).toEqual({ code: -32602, message: 'unknown tool: sai_not_a_real_tool' });
   });
 
   it('appends an image content block when the result carries __mcpImage', async () => {
-    setToolset('chat');
-    const transport: SwarmCallTransport = {
+    const transport: SaiCallTransport = {
       call: async () => ({ renderId: 'r', __mcpImage: { base64: 'AAAA', mimeType: 'image/png' } }),
     };
     const res: any = await handleRequest(
@@ -344,24 +332,24 @@ describe('sai tools over MCP', () => {
   });
 });
 
-describe('makeSocketTransport ↔ swarmMcpHost end-to-end', () => {
+describe('makeSocketTransport ↔ saiMcpHost end-to-end', () => {
   let handle: { socketPath: string; secret: string };
 
   beforeEach(() => {
-    swarmMcpHost._resetForTests();
-    handle = swarmMcpHost._test_start({
+    saiMcpHost._resetForTests();
+    handle = saiMcpHost._test_start({
       socketPath: tmpSocketPath('e2e'),
       secret: 'b'.repeat(64),
     });
   });
 
   afterEach(() => {
-    swarmMcpHost._resetForTests();
+    saiMcpHost._resetForTests();
   });
 
   it('connects, handshakes, dispatches a tool call, and returns the result', async () => {
     let capturedReq: any = null;
-    swarmMcpHost.onToolCall(async (req) => {
+    saiMcpHost.onToolCall(async (req) => {
       capturedReq = req;
       return { ok: true, echo: req.input };
     });

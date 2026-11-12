@@ -75,7 +75,7 @@ async function _resolveTailnetEndpointWithEnv() {
 import { registerTerminalHandlers, destroyAllTerminals, listTerminalPids } from './services/pty';
 import { registerClaudeHandlers, destroyClaude, setRemoteCeiling, setRemoteBus, setSubprocessMemoryCapMB, emitChatMessage } from './services/claude';
 import { initSudoService, lockSudo } from './services/sudo';
-import { getClaudeBackend, getClaudeBackendSetting } from './services/claudeBackend';
+import { getClaudeBackend } from './services/claudeBackend';
 import { RendererProxy } from './services/remote/renderer-proxy';
 import { registerGitHandlers } from './services/git';
 import { registerFsHandlers } from './services/fs';
@@ -105,11 +105,10 @@ import { registerJiraHandlers } from './services/jira';
 import { registerLinearHandlers } from './services/linear';
 import { registerBrainstormHandlers } from './services/brainstorm';
 import { registerSearchHandlers } from './services/search';
-import { registerSwarmHandlers } from './services/swarm';
-import * as swarmMcpHost from './services/swarmMcpHost';
+import * as saiMcpHost from './services/saiMcpHost';
 import * as browserBridge from './services/browserBridge';
 import * as browserDeploy from './services/browserDeploy';
-import { cleanupSwarmMcpConfigs } from './services/swarmMcpConfig';
+import { cleanupSaiMcpConfigs } from './services/saiMcpConfig';
 import { setSaiToolDispatch } from './services/saiToolBridge';
 import {
   listMetaWorkspaces, createMetaWorkspace, updateMetaWorkspace,
@@ -575,7 +574,7 @@ function createWindow() {
       // A before-quit that fired first already stopped the guard; the app keeps running, so
       // restart it (start() is a no-op when running; stop() bumped the epoch, settings stay).
       try { loadGuard?.start(); } catch { /* noop */ }
-      mainWindow?.webContents.send('swarm:request-quit');
+      mainWindow?.webContents.send('app:requestQuit');
       return;
     }
     if (mainWindow) writeSetting('windowBounds', mainWindow.getBounds());
@@ -656,10 +655,9 @@ function createWindow() {
   registerPluginHandlers();
   registerSearchHandlers();
   registerMcpHandlers();
-  registerSwarmHandlers();
   try {
-    const mcpHandle = swarmMcpHost.start();
-    console.log('[swarm-mcp] socket listening at', mcpHandle.socketPath);
+    const mcpHandle = saiMcpHost.start();
+    console.log('[sai-mcp] socket listening at', mcpHandle.socketPath);
 
     // Browser bridge: listens for the native-messaging relay that Chrome
     // spawns when the SAI Browser Bridge extension has a tab attached. Nothing
@@ -751,12 +749,8 @@ function createWindow() {
       return browserBridge.call(method, params);
     });
 
-    // Bridge MCP tool calls (from socket) into the renderer over IPC.
-    const pendingMcpCalls = new Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void; toolUseId: string; workspace: string; orchSessionId: string | undefined }>();
-    // Per-workspace orchestrator session id, registered by the renderer when
-    // ensureOrchestratorSession resolves. Used to tag synthetic claude:message
-    // events so ChatPanel renders inline tool cards for MCP calls.
-    const swarmOrchestratorSessions = new Map<string, string>();
+    // Bridge SAI chat tool calls into the renderer over IPC.
+    const pendingMcpCalls = new Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
 
     const safeSendMcp = (channel: string, payload: unknown) => {
       try {
@@ -766,59 +760,14 @@ function createWindow() {
       } catch { /* noop */ }
     };
 
-    ipcMain.handle('swarm:set-orchestrator-session', (_evt, workspace: string, sessionId: string) => {
-      if (typeof workspace === 'string' && typeof sessionId === 'string') {
-        swarmOrchestratorSessions.set(workspace, sessionId);
-      }
-    });
-
-    // In SDK mode the runtime surfaces the real MCP tool_use block in the
-    // assistant stream, so the synthetic orchestrator-card injection below would
-    // render a DUPLICATE of each swarm card. Gate the MODEL-initiated synthetic
-    // injection to CLI mode only (CLI stream-json omits MCP tool_use blocks, so
-    // it needs the fallback). User-action cards (swarm:emit-card, Land/Discard
-    // clicks) have no real tool_use and are unaffected — they read
-    // swarmOrchestratorSessions directly. Read once at startup so it stays
-    // consistent with the backend getClaudeBackend() cached at first use.
-    const injectSyntheticOrchCards = getClaudeBackendSetting() !== 'sdk';
-
-    // Single dispatch used by BOTH MCP transports: the socket SwarmMcpHost (CLI
-    // mode) and the in-process SDK MCP server (SDK mode, via saiToolBridge). The
-    // orchestrator-card injection below is a no-op for chat scopes (no
-    // orchSessionId), so SDK chat tools reuse this unchanged.
-    const dispatchSwarmTool = async (req: { tool: string; input: unknown; workspace: string; scope?: string; suppressSyntheticCard?: boolean }) => {
+    // Single dispatch used by BOTH MCP transports: the socket saiMcpHost (Claude
+    // CLI and Codex SDK backends) and the in-process SDK MCP server (Claude SDK
+    // backend, via saiToolBridge).
+    const dispatchSaiTool = async (req: { tool: string; input: unknown; workspace: string }) => {
       const id = `mcp-${crypto.randomUUID()}`;
-      // App Server Dynamic Tool calls carry the owning scope from its backend.
-      // Never let a call for one orchestrator route through another workspace's
-      // renderer host or manufacture a second tool card.
-      if (req.scope && swarmOrchestratorSessions.get(req.workspace) !== req.scope) {
-        throw new Error('orchestrator workspace/scope ownership mismatch');
-      }
-      // Deterministic tool_use id so the later tool_result can be matched.
-      const toolUseId = `mcp-tooluse-${id}`;
-      const orchSessionId = !req.suppressSyntheticCard && injectSyntheticOrchCards ? swarmOrchestratorSessions.get(req.workspace) : undefined;
-
-      // Inject a synthetic assistant tool_use into the orchestrator chat so a
-      // SwarmToolCardSelector card renders inline. Claude CLI's stream-json
-      // output doesn't surface tool_use blocks for MCP tools (they're absorbed
-      // into the MCP exchange), so without this fallback the orchestrator chat
-      // looks like the model "did nothing" even though tasks landed.
-      if (orchSessionId) {
-        safeSendMcp('claude:message', {
-          type: 'assistant',
-          projectPath: req.workspace,
-          scope: orchSessionId,
-          message: {
-            content: [
-              { type: 'tool_use', id: toolUseId, name: `mcp__swarm__${req.tool}`, input: req.input },
-            ],
-          },
-        });
-      }
-
       return await new Promise<unknown>((resolve, reject) => {
-        pendingMcpCalls.set(id, { resolve, reject, toolUseId, workspace: req.workspace, orchSessionId });
-        safeSendMcp('swarm:tool-request', {
+        pendingMcpCalls.set(id, { resolve, reject });
+        safeSendMcp('sai-tool:request', {
           id,
           tool: req.tool,
           input: req.input,
@@ -836,8 +785,8 @@ function createWindow() {
       });
     };
 
-    swarmMcpHost.onToolCall(dispatchSwarmTool);
-    setSaiToolDispatch(dispatchSwarmTool);
+    saiMcpHost.onToolCall(dispatchSaiTool);
+    setSaiToolDispatch(dispatchSaiTool);
 
     // Don't leave MCP tool calls hanging if the window goes away mid-call.
     mainWindow.on('closed', () => {
@@ -847,82 +796,21 @@ function createWindow() {
       pendingMcpCalls.clear();
     });
 
-    const emitSyntheticToolResult = (
-      pending: { toolUseId: string; workspace: string; orchSessionId: string | undefined },
-      content: string,
-      isError: boolean,
-    ) => {
-      if (!pending.orchSessionId) return;
-      safeSendMcp('claude:message', {
-        type: 'user',
-        projectPath: pending.workspace,
-        scope: pending.orchSessionId,
-        message: {
-          content: [
-            { type: 'tool_result', tool_use_id: pending.toolUseId, content, is_error: isError },
-          ],
-        },
-      });
-    };
-
-    ipcMain.on('swarm:tool-response', (_evt, id: string, result: unknown) => {
+    ipcMain.on('sai-tool:response', (_evt, id: string, result: unknown) => {
       const pending = pendingMcpCalls.get(id);
       if (!pending) return;
       pendingMcpCalls.delete(id);
-      let serialized: string;
-      try { serialized = typeof result === 'string' ? result : JSON.stringify(result); } catch { serialized = String(result); }
-      emitSyntheticToolResult(pending, serialized, false);
       pending.resolve(result);
     });
 
-    ipcMain.on('swarm:tool-response-error', (_evt, id: string, error: string) => {
+    ipcMain.on('sai-tool:response-error', (_evt, id: string, error: string) => {
       const pending = pendingMcpCalls.get(id);
       if (!pending) return;
       pendingMcpCalls.delete(id);
-      emitSyntheticToolResult(pending, String(error ?? 'error'), true);
       pending.reject(new Error(error));
     });
-
-    // Renderer-driven synthetic card emission. Used for user-initiated actions
-    // (Land / Discard clicks) that bypass the MCP onToolCall path but should
-    // still appear inline in the orchestrator chat as activity cards.
-    ipcMain.handle('swarm:emit-card', (_evt, args: { workspace: string; kind: string; input: unknown }) => {
-      if (!args || typeof args.workspace !== 'string' || typeof args.kind !== 'string') return null;
-      const orchSessionId = swarmOrchestratorSessions.get(args.workspace);
-      if (!orchSessionId) return null;
-      const toolUseId = `mcp-tooluse-${crypto.randomUUID()}`;
-      safeSendMcp('claude:message', {
-        type: 'assistant',
-        projectPath: args.workspace,
-        scope: orchSessionId,
-        message: {
-          content: [
-            { type: 'tool_use', id: toolUseId, name: `mcp__swarm__${args.kind}`, input: args.input ?? {} },
-          ],
-        },
-      });
-      return { id: toolUseId };
-    });
-
-    ipcMain.on('swarm:emit-card-result', (_evt, args: { workspace: string; id: string; result: unknown; isError?: boolean }) => {
-      if (!args || typeof args.workspace !== 'string' || typeof args.id !== 'string') return;
-      const orchSessionId = swarmOrchestratorSessions.get(args.workspace);
-      if (!orchSessionId) return;
-      let serialized: string;
-      try { serialized = typeof args.result === 'string' ? args.result : JSON.stringify(args.result); } catch { serialized = String(args.result); }
-      safeSendMcp('claude:message', {
-        type: 'user',
-        projectPath: args.workspace,
-        scope: orchSessionId,
-        message: {
-          content: [
-            { type: 'tool_result', tool_use_id: args.id, content: serialized, is_error: !!args.isError },
-          ],
-        },
-      });
-    });
   } catch (err) {
-    console.error('[swarm-mcp] failed to start host:', err);
+    console.error('[sai-mcp] failed to start host:', err);
   }
   registerUpdater(mainWindow!);
   registerUsageHandlers(mainWindow!);
@@ -1640,11 +1528,11 @@ app.on('before-quit', (e) => {
   // Idempotent with the close-path cleanup above.
   try { destroyCodexBackendIfActive(); } catch { /* backend already down */ }
   try { destroyCodexTelemetry(); } catch { /* telemetry already down */ }
-  try { swarmMcpHost.stop(); } catch { /* noop */ }
+  try { saiMcpHost.stop(); } catch { /* noop */ }
   // The bridge token authenticates any local process to the browser — drop it.
   try { browserBridge.stop(); } catch { /* noop */ }
-  // Config tmp files carry the swarm-host auth secret — don't leave them behind.
-  try { cleanupSwarmMcpConfigs(); } catch { /* noop */ }
+  // Config tmp files carry the SAI MCP host auth secret — don't leave them behind.
+  try { cleanupSaiMcpConfigs(); } catch { /* noop */ }
   // The sudo pw file holds the user's password — never leave it behind.
   try { lockSudo(); } catch { /* noop */ }
   // Never leave SAI's processes SIGSTOPped behind us.
@@ -1665,7 +1553,7 @@ app.on('window-all-closed', () => {
   destroyAllTerminals();
   terminalStore.destroyAll();
   if (mainWindow) destroyAll(mainWindow);
-  try { swarmMcpHost.stop(); } catch { /* noop */ }
+  try { saiMcpHost.stop(); } catch { /* noop */ }
   try { browserBridge.stop(); } catch { /* noop */ }
   app.quit();
 });
