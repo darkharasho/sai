@@ -31,6 +31,7 @@ import { computeUnmountFlushes, computeQuitFlushes } from './workspaceFlush';
 import { buildOverlayPayload, truncateSnippet, updateRecentDone, type OverlayRow, type OverlayTailItem } from './lib/overlayFeed';
 import { toolCallDetail } from './lib/toolCallDetail';
 import { findLatestTodos } from './components/Chat/TodoProgress';
+import { dropLegacySwarmData } from './lib/dropLegacySwarmData';
 import { dbGetSessions, dbGetAllSessions, dbGetMessages, dbGetMessagesTail, dbPatchSessionMeta, dbPurgeExpired, dbExternalizeStoredImages, dbCollectReferencedImagePaths, migrateFromLocalStorage } from './chatDb';
 import { queueSaveSession } from './lib/sessionSaveQueue';
 import type { ChatSession, ChatMessage, GitFile, OpenFile, WorkspaceContext, QueuedMessage, TerminalTab, PendingApproval, SwarmTask, ApprovalPolicy, SwarmApproval, EffortLevel, CodexEffort, CodexModelOption, ModelChoice, ClaudeModelOption, AIProvider } from './types';
@@ -2614,6 +2615,9 @@ export default function App() {
     })();
     return () => { cancelled = true; };
   }, []);
+
+  // Legacy swarm data cleanup: best-effort, never blocks boot.
+  useEffect(() => { void dropLegacySwarmData(); }, []);
 
   // Migrate localStorage sessions to IndexedDB and load sessions for the active project
   useEffect(() => {

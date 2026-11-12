@@ -37,9 +37,7 @@ export function installRemoteProxyHandler(deps: RemoteProxyDeps): () => void {
     let error: string | undefined;
     try {
       if (kind === 'listSessions') {
-        const all = await dbGetSessions(args.projectPath);
-        // Phase 1 chat surface: exclude swarm tasks. 'chat' default + 'orchestrator'.
-        result = all.filter((s: any) => !s.kind || s.kind === 'chat' || s.kind === 'orchestrator');
+        result = await dbGetSessions(args.projectPath);
       } else if (kind === 'loadHistory') {
         result = await dbGetMessages(args.sessionId);
       } else if (kind === 'getActiveSession') {

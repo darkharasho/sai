@@ -49,6 +49,11 @@ function openDb(): Promise<IDBDatabase> {
   return dbPromise;
 }
 
+/** True for normal chat rows (kind undefined or 'chat'); false for legacy swarm 'task'/'orchestrator' rows. */
+export function isChatSessionRow(s: { kind?: unknown }): boolean {
+  return s.kind === undefined || s.kind === 'chat';
+}
+
 export async function dbGetSessions(projectPath: string): Promise<ChatSession[]> {
   const db = await openDb();
   return new Promise((resolve, reject) => {
@@ -58,7 +63,7 @@ export async function dbGetSessions(projectPath: string): Promise<ChatSession[]>
     const request = index.getAll(projectPath);
 
     request.onsuccess = () => {
-      const sessions: ChatSession[] = request.result;
+      const sessions: ChatSession[] = (request.result as ChatSession[]).filter(isChatSessionRow);
       sessions.sort((a, b) => b.createdAt - a.createdAt);
       resolve(sessions);
     };
@@ -76,7 +81,7 @@ export async function dbGetAllSessions(): Promise<ChatSession[]> {
   return new Promise((resolve, reject) => {
     const tx = db.transaction('sessions', 'readonly');
     const request = tx.objectStore('sessions').getAll();
-    request.onsuccess = () => resolve(request.result as ChatSession[]);
+    request.onsuccess = () => resolve((request.result as ChatSession[]).filter(isChatSessionRow));
     request.onerror = () => reject(request.error);
   });
 }

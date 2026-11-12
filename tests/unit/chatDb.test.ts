@@ -44,6 +44,18 @@ beforeEach(async () => {
   await clearDb();
 });
 
+describe('dbGetSessions excludes legacy swarm rows', () => {
+  it('returns only normal chat rows', async () => {
+    const proj = '/p';
+    const chat = makeSession({ projectPath: proj });
+    await dbSaveSession(proj, chat);
+    await dbSaveSession(proj, makeSession({ projectPath: proj, kind: 'task' } as any));
+    await dbSaveSession(proj, makeSession({ projectPath: proj, kind: 'orchestrator' } as any));
+    const got = await dbGetSessions(proj);
+    expect(got.map((s) => s.id)).toEqual([chat.id]);
+  });
+});
+
 describe('dbCollectReferencedImagePaths', () => {
   it('collects filePath refs from toolCalls across all sessions, deduped', async () => {
     const withImgs = (paths: string[]): ChatMessage =>
