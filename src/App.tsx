@@ -3,6 +3,7 @@ import { validateSaiTaskInput } from './lib/saiTaskTool';
 import type { SlashCommandInfo } from './lib/slashCommands';
 import NavBar from './components/NavBar';
 import ChatPanel from './components/Chat/ChatPanel';
+import { TASK_TABS_SLOT_ID } from './components/Chat/tasks/TaskTabs';
 import BackgroundTasksSidebar from './components/Chat/BackgroundTasksSidebar';
 import { selectSidebarTasks } from './components/Chat/selectSidebarTasks';
 import TerminalPanel from './components/Terminal/TerminalPanel';
@@ -4693,6 +4694,15 @@ export default function App() {
               {basename(activeFilePath)}
             </span>
           )}
+          {/* ChatPanel portals its task tabs here, so running tasks reuse this
+              bar instead of adding one under it. */}
+          {panel === 'chat' && (
+            <div
+              id={TASK_TABS_SLOT_ID}
+              className="accordion-bar-slot"
+              onClick={(e) => e.stopPropagation()}
+            />
+          )}
           {panel === 'chat' && (
             <div className="accordion-bar-actions">
               {activeMetaRuntime && activeMetaRuntime.syntheticRoot === activeProjectPath && (
@@ -6349,6 +6359,12 @@ export default function App() {
           color: var(--text-secondary);
           background: var(--bg-hover);
         }
+        /* Hovering a task tab must not light up the whole bar — the bar's
+           hover is the collapse affordance, and the tabs have their own. */
+        .accordion-bar:hover:has(.accordion-bar-slot:hover) {
+          color: var(--text-muted);
+          background: var(--bg-secondary);
+        }
         .accordion-chevron {
           transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
           flex-shrink: 0;
@@ -6356,6 +6372,17 @@ export default function App() {
         }
         .accordion-chevron.open {
           transform: rotate(90deg);
+        }
+        .accordion-bar-slot {
+          display: flex;
+          align-items: stretch;
+          flex: 1 1 auto;
+          min-width: 0;
+          height: 100%;
+          cursor: default;
+        }
+        .accordion-bar-slot:empty {
+          display: none;
         }
         .accordion-bar-actions {
           display: flex;

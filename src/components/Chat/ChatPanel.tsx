@@ -1,4 +1,5 @@
 import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { ChevronDown, CornerLeftUp } from 'lucide-react';
 import { motion, AnimatePresence, LayoutGroup } from 'motion/react';
 import { setFlipRect } from './flipRegistry';
@@ -93,7 +94,7 @@ import { parseAiError, looksLikeApiError } from './parseAiError';
 import { classifyToolType } from './tasks/toolType';
 import { useTaskBoard } from './tasks/useTaskBoard';
 import { TaskRail } from './tasks/TaskRail';
-import { TaskTabs } from './tasks/TaskTabs';
+import { TaskTabs, TASK_TABS_SLOT_ID } from './tasks/TaskTabs';
 import { TaskStreamView } from './tasks/TaskStreamView';
 import type { TaskCard } from './tasks/types';
 import './tasks/tasks.css';
@@ -765,6 +766,14 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
   const taskCards = taskBoard.board.cards;
   const showTaskUi = taskUiEnabled && taskCards.length > 0;
   const openTaskCard = openTaskId ? taskCards.find(c => c.id === openTaskId) ?? null : null;
+  // The tabs live in the host's Chat accordion bar rather than a bar of their
+  // own. Only the visible panel claims the slot — background workspaces keep
+  // their ChatPanel mounted and would otherwise portal their tabs over ours.
+  const showTaskTabs = showTaskUi && taskView === 'tabs';
+  const [tabsSlot, setTabsSlot] = useState<HTMLElement | null>(null);
+  useLayoutEffect(() => {
+    setTabsSlot(showTaskTabs && isActive === true ? document.getElementById(TASK_TABS_SLOT_ID) : null);
+  }, [showTaskTabs, isActive]);
   useEffect(() => { setOpenTaskId(null); setSelectedTaskId(null); }, [sessionId]);
   useEffect(() => {
     if (openTaskId && !openTaskCard) setOpenTaskId(null);
@@ -2639,9 +2648,12 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
   return (
     <div className={`chat-panel${showTaskUi && taskView === 'rail' ? ' chat-panel--task-rail' : ''}`}>
       <LoadGuardBanner state={loadGuard} />
-      {showTaskUi && taskView === 'tabs' && (
-        <TaskTabs board={taskBoard.board} tails={taskBoard.tails} activeId={openTaskCard?.id ?? null} onSelect={openTaskStream} onStop={handleTaskStop} />
-      )}
+      {showTaskTabs && (() => {
+        const tabs = <TaskTabs board={taskBoard.board} activeId={openTaskCard?.id ?? null} onSelect={openTaskStream} />;
+        // No slot (another host, or a background workspace): keep the old
+        // in-panel strip rather than dropping the tabs entirely.
+        return tabsSlot ? createPortal(tabs, tabsSlot) : <div className="task-tabs-fallback">{tabs}</div>;
+      })()}
       <motion.div
         className="pinned-prompt-bar"
         layoutId={pinnedUserMessage ? `pinned-${pinnedUserMessage.id}` : undefined}
@@ -2671,6 +2683,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
           card={openTaskCard}
           messages={taskBoard.streamMessages(openTaskCard)}
           fallback={taskBoard.streamFallback(openTaskCard)}
+          tail={taskBoard.tails.get(openTaskCard.id)}
           onBack={() => setOpenTaskId(null)}
           renderMessage={renderTaskMessage}
           onStop={handleTaskStop}

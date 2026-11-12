@@ -23,6 +23,25 @@ describe('TaskStreamView', () => {
     expect(screen.getByText('msg:one')).toBeTruthy();
     expect(screen.getByText('msg:two')).toBeTruthy();
   });
+  it('shows the card step pills and the last few tail lines', () => {
+    const steps = [
+      { label: 'Plan', state: 'done' as const },
+      { label: 'Build', state: 'current' as const },
+      { label: 'Ship', state: 'pending' as const },
+    ];
+    const tail = Array.from({ length: 6 }, (_, i) => ({ text: `line${i}`, tone: 'normal' as const }));
+    render(<TaskStreamView card={{ ...card, steps }} messages={msgs} tail={tail} onBack={() => {}} renderMessage={() => null} />);
+    expect(screen.getByText('Plan')).toBeTruthy();
+    expect(screen.getByText('Build').className).toContain('pill--current');
+    expect(screen.getByText('Ship').className).toContain('pill--pending');
+    expect(screen.queryByText('line1')).toBeNull();
+    expect(screen.getByText('line2')).toBeTruthy();
+    expect(screen.getByText('line5')).toBeTruthy();
+  });
+  it('omits the progress block when there are no steps and no tail', () => {
+    const { container } = render(<TaskStreamView card={card} messages={msgs} onBack={() => {}} renderMessage={() => null} />);
+    expect(container.querySelector('.task-stream__progress')).toBeNull();
+  });
   it('shows unavailable state when transcript is null', () => {
     render(<TaskStreamView card={card} messages={null} onBack={() => {}} renderMessage={() => null} />);
     expect(screen.getByText('Transcript unavailable')).toBeTruthy();

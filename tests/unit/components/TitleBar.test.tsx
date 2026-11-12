@@ -94,21 +94,13 @@ describe('TitleBar', () => {
     installMockSai(mock);
 
     render(<TitleBar {...defaultProps} />);
-    // Find settings button by looking for Settings icon button
-    const settingsBtn = document.querySelector('button[title*="Settings"]') ||
-      Array.from(document.querySelectorAll('button')).find(
-        btn => btn.getAttribute('title')?.toLowerCase().includes('setting')
-      );
-
-    if (settingsBtn) {
-      fireEvent.click(settingsBtn);
-      await waitFor(() => {
-        expect(screen.getByTestId('settings-modal')).toBeTruthy();
-      });
-    } else {
-      // Settings button may be triggered via different UI — just test render
-      expect(document.body).toBeTruthy();
-    }
+    // Signed out, the user dropdown (the other way in) isn't there — the
+    // titlebar must still offer Settings.
+    const settingsBtn = await screen.findByRole('button', { name: 'Settings' });
+    fireEvent.click(settingsBtn);
+    await waitFor(() => {
+      expect(screen.getByTestId('settings-modal')).toBeTruthy();
+    });
   });
 
   it('registers githubOnSyncStatus listener on mount', async () => {
