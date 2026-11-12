@@ -22,52 +22,38 @@ afterEach(cleanup);
 
 describe('TaskTabs', () => {
   it('All plus one tab per card', () => {
-    render(<TaskTabs board={two} tails={new Map()} activeId={null} onSelect={() => {}} />);
+    render(<TaskTabs board={two} activeId={null} onSelect={() => {}} />);
     expect(screen.getAllByRole('tab').map((t) => t.textContent)).toEqual(['All', 'Alpha1/3', 'Beta']);
     expect(screen.getByRole('tab', { name: 'All' }).getAttribute('aria-selected')).toBe('true');
   });
   it('renders nothing for an empty board', () => {
-    const { container } = render(<TaskTabs board={board([])} tails={new Map()} activeId={null} onSelect={() => {}} />);
+    const { container } = render(<TaskTabs board={board([])} activeId={null} onSelect={() => {}} />);
     expect(container.firstChild).toBeNull();
   });
   it('selecting a tab calls onSelect with its id; All calls onSelect(null)', () => {
     const onSelect = vi.fn();
-    render(<TaskTabs board={two} tails={new Map()} activeId="a" onSelect={onSelect} />);
+    render(<TaskTabs board={two} activeId="a" onSelect={onSelect} />);
     fireEvent.click(screen.getByRole('tab', { name: /Beta/ }));
     expect(onSelect).toHaveBeenLastCalledWith('b');
     fireEvent.click(screen.getByRole('tab', { name: 'All' }));
     expect(onSelect).toHaveBeenLastCalledWith(null);
   });
-  it('active tab shows step pills and tail', () => {
-    const b = board([card({ id: 'a', steps: [
-      { label: 'Plan', state: 'done' }, { label: 'Build', state: 'current' }, { label: 'Ship', state: 'pending' },
-    ] })]);
-    const tails = new Map([['a', Array.from({ length: 6 }, (_, i) => ({ text: `line${i}`, tone: 'normal' as const }))]]);
-    render(<TaskTabs board={b} tails={tails} activeId="a" onSelect={() => {}} />);
-    expect(screen.getByText('Plan')).toBeTruthy();
-    expect(screen.getByText('Build').className).toContain('pill--current');
-    expect(screen.getByText('Ship').className).toContain('pill--pending');
-    expect(screen.queryByText('line1')).toBeNull();
-    expect(screen.getByText('line2')).toBeTruthy();
-    expect(screen.getByText('line5')).toBeTruthy();
-  });
-  it('active running agent tab shows Stop that calls onStop with the card', () => {
-    const agentCard = card({ id: 'g', title: 'Gamma', agent: { description: 'd', toolUseId: 'tu', taskId: 'bg1' } });
-    const onStop = vi.fn();
-    const { rerender } = render(<TaskTabs board={board([agentCard])} tails={new Map()} activeId="g" onSelect={() => {}} onStop={onStop} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
-    expect(onStop).toHaveBeenCalledWith(agentCard);
-    // No Stop for a finished card, an inline card, or without onStop.
-    rerender(<TaskTabs board={board([{ ...agentCard, status: 'done' }])} tails={new Map()} activeId="g" onSelect={() => {}} onStop={onStop} />);
+  // The tabs are a bare row — steps, tail and Stop belong to the stream view
+  // so the tabs fit inside the host's Chat bar (see TaskStreamView tests).
+  it('renders no step pills, tail or Stop of its own', () => {
+    const b = board([card({
+      id: 'a',
+      agent: { description: 'd', toolUseId: 'tu', taskId: 'bg1' },
+      steps: [{ label: 'Plan', state: 'done' }, { label: 'Build', state: 'current' }],
+    })]);
+    const { container } = render(<TaskTabs board={b} activeId="a" onSelect={() => {}} />);
+    expect(screen.queryByText('Plan')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull();
-    rerender(<TaskTabs board={board([card({ id: 'g' })])} tails={new Map()} activeId="g" onSelect={() => {}} onStop={onStop} />);
-    expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull();
-    rerender(<TaskTabs board={board([agentCard])} tails={new Map()} activeId="g" onSelect={() => {}} />);
-    expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull();
+    expect(container.querySelector('.task-tabs__tail')).toBeNull();
   });
 
   it('a finished batch collapses to a summary line, and expands again on click', () => {
-    render(<TaskTabs board={doneBoard()} tails={new Map()} activeId={null} onSelect={() => {}} />);
+    render(<TaskTabs board={doneBoard()} activeId={null} onSelect={() => {}} />);
     expect(screen.queryByRole('tab')).toBeNull();
     const summary = screen.getByText('2 tasks done · 1m 20s');
     fireEvent.click(summary);
@@ -77,36 +63,36 @@ describe('TaskTabs', () => {
   it('summary counts failures', () => {
     const b = doneBoard();
     b.cards[1] = card({ id: 'b', title: 'Beta', status: 'failed', endedAt: 80_000 });
-    render(<TaskTabs board={b} tails={new Map()} activeId={null} onSelect={() => {}} />);
+    render(<TaskTabs board={b} activeId={null} onSelect={() => {}} />);
     expect(screen.getByText('1 done · 1 failed · 1m 20s')).toBeTruthy();
   });
 
   it('dismiss hides the strip until a new batch starts', () => {
-    const { rerender } = render(<TaskTabs board={doneBoard()} tails={new Map()} activeId={null} onSelect={() => {}} />);
+    const { rerender } = render(<TaskTabs board={doneBoard()} activeId={null} onSelect={() => {}} />);
     fireEvent.click(screen.getByRole('button', { name: 'Dismiss finished tasks' }));
     expect(screen.queryByText(/tasks done/)).toBeNull();
     expect(screen.queryByRole('tab')).toBeNull();
     // same batch re-rendered: still dismissed
-    rerender(<TaskTabs board={doneBoard()} tails={new Map()} activeId={null} onSelect={() => {}} />);
+    rerender(<TaskTabs board={doneBoard()} activeId={null} onSelect={() => {}} />);
     expect(screen.queryByRole('tab')).toBeNull();
     // a new batch brings the tabs back
-    rerender(<TaskTabs board={{ ...board([card({ id: 'c', title: 'Gamma' })]), batchStartedAt: 99 }} tails={new Map()} activeId={null} onSelect={() => {}} />);
+    rerender(<TaskTabs board={{ ...board([card({ id: 'c', title: 'Gamma' })]), batchStartedAt: 99 }} activeId={null} onSelect={() => {}} />);
     expect(screen.getAllByRole('tab').map((t) => t.textContent)).toEqual(['All', 'Gamma']);
   });
 
   it('does not collapse out from under an open tab, and the collapse control closes it', () => {
     const onSelect = vi.fn();
-    const { rerender } = render(<TaskTabs board={doneBoard()} tails={new Map()} activeId="a" onSelect={onSelect} />);
+    const { rerender } = render(<TaskTabs board={doneBoard()} activeId="a" onSelect={onSelect} />);
     expect(screen.getAllByRole('tab')).toHaveLength(3);
     fireEvent.click(screen.getByRole('button', { name: 'Collapse finished tasks' }));
     expect(onSelect).toHaveBeenCalledWith(null);
-    rerender(<TaskTabs board={doneBoard()} tails={new Map()} activeId={null} onSelect={onSelect} />);
+    rerender(<TaskTabs board={doneBoard()} activeId={null} onSelect={onSelect} />);
     expect(screen.queryByRole('tab')).toBeNull();
     expect(screen.getByText('2 tasks done · 1m 20s')).toBeTruthy();
   });
 
   it('an unfinished board never collapses', () => {
-    render(<TaskTabs board={two} tails={new Map()} activeId={null} onSelect={() => {}} />);
+    render(<TaskTabs board={two} activeId={null} onSelect={() => {}} />);
     expect(screen.getAllByRole('tab')).toHaveLength(3);
     expect(screen.queryByRole('button', { name: 'Collapse finished tasks' })).toBeNull();
   });

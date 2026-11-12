@@ -110,6 +110,31 @@ describe('ChatPanel task rail integration', () => {
     ]);
   });
 
+  it('hides the rail on request and offers a chip to bring it back', async () => {
+    const onTaskRailHiddenChange = vi.fn();
+    const props = { ...baseProps(), onTaskRailHiddenChange };
+    const { rerender } = await mount(props);
+    fireEvent.click(screen.getByRole('button', { name: 'Hide tasks' }));
+    expect(onTaskRailHiddenChange).toHaveBeenCalledWith(true);
+
+    // Hidden: no rail, no reserved column, but the count chip remains.
+    rerender(<ChatPanel {...props} taskRailHidden />);
+    expect(screen.queryByRole('complementary', { name: 'Tasks' })).toBeNull();
+    expect(document.querySelector('.chat-panel--task-rail')).toBeNull();
+    const chip = screen.getByRole('button', { name: /task/ });
+    expect(chip.textContent).toContain('2 tasks');
+    // Alpha is running, so the chip carries that status through.
+    expect(chip.closest('.task-tabs')?.className).toContain('task-status--running');
+    fireEvent.click(chip);
+    expect(onTaskRailHiddenChange).toHaveBeenLastCalledWith(false);
+  });
+
+  it('leaves the rail alone when hidden but the view is tabs', async () => {
+    await mount({ ...baseProps(), taskView: 'tabs', taskRailHidden: true, onTaskRailHiddenChange: vi.fn() });
+    expect(screen.getAllByRole('tab').length).toBeGreaterThan(1);
+    expect(screen.queryByRole('button', { name: /^\d+ tasks?$/ })).toBeNull();
+  });
+
   it('renders tabs instead when taskView tabs', async () => {
     await mount({ ...baseProps(), taskView: 'tabs' });
     expect(screen.queryByRole('complementary', { name: 'Tasks' })).toBeNull();

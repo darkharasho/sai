@@ -3,6 +3,7 @@ import { validateSaiTaskInput } from './lib/saiTaskTool';
 import type { SlashCommandInfo } from './lib/slashCommands';
 import NavBar from './components/NavBar';
 import ChatPanel from './components/Chat/ChatPanel';
+import { TASK_TABS_SLOT_ID } from './components/Chat/tasks/TaskTabs';
 import BackgroundTasksSidebar from './components/Chat/BackgroundTasksSidebar';
 import { selectSidebarTasks } from './components/Chat/selectSidebarTasks';
 import TerminalPanel from './components/Terminal/TerminalPanel';
@@ -470,6 +471,13 @@ export default function App() {
   // change must not flip the task UI. It starts as 'cli' so a CLI user never
   // sees a flash of task UI before settings load.
   const [taskView, setTaskView] = useState<'rail' | 'tabs'>('rail');
+  // Rail dismissed by the user. Persisted, so "I don't care about this" sticks
+  // across restarts and new task batches; the Chat bar keeps a way back in.
+  const [taskRailHidden, setTaskRailHidden] = useState(false);
+  const handleTaskRailHiddenChange = useCallback((hidden: boolean) => {
+    setTaskRailHidden(hidden);
+    try { window.sai.settingsSet('taskRailHidden', hidden); } catch { /* noop */ }
+  }, []);
   const [claudeBackendSetting, setClaudeBackendSetting] = useState<'cli' | 'sdk'>('cli');
   // Session-scoped overlay mode from the inline control under the chat input.
   const [overlayMode, setOverlayMode] = useState<'on' | 'off' | 'persist'>('on');
@@ -2284,6 +2292,7 @@ export default function App() {
     window.sai.settingsGet('focusedChat', false).then(guard((v: boolean) => setFocusedChat(v)));
     window.sai.settingsGet('overlayEnabled', false).then(guard((v: boolean) => setOverlayEnabled(!!v)));
     window.sai.settingsGet('taskView', 'rail').then(guard((v: string) => setTaskView(v === 'tabs' ? 'tabs' : 'rail')));
+    window.sai.settingsGet('taskRailHidden', false).then(guard((v: boolean) => setTaskRailHidden(!!v)));
     window.sai.settingsGet('claudeBackend', 'sdk').then(guard((v: string) => setClaudeBackendSetting(v === 'cli' ? 'cli' : 'sdk')));
     window.sai.settingsGet('overlayMode', 'on').then(guard((v: string) => {
       if (v === 'on' || v === 'off' || v === 'persist') setOverlayMode(v);
@@ -4693,6 +4702,15 @@ export default function App() {
               {basename(activeFilePath)}
             </span>
           )}
+          {/* ChatPanel portals its task tabs here, so running tasks reuse this
+              bar instead of adding one under it. */}
+          {panel === 'chat' && (
+            <div
+              id={TASK_TABS_SLOT_ID}
+              className="accordion-bar-slot"
+              onClick={(e) => e.stopPropagation()}
+            />
+          )}
           {panel === 'chat' && (
             <div className="accordion-bar-actions">
               {activeMetaRuntime && activeMetaRuntime.syntheticRoot === activeProjectPath && (
@@ -5319,6 +5337,8 @@ export default function App() {
                   sessionId={ws.activeSession.id}
                   taskUiEnabled={taskUiEnabledFor(ws.activeSession.kind)}
                   taskView={taskView}
+                  taskRailHidden={taskRailHidden}
+                  onTaskRailHiddenChange={handleTaskRailHiddenChange}
                   backgroundTasks={aiProvider === 'claude' ? selectSidebarTasks(backgroundTasksByScope, `${wsPath}:${ws.activeSession.id}`) : undefined}
                   onStopBackgroundTask={(taskId: string) => window.sai.claudeStopTask?.(wsPath, ws.activeSession.id, taskId) ?? Promise.resolve(false)}
                   claudeSessionId={ws.activeSession.claudeSessionId}
@@ -5915,6 +5935,7 @@ export default function App() {
           if (key === 'focusedChat') { setFocusedChat(value); if (value) { setExpanded(['chat', 'terminal']); setSplitRatio(0.66); } }
           if (key === 'overlayEnabled') setOverlayEnabled(!!value);
           if (key === 'taskView') setTaskView(value === 'tabs' ? 'tabs' : 'rail');
+          if (key === 'taskRailHidden') setTaskRailHidden(!!value);
           if (key === 'defaultView') { /* persisted only, applies on next launch */ }
           if (key === 'sidebarWidth') document.documentElement.style.setProperty('--sidebar-width', `${value}px`);
           if (typeof key === 'string' && key.startsWith('swarm.')) {
@@ -6349,6 +6370,12 @@ export default function App() {
           color: var(--text-secondary);
           background: var(--bg-hover);
         }
+        /* Hovering a task tab must not light up the whole bar — the bar's
+           hover is the collapse affordance, and the tabs have their own. */
+        .accordion-bar:hover:has(.accordion-bar-slot:hover) {
+          color: var(--text-muted);
+          background: var(--bg-secondary);
+        }
         .accordion-chevron {
           transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
           flex-shrink: 0;
@@ -6356,6 +6383,17 @@ export default function App() {
         }
         .accordion-chevron.open {
           transform: rotate(90deg);
+        }
+        .accordion-bar-slot {
+          display: flex;
+          align-items: stretch;
+          flex: 1 1 auto;
+          min-width: 0;
+          height: 100%;
+          cursor: default;
+        }
+        .accordion-bar-slot:empty {
+          display: none;
         }
         .accordion-bar-actions {
           display: flex;

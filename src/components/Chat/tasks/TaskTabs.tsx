@@ -1,16 +1,16 @@
 import { useState } from 'react';
-import type { TaskBoard, TaskCard, TailLine } from './types';
+import type { TaskBoard } from './types';
 import { batchSummary } from './batchSummary';
 import './tasks.css';
 
+/** Host-provided mount point inside the Chat accordion bar. */
+export const TASK_TABS_SLOT_ID = 'chat-task-tabs-slot';
+
 export interface TaskTabsProps {
   board: TaskBoard;
-  tails: Map<string, TailLine[]>;
   /** null = All */
   activeId: string | null;
   onSelect(id: string | null): void;
-  /** Stop the active tab's background task (shown while it runs). */
-  onStop?(card: TaskCard): void;
 }
 
 /** Per-batch collapse state: `batch` is the board's batchStartedAt it applies to. */
@@ -18,7 +18,12 @@ interface BatchView { batch: number | null; open: boolean; dismissed: boolean }
 
 const CLOSED: BatchView = { batch: null, open: false, dismissed: false };
 
-export function TaskTabs({ board, tails, activeId, onSelect, onStop }: TaskTabsProps) {
+/**
+ * A row of task tabs. Rendered into the Chat accordion bar (ChatPanel portals
+ * it there) so running tasks never cost the conversation a second bar — hence
+ * no step pills or tail here; the stream view carries those.
+ */
+export function TaskTabs({ board, activeId, onSelect }: TaskTabsProps) {
   // Derived against batchStartedAt so a new batch starts fresh without an effect.
   const [view, setView] = useState<BatchView>(CLOSED);
   const sameBatch = view.batch === board.batchStartedAt;
@@ -28,9 +33,9 @@ export function TaskTabs({ board, tails, activeId, onSelect, onStop }: TaskTabsP
   if (board.cards.length === 0) return null;
   const active = activeId ? board.cards.find((c) => c.id === activeId) ?? null : null;
 
-  // Finished work collapses to one line, then out of the way entirely — the
-  // strip sits above the chat, so stale tabs cost the conversation space.
-  // Never while a tab is open: that would pull the strip out from under the user.
+  // Finished work collapses to one line, then out of the way entirely, so
+  // stale tabs stop crowding the bar's label and actions.
+  // Never while a tab is open: that would pull the tabs out from under the user.
   if (board.allDone && active === null && !expanded) {
     if (dismissed) return null;
     return (
@@ -55,9 +60,6 @@ export function TaskTabs({ board, tails, activeId, onSelect, onStop }: TaskTabsP
       </div>
     );
   }
-  const tail = active ? (tails.get(active.id) ?? []).slice(-4) : [];
-  const canStop = !!active && active.status === 'running' && !!active.agent?.taskId && !!onStop;
-
   return (
     <div className="task-tabs">
       <div className="task-tabs__list" role="tablist">
@@ -101,27 +103,6 @@ export function TaskTabs({ board, tails, activeId, onSelect, onStop }: TaskTabsP
           </button>
         )}
       </div>
-      {active && (
-        <div className="task-tabs__strip">
-          {canStop && (
-            <button type="button" className="task-card__link task-card__link--stop" onClick={() => onStop?.(active)}>Stop</button>
-          )}
-          {active.steps.length > 0 && (
-            <div className="task-tabs__pills">
-              {active.steps.map((s, i) => (
-                <span key={i} className={`task-tabs__pill task-tabs__pill--${s.state}`}>{s.label}</span>
-              ))}
-            </div>
-          )}
-          {tail.length > 0 && (
-            <div className="task-tabs__tail">
-              {tail.map((l, i) => (
-                <div key={i} className={`task-card__tail-line task-card__tail-line--${l.tone}`}>{l.text}</div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
     </div>
   );
 }

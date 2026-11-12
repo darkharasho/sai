@@ -1,4 +1,5 @@
 import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { ChevronDown, CornerLeftUp } from 'lucide-react';
 import { motion, AnimatePresence, LayoutGroup } from 'motion/react';
 import { setFlipRect } from './flipRegistry';
@@ -93,7 +94,8 @@ import { parseAiError, looksLikeApiError } from './parseAiError';
 import { classifyToolType } from './tasks/toolType';
 import { useTaskBoard } from './tasks/useTaskBoard';
 import { TaskRail } from './tasks/TaskRail';
-import { TaskTabs } from './tasks/TaskTabs';
+import { TaskTabs, TASK_TABS_SLOT_ID } from './tasks/TaskTabs';
+import { TaskRailReopen } from './tasks/TaskRailReopen';
 import { TaskStreamView } from './tasks/TaskStreamView';
 import type { TaskCard } from './tasks/types';
 import './tasks/tasks.css';
@@ -249,6 +251,9 @@ interface ChatPanelProps {
   /** Task rail/tabs: App sets this for Claude SDK chats only. */
   taskUiEnabled?: boolean;
   taskView?: 'rail' | 'tabs';
+  /** Rail dismissed by the user; a chip in the Chat bar brings it back. */
+  taskRailHidden?: boolean;
+  onTaskRailHiddenChange?: (hidden: boolean) => void;
   /** This chat's background task snapshots (App's sidebar tasks for the scope). */
   backgroundTasks?: BackgroundTaskDetail[];
   onStopBackgroundTask?(taskId: string): Promise<boolean>;
@@ -479,7 +484,7 @@ const LOAD_MORE_CHUNK = 30; // messages to load when scrolling up
 const LOAD_GUARD_ERROR_QUIET_MS = 15_000;
 
 
-export default function ChatPanel({ projectPath, overlayControl, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, availableModels, claudeOverrideState, aiProvider, codexModel, onCodexModelChange, codexModels, onCodexModelsRefresh, codexPermission, onCodexPermissionChange, codexEffort, onCodexEffortChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, kimiModel, onKimiModelChange, kimiModels, kimiApprovalMode, onKimiApprovalModeChange, initialMessages, onMessagesChange, onTurnComplete, onClaudeSessionId, onGeminiSessionId, onKimiSessionId, onCodexSessionId, activeFilePath, onFileOpen, isActive, isStreaming = false, awaitingQuestion = false, initialDraft, onDraftChange, initialContextItems, onContextItemsChange, messageQueue = [], onQueueAdd, onQueueRemove, onQueueShift, onQueuePromote, sessionId, terminalTabs = [], onSlashCommandsUpdate, onInterceptSend, claudeScope = 'chat', onOpenMcpPanel, claudeKind = 'chat', claudeOrchestratorContext, initialPendingApproval = null, renderToolCall, renderMessage, activeMetaRuntime, emptyStateVisual, conversationHeaderVisual, mentionInsertRef: mentionInsertRefProp, waiting = null, liveBackgroundTaskCount, onToggleBackgroundTasks, backgroundTasksOpen, taskUiEnabled = false, taskView = 'rail', backgroundTasks, onStopBackgroundTask, claudeSessionId }: ChatPanelProps) {
+export default function ChatPanel({ projectPath, overlayControl, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, availableModels, claudeOverrideState, aiProvider, codexModel, onCodexModelChange, codexModels, onCodexModelsRefresh, codexPermission, onCodexPermissionChange, codexEffort, onCodexEffortChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, kimiModel, onKimiModelChange, kimiModels, kimiApprovalMode, onKimiApprovalModeChange, initialMessages, onMessagesChange, onTurnComplete, onClaudeSessionId, onGeminiSessionId, onKimiSessionId, onCodexSessionId, activeFilePath, onFileOpen, isActive, isStreaming = false, awaitingQuestion = false, initialDraft, onDraftChange, initialContextItems, onContextItemsChange, messageQueue = [], onQueueAdd, onQueueRemove, onQueueShift, onQueuePromote, sessionId, terminalTabs = [], onSlashCommandsUpdate, onInterceptSend, claudeScope = 'chat', onOpenMcpPanel, claudeKind = 'chat', claudeOrchestratorContext, initialPendingApproval = null, renderToolCall, renderMessage, activeMetaRuntime, emptyStateVisual, conversationHeaderVisual, mentionInsertRef: mentionInsertRefProp, waiting = null, liveBackgroundTaskCount, onToggleBackgroundTasks, backgroundTasksOpen, taskUiEnabled = false, taskView = 'rail', taskRailHidden = false, onTaskRailHiddenChange, backgroundTasks, onStopBackgroundTask, claudeSessionId }: ChatPanelProps) {
   const [messages, setMessagesRaw] = useState<ChatMessageType[]>(() => {
     const initial = initialMessages || [];
     // Anything present at mount is history, not a fresh arrival — a workspace/
@@ -765,6 +770,24 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
   const taskCards = taskBoard.board.cards;
   const showTaskUi = taskUiEnabled && taskCards.length > 0;
   const openTaskCard = openTaskId ? taskCards.find(c => c.id === openTaskId) ?? null : null;
+  // The tabs live in the host's Chat accordion bar rather than a bar of their
+  // own. Only the visible panel claims the slot — background workspaces keep
+  // their ChatPanel mounted and would otherwise portal their tabs over ours.
+  const showTaskTabs = showTaskUi && taskView === 'tabs';
+  const showTaskRail = showTaskUi && taskView === 'rail' && !taskRailHidden;
+  // Rail hidden but tasks are running: the bar carries the way back in.
+  const showRailReopen = showTaskUi && taskView === 'rail' && taskRailHidden;
+  // Worst-first: a question or a failure must not be buried by a hidden rail.
+  const hiddenRailStatus: TaskCard['status'] =
+    taskCards.some(c => c.status === 'waiting') ? 'waiting'
+    : taskCards.some(c => c.status === 'failed') ? 'failed'
+    : taskCards.some(c => c.status === 'running') ? 'running'
+    : 'done';
+  const wantsBarSlot = showTaskTabs || showRailReopen;
+  const [tabsSlot, setTabsSlot] = useState<HTMLElement | null>(null);
+  useLayoutEffect(() => {
+    setTabsSlot(wantsBarSlot && isActive === true ? document.getElementById(TASK_TABS_SLOT_ID) : null);
+  }, [wantsBarSlot, isActive]);
   useEffect(() => { setOpenTaskId(null); setSelectedTaskId(null); }, [sessionId]);
   useEffect(() => {
     if (openTaskId && !openTaskCard) setOpenTaskId(null);
@@ -2637,11 +2660,16 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
   }, []);
 
   return (
-    <div className={`chat-panel${showTaskUi && taskView === 'rail' ? ' chat-panel--task-rail' : ''}`}>
+    <div className={`chat-panel${showTaskRail ? ' chat-panel--task-rail' : ''}`}>
       <LoadGuardBanner state={loadGuard} />
-      {showTaskUi && taskView === 'tabs' && (
-        <TaskTabs board={taskBoard.board} tails={taskBoard.tails} activeId={openTaskCard?.id ?? null} onSelect={openTaskStream} onStop={handleTaskStop} />
-      )}
+      {wantsBarSlot && (() => {
+        const content = showTaskTabs
+          ? <TaskTabs board={taskBoard.board} activeId={openTaskCard?.id ?? null} onSelect={openTaskStream} />
+          : <TaskRailReopen count={taskCards.length} status={hiddenRailStatus} onShow={() => onTaskRailHiddenChange?.(false)} />;
+        // No slot (another host, or a background workspace): keep the old
+        // in-panel strip rather than dropping the control entirely.
+        return tabsSlot ? createPortal(content, tabsSlot) : <div className="task-tabs-fallback">{content}</div>;
+      })()}
       <motion.div
         className="pinned-prompt-bar"
         layoutId={pinnedUserMessage ? `pinned-${pinnedUserMessage.id}` : undefined}
@@ -2671,6 +2699,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
           card={openTaskCard}
           messages={taskBoard.streamMessages(openTaskCard)}
           fallback={taskBoard.streamFallback(openTaskCard)}
+          tail={taskBoard.tails.get(openTaskCard.id)}
           onBack={() => setOpenTaskId(null)}
           renderMessage={renderTaskMessage}
           onStop={handleTaskStop}
@@ -2929,7 +2958,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
           />
         </div>
       </LayoutGroup>
-      {showTaskUi && taskView === 'rail' && (
+      {showTaskRail && (
         <TaskRail
           board={taskBoard.board}
           tails={taskBoard.tails}
@@ -2939,6 +2968,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
           onStop={handleTaskStop}
           onAnswer={handleTaskAnswer}
           onReply={handleTaskReply}
+          onHide={onTaskRailHiddenChange ? () => onTaskRailHiddenChange(true) : undefined}
         />
       )}
       <style>{`
