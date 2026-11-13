@@ -22,3 +22,18 @@ export function extractModelResult(output: string | undefined): { versionKey: st
   }
   return { versionKey: k[1], path };
 }
+
+/** Error text from a failed render_model output ({ok:false,error}), else null. */
+export function extractModelError(output: string | undefined): string | null {
+  if (!output) return null;
+  try {
+    const v = JSON.parse(output);
+    if (v && v.ok === false) return typeof v.error === 'string' && v.error ? v.error : 'Model render failed';
+  } catch { /* fall through */ }
+  if (/"ok"\s*:\s*false/.test(output)) {
+    const m = /"error"\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(output);
+    if (m) { try { return JSON.parse(`"${m[1]}"`); } catch { return m[1]; } }
+    return 'Model render failed';
+  }
+  return null;
+}

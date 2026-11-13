@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useId } from 'react';
 import ModelViewer from '../../model3d/ModelViewer';
 import { claim, release, useIsActiveModelCard } from '../../model3d/activeModelCard';
 import type { ModelExt } from '../../model3d/modelFiles';
@@ -16,6 +16,8 @@ export interface ModelCardProps {
   onOpenFile?: (path: string) => void;
   /** Tool failed (no version produced). */
   error?: string;
+  /** Tool call still in flight (history path); no versionKey yet. */
+  running?: boolean;
 }
 
 const boxStyle = (height: number): React.CSSProperties => ({
@@ -43,18 +45,21 @@ const pillStyle: React.CSSProperties = {
   pointerEvents: 'none',
 };
 
-export function ModelCard({ renderId, path, versionKey, ext, thumbnailPath, thumbnailDataUrl, height, isNewest, onOpenFile, error }: ModelCardProps) {
-  const active = useIsActiveModelCard(renderId);
+export function ModelCard({ renderId, path, versionKey, ext, thumbnailPath, thumbnailDataUrl, height, isNewest, onOpenFile, error, running }: ModelCardProps) {
+  // Claim key is unique per mounted instance: renderId can collide (tc.id restarts
+  // per turn / is absent), and two live WebGL contexts would break the budget.
+  const instanceKey = useId();
+  const active = useIsActiveModelCard(instanceKey);
   const [thumb, setThumb] = useState<string | null>(thumbnailDataUrl ?? null);
   const [missing, setMissing] = useState(false);
   const [viewerError, setViewerError] = useState<string | null>(null);
 
   // The newest card claims the live viewer on mount; any card releases on unmount.
   useEffect(() => {
-    if (isNewest) claim(renderId);
-    return () => release(renderId);
+    if (isNewest && versionKey !== null) claim(instanceKey);
+    return () => release(instanceKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [renderId]);
+  }, [instanceKey, versionKey === null]);
 
   useEffect(() => {
     if (thumbnailDataUrl) { setThumb(thumbnailDataUrl); return; }
@@ -81,7 +86,7 @@ export function ModelCard({ renderId, path, versionKey, ext, thumbnailPath, thum
   if (versionKey === null) {
     return (
       <div style={boxStyle(height)} data-testid="model-card-pending">
-        {error ? <span className="sai-render-card__err">{error}</span> : 'Preparing model…'}
+        {error ? <span className="sai-render-card__err">{error}</span> : running ? 'Preparing model…' : 'Model unavailable'}
       </div>
     );
   }
@@ -116,8 +121,8 @@ export function ModelCard({ renderId, path, versionKey, ext, thumbnailPath, thum
       role="button"
       tabIndex={0}
       data-testid="model-card-inactive"
-      onClick={() => claim(renderId)}
-      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); claim(renderId); } }}
+      onClick={() => claim(instanceKey)}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); claim(instanceKey); } }}
     >
       {thumb && <img src={thumb} alt="Model preview" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />}
       <span style={pillStyle}>⟳ Click to rotate</span>

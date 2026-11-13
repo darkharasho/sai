@@ -51,8 +51,30 @@ describe('ModelCard', () => {
   });
 
   it('versionKey null never reads the cache', () => {
-    render(<ModelCard renderId="c1" versionKey={null} isNewest {...base} />);
+    render(<ModelCard renderId="c1" versionKey={null} isNewest running {...base} />);
     expect(screen.getByText('Preparing model…')).toBeTruthy();
     expect((window as any).sai.modelReadCached).not.toHaveBeenCalled();
+  });
+});
+
+describe('ModelCard budget + states', () => {
+  it('two cards sharing a renderId never both go live', async () => {
+    render(<><ModelCard renderId="same" versionKey={KEY} isNewest {...base} /><ModelCard renderId="same" versionKey={KEY} isNewest {...base} /></>);
+    await screen.findAllByTestId(/model-card-/);
+    expect(screen.getAllByTestId('viewer')).toHaveLength(1);
+    expect(screen.getAllByTestId('model-card-inactive')).toHaveLength(1);
+  });
+  it('null versionKey never claims or demotes a live card', async () => {
+    render(<ModelCard renderId="g" versionKey={KEY} isNewest {...base} />);
+    expect(await screen.findByTestId('viewer')).toBeTruthy();
+    render(<ModelCard renderId="f" versionKey={null} isNewest {...base} error="boom" />);
+    expect(screen.getByText('boom')).toBeTruthy();
+    expect(screen.getByTestId('viewer')).toBeTruthy();
+  });
+  it('done without key says unavailable; running says preparing', () => {
+    const { rerender } = render(<ModelCard renderId="x" versionKey={null} isNewest {...base} running />);
+    expect(screen.getByText('Preparing model…')).toBeTruthy();
+    rerender(<ModelCard renderId="x" versionKey={null} isNewest {...base} />);
+    expect(screen.getByText('Model unavailable')).toBeTruthy();
   });
 });

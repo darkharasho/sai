@@ -484,7 +484,10 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
         if (!tcs) continue;
         for (let j = tcs.length - 1; j >= 0; j--) {
           if ((tcs[j].name || '').endsWith('sai_render_model')) {
-            isNewestModel = tcs[j] === tc || (!!tc.id && tcs[j].id === tc.id);
+            // Position-based: the last model call in the list, matched by object
+            // reference (tc.id restarts per turn / may be absent).
+            const last = tcs[j];
+            isNewestModel = last === tc || (last.startedAt != null && last.startedAt === tc.startedAt && last.input === tc.input);
             break outer;
           }
         }

@@ -152,3 +152,17 @@ describe('entryFromToolCall — render_model', () => {
     expect(entryFromToolCall(t, '/p')?.entry.payload.versionKey).toBe(KEY);
   });
 });
+
+describe('entryFromToolCall — render_model failure states', () => {
+  it('ok:false output becomes an error entry', () => {
+    const t = { ...tc('sai_render_model', { path: 'a.stl' }), output: JSON.stringify({ ok: false, error: 'file too big' }) } as ToolCall;
+    const e = entryFromToolCall(t, '/p')!.entry;
+    expect(e.status).toBe('error');
+    expect(e.error).toBe('file too big');
+  });
+  it('running vs done-without-key', () => {
+    expect(entryFromToolCall(tc('sai_render_model', { path: 'a.stl' }), '/p')!.entry.payload.running).toBe(true);
+    const done = { ...tc('sai_render_model', { path: 'a.stl' }), output: 'weird' } as ToolCall;
+    expect(entryFromToolCall(done, '/p')!.entry.payload.running).toBe(false);
+  });
+});

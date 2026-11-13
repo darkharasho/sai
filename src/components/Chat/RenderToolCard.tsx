@@ -102,7 +102,7 @@ export function RenderRegion({ entry, onOpenFile, isNewestModel = true }: { entr
 }
 
 function ModelRegion({ entry, onOpenFile, isNewest }: { entry: RenderEntry; onOpenFile?: (path: string) => void; isNewest: boolean }) {
-  const p = entry.payload as { path: string; versionKey: string | null; ext: ModelExt; thumbnailPath?: string; thumbnailDataUrl?: string };
+  const p = entry.payload as { path: string; versionKey: string | null; ext: ModelExt; thumbnailPath?: string; thumbnailDataUrl?: string; running?: boolean };
   return (
     <ModelCard
       renderId={entry.renderId}
@@ -114,6 +114,7 @@ function ModelRegion({ entry, onOpenFile, isNewest }: { entry: RenderEntry; onOp
       height={entry.height ?? 360}
       isNewest={isNewest}
       onOpenFile={onOpenFile}
+      running={p.running}
       error={entry.status === 'error' ? entry.error : undefined}
     />
   );

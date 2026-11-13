@@ -10,7 +10,7 @@ import { getShikiHighlighter, getActiveHighlightTheme } from '../../themes';
 import { AppWindow } from 'lucide-react';
 import { buildChartHtml, buildDiffHtml, type ChartInput, type DiffInput } from '../../render/builtinRenderers';
 import { buildChoiceHtml } from '../../render/buildChoiceHtml';
-import { extractModelResult } from '../../model3d/modelResult';
+import { extractModelResult, extractModelError } from '../../model3d/modelResult';
 import { modelExt } from '../../model3d/modelFiles';
 import { registeredComponentKeys } from '../../render/componentRegistry';
 
@@ -102,16 +102,19 @@ export function entryFromToolCall(tc: ToolCall, cwd = ''): { entry: RenderEntry;
     const ext = modelExt(inPath);
     if (!ext) return null;
     const img = tc.resultImages?.[0];
+    const modelError = res ? null : extractModelError(tc.output);
+    const running = tc.output == null || tc.liveOutput === true;
     const base = inPath.split(/[\\/]/).filter(Boolean).pop() ?? inPath;
     return {
       entry: {
         renderId,
         kind: 'model',
-        payload: { path: abs, versionKey: res?.versionKey ?? null, ext, thumbnailPath: img?.filePath, thumbnailDataUrl: img?.dataUrl },
+        payload: { path: abs, versionKey: res?.versionKey ?? null, ext, thumbnailPath: img?.filePath, thumbnailDataUrl: img?.dataUrl, running: !modelError && !res && running },
         title: title || base,
         width: 480,
         height: height ?? 360,
-        status: 'ready',
+        status: modelError ? 'error' : 'ready',
+        ...(modelError ? { error: modelError } : {}),
       },
       code: abs,
     };
