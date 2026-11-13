@@ -33,7 +33,7 @@ export function snapshotModel(opts: {
       : { ok: false, error: `path escapes workspace: ${opts.path}` };
   }
   const absPath = res.path;
-  const ext = modelExt(absPath);
+  let ext = modelExt(absPath);
   if (!ext) return { ok: false, error: `unsupported model type: ${opts.path}` };
   let buf: Buffer;
   try {
@@ -44,11 +44,17 @@ export function snapshotModel(opts: {
   const versionKey = crypto.createHash('sha256').update(buf).digest('hex').slice(0, 32);
   try {
     fs.mkdirSync(opts.dir, { recursive: true });
-    const dest = path.join(opts.dir, `${versionKey}.${ext}`);
-    if (fs.existsSync(dest)) {
+    // One file per key: hit check by stem, regardless of extension.
+    const existing = fs.readdirSync(opts.dir).find((n) => {
+      const m = FILE_RE.exec(n);
+      return m && m[1] === versionKey && modelExt(n);
+    });
+    if (existing) {
       const now = new Date();
-      fs.utimesSync(dest, now, now);
+      fs.utimesSync(path.join(opts.dir, existing), now, now);
+      ext = modelExt(existing) as ModelExt;
     } else {
+      const dest = path.join(opts.dir, `${versionKey}.${ext}`);
       const tmp = path.join(opts.dir, `.${versionKey}.${process.pid}.${Date.now()}.tmp`);
       fs.writeFileSync(tmp, buf);
       fs.renameSync(tmp, dest);

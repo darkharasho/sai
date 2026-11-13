@@ -106,4 +106,17 @@ describe('modelCache', () => {
     if (c.ok) expect(fs.existsSync(path.join(dir, `${c.versionKey}.stl`))).toBe(true);
     expect(fs.existsSync(f)).toBe(false);
   });
+
+  it('same bytes via different extensions keep one mesh file per key', () => {
+    fs.writeFileSync(path.join(ws, 'a.stl'), 'solid z');
+    fs.writeFileSync(path.join(ws, 'b.obj'), 'solid z');
+    const a = snap('a.stl');
+    const b = snap('b.obj');
+    expect(a.ok && b.ok).toBe(true);
+    if (!a.ok || !b.ok) return;
+    expect(b.versionKey).toBe(a.versionKey);
+    expect(b.ext).toBe('stl');
+    expect(fs.readdirSync(dir)).toEqual([`${a.versionKey}.stl`]);
+    expect(readCachedModel(a.versionKey, dir)?.toString()).toBe('solid z');
+  });
 });
