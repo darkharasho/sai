@@ -1,6 +1,7 @@
 import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronDown, CornerLeftUp } from 'lucide-react';
+import { stampTaskTags } from './tasks/taskTags';
 import { motion, AnimatePresence, LayoutGroup } from 'motion/react';
 import { setFlipRect } from './flipRegistry';
 import { useLoadGuard } from '../../hooks/useLoadGuard';
@@ -477,8 +478,13 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
   // update, so the done-time flushMessagesToParent persisted a stale list —
   // a reply streamed into a hidden workspace saved only its first delta, and
   // the turn end unmounted the panel before the queued updates could apply.
+  // Read through a ref so the callback identity stays stable ([] deps).
+  const taskUiEnabledRef = useRef(taskUiEnabled);
+  taskUiEnabledRef.current = taskUiEnabled;
   const setMessages = useCallback((updater: ChatMessageType[] | ((prev: ChatMessageType[]) => ChatMessageType[])) => {
-    const next = typeof updater === 'function' ? updater(messagesRef.current) : updater;
+    let next = typeof updater === 'function' ? updater(messagesRef.current) : updater;
+    // Persist task tags on first arrival (display-only); stamp before the ref.
+    if (taskUiEnabledRef.current) next = stampTaskTags(messagesRef.current, next);
     messagesRef.current = next;
     setMessagesRaw(next);
   }, []);
