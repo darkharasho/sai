@@ -112,6 +112,25 @@ export const SAI_TOOL_SCHEMA: SaiToolDef[] = [
     },
   },
   {
+    name: 'render_model',
+    description:
+      'Show a 3D model (.stl, .3mf, .obj) as an interactive, rotatable view inside SAI and return a screenshot. ' +
+      'USE THIS for any 3D/CAD work instead of describing the mesh or rendering images with external tools. ' +
+      'For OpenSCAD: export first (`openscad -o part.stl part.scad`), then call this with the .stl path. ' +
+      'Re-export to the same path to update the open panel view; call again to add a new version card to the chat.',
+    toolset: 'chat',
+    input_schema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Path to the .stl, .3mf or .obj file (absolute or relative to the workspace).' },
+        title: { type: 'string', description: 'Label shown on the card.' },
+        openInPanel: { type: 'boolean', description: 'Also open the file in the code panel live viewer (default true).' },
+        height: { type: 'number', description: 'Card viewport height in px (default 360).' },
+      },
+      required: ['path'],
+    },
+  },
+  {
     name: 'render_theme',
     description:
       'Apply candidate CSS custom properties to real registered SAI components and return a screenshot. ' +

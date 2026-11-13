@@ -433,6 +433,7 @@ export default function App() {
     busy: new Set(), streaming: new Set(), completed: new Set(), approval: new Set(), awaitingQuestion: new Set(),
   });
   const activeProjectPathRef = useRef(activeProjectPath);
+  const handleFileOpenRef = useRef<((filePath: string, line?: number) => Promise<void>) | null>(null);
   const aiProviderRef = useRef(aiProvider);
   const codexSessionIdByScopeRef = useRef<Map<string, string>>(new Map());
   // tool_use_ids of in-flight AI file edits, awaiting their tool_result so we can
@@ -730,6 +731,31 @@ export default function App() {
       if (req.tool === 'watch_github_run') {
         const saiAny = sai as { githubApiGet?: (p: string) => Promise<{ ok: boolean; status: number; body: any }> };
         void resolveWatchRun(req.input ?? {}, saiAny.githubApiGet).then(
+          (result) => sai.respondSaiTool(req.id, result),
+          (err) => sai.respondSaiToolError(req.id, err instanceof Error ? err.message : String(err)),
+        );
+        return;
+      }
+
+      if (req.tool === 'render_model') {
+        const saiAny = sai as { modelSnapshot?: any; modelReadCached?: any };
+        if (typeof saiAny.modelSnapshot !== 'function' || typeof saiAny.modelReadCached !== 'function') {
+          sai.respondSaiToolError(req.id, 'render_model is unavailable in this build');
+          return;
+        }
+        void (async () => {
+          const { handleRenderModelRequest } = await import('./render/renderModelTool');
+          const { renderModelThumbnail } = await import('./model3d/renderThumbnail');
+          return handleRenderModelRequest(
+            { input: req.input, renderId: req.id, cwd: activeProjectPathRef.current ?? '' },
+            {
+              snapshot: saiAny.modelSnapshot.bind(sai),
+              readCached: saiAny.modelReadCached.bind(sai),
+              thumbnail: renderModelThumbnail,
+              openInPanel: (absPath) => { void handleFileOpenRef.current?.(absPath); },
+            },
+          );
+        })().then(
           (result) => sai.respondSaiTool(req.id, result),
           (err) => sai.respondSaiToolError(req.id, err instanceof Error ? err.message : String(err)),
         );
@@ -2487,6 +2513,7 @@ export default function App() {
       // File couldn't be read
     }
   }, [activeProjectPath, updateWorkspace, focusedChat]);
+  handleFileOpenRef.current = handleFileOpen;
 
   const doFileClose = useCallback((path: string) => {
     if (!activeProjectPath) return;

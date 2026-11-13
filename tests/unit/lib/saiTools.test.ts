@@ -121,3 +121,12 @@ describe('confirm/choose tools', () => {
     expect(choose.toolset).toBe('chat');
   });
 });
+
+describe('render_model tool', () => {
+  it('registers render_model as a chat tool requiring path', () => {
+    expect(SAI_TOOL_NAMES.has('render_model')).toBe(true);
+    const m = SAI_TOOL_SCHEMA.find((t) => t.name === 'render_model')!;
+    expect(m.toolset).toBe('chat');
+    expect(m.input_schema.required).toContain('path');
+  });
+});
