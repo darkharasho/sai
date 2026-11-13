@@ -3,6 +3,11 @@ import { SAI_TASK_TOOL, validateSaiTaskInput, isSaiTaskToolName } from '../../..
 import { SAI_TOOL_SCHEMA } from '../../../src/lib/saiTools';
 
 describe('saiTaskTool', () => {
+  it('description drops step lists and calls steps optional', () => {
+    expect(SAI_TASK_TOOL.description).not.toContain('its real steps');
+    expect(SAI_TASK_TOOL.description).toContain('optional');
+  });
+
   it('is a chat tool named task and not in SAI_TOOL_SCHEMA', () => {
     expect(SAI_TASK_TOOL.name).toBe('task');
     expect(SAI_TASK_TOOL.toolset).toBe('chat');

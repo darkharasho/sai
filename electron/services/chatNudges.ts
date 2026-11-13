@@ -49,17 +49,16 @@ export const CHAT_TASKS_NUDGE =
 export const CHAT_TASK_CARDS_NUDGE =
   'When the user asks for several things in one message, or for multi-step work (3+ distinct steps, ' +
   'refactors, features, debugging sessions), track it with the sai_task tool: call it with action ' +
-  '"create" BEFORE starting, with one task per distinct request and that task\'s real steps. Keep the ' +
-  'cards honest as you go: set status "running" with the current step index when you start or advance ' +
-  'a step, "done" with a one-line note when a task finishes, "failed" with the reason if it can\'t be ' +
-  'finished. Updating a task also tags the work that follows onto its card — your replies and tool ' +
-  'calls are filed under the task you last updated — so update a task right before you start on it, ' +
-  'and update the new one as soon as you switch, even when nothing else about the card changed. ' +
-  'When you hand a task to a background agent, pass agent = the exact description you gave ' +
-  'the Agent call so SAI can show that agent\'s live work on the card. SAI renders these as a persistent ' +
-  'task panel the user watches; stale or skipped updates make it lie. Use sai_task instead of ' +
-  'TaskCreate/TodoWrite. If the tool is deferred, load it via ToolSearch first. Skip it for single-step or conversational requests, and if the tool is not ' +
-  'registered in this session, just do the work and do not mention the tool or its absence.';
+  '"create" BEFORE starting, one task per distinct request, title only. Mark a task with update status ' +
+  '"running" right before you start it and whenever you switch to a different task — SAI files ' +
+  'everything you say and every tool you run under the task you last marked, and each task gets its ' +
+  'own feed the user can open. Set "done" with a one-line note when a task finishes, "failed" with the ' +
+  'reason if it can\'t be finished. Don\'t maintain step lists. Only while a chat has tasks: before ' +
+  'each batch of tool calls, write one short sentence saying what you\'re about to do and why. When ' +
+  'you hand a task to a background agent, pass agent = the exact description you gave the Agent call. ' +
+  'Use sai_task instead of TaskCreate/TodoWrite. If the tool is deferred, load it via ToolSearch first. ' +
+  'Skip it for single-step or conversational requests, and if the tool is not registered in this ' +
+  'session, just do the work and do not mention the tool or its absence.';
 
 export const CHAT_GITHUB_WATCH_NUDGE =
   'After you run `git push` (including pushing tags) or otherwise trigger a GitHub Actions ' +

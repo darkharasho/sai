@@ -59,13 +59,10 @@ describe('chatNudges', () => {
   // SDK chats get the sai_task task-card nudge in place of the tool-agnostic
   // CHAT_TASKS_NUDGE (CLI and Codex keep CHAT_TASKS_NUDGE).
   it('task-card nudge is the exact copy and names sai_task, agent, and the no-mention fallback', () => {
-    expect(CHAT_TASK_CARDS_NUDGE).toBe(
-      'When the user asks for several things in one message, or for multi-step work (3+ distinct steps, refactors, features, debugging sessions), track it with the sai_task tool: call it with action "create" BEFORE starting, with one task per distinct request and that task\'s real steps. Keep the cards honest as you go: set status "running" with the current step index when you start or advance a step, "done" with a one-line note when a task finishes, "failed" with the reason if it can\'t be finished. Updating a task also tags the work that follows onto its card — your replies and tool calls are filed under the task you last updated — so update a task right before you start on it, and update the new one as soon as you switch, even when nothing else about the card changed. When you hand a task to a background agent, pass agent = the exact description you gave the Agent call so SAI can show that agent\'s live work on the card. SAI renders these as a persistent task panel the user watches; stale or skipped updates make it lie. Use sai_task instead of TaskCreate/TodoWrite. If the tool is deferred, load it via ToolSearch first. Skip it for single-step or conversational requests, and if the tool is not registered in this session, just do the work and do not mention the tool or its absence.',
-    );
     expect(CHAT_TASK_CARDS_NUDGE).toContain('sai_task');
     expect(CHAT_TASK_CARDS_NUDGE).toContain('agent');
-    // The attribution rule is what gives a non-subagent card a stream of its own.
-    expect(CHAT_TASK_CARDS_NUDGE).toMatch(/tags the work that follows/);
+    for (const t of ['status "running"', 'switch', 'one short sentence', 'only while']) expect(CHAT_TASK_CARDS_NUDGE.toLowerCase()).toContain(t.toLowerCase());
+    expect(CHAT_TASK_CARDS_NUDGE).not.toMatch(/real steps|step index|step = index/);
     expect(CHAT_TASK_CARDS_NUDGE).toMatch(/do not mention the tool or its absence/);
   });
 

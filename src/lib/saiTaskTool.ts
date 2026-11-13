@@ -9,7 +9,7 @@ export const SAI_TASK_TOOL: SaiToolDef = {
   name: 'task',
   toolset: 'chat',
   description:
-    'Show and update task cards in SAI\'s task panel. When the user asks for several things at once, or for one piece of multi-step work, call this FIRST with action "create" and one task per distinct request. Each task gets a short id, a short title, and its real steps. As you work, call action "update": set status "running" with `step` = index of the step now in progress (earlier steps count as done), set status "done" with a one-line `note` when finished, or "failed" with the reason. Updating a task also tags the work that follows it: everything you say and every tool you run is filed under that task\'s card until you update a different task or finish this one, so update the card you are about to work on BEFORE you start on it, and when you switch tasks, even if nothing else changed (a bare {action:"update", id} re-tags without altering the card). When you hand a task to the Agent tool, pass `agent` = the exact `description` you gave the Agent call. Use this instead of TaskCreate/TodoWrite. Skip it for single-step or conversational requests.',
+    'Track multi-step work as tasks the user can open as feeds. When the user asks for several things at once, or for multi-step work, call this FIRST with action "create": one task per distinct request, title only (steps are optional and not displayed). Mark a task running (action "update", status "running") right before you start it and whenever you switch to a different task: everything you say and every tool you run is filed under the task you last marked running. Set status "done" with a one-line `note` when finished, or "failed" with the reason. When you hand a task to the Agent tool, pass `agent` = the exact `description` you gave the Agent call. While a chat has tasks, write one short sentence before each batch of tool calls. Use this instead of TaskCreate/TodoWrite. Skip it for single-step or conversational requests.',
   input_schema: {
     type: 'object',
     properties: {
@@ -22,7 +22,7 @@ export const SAI_TASK_TOOL: SaiToolDef = {
           properties: {
             id: { type: 'string', description: 'Short stable id.' },
             title: { type: 'string', description: 'Short title.' },
-            steps: { type: 'array', items: { type: 'string' }, description: 'The real steps, in order.' },
+            steps: { type: 'array', items: { type: 'string' }, description: 'Optional, not displayed.' },
             agent: { type: 'string', description: 'If a background agent will do this task: the exact `description` you will pass to the Agent tool.' },
           },
           required: ['id', 'title'],
@@ -30,10 +30,10 @@ export const SAI_TASK_TOOL: SaiToolDef = {
       },
       id: { type: 'string', description: 'For update: the task id. Also tags the work that follows onto this task\'s card.' },
       status: { type: 'string', enum: ['running', 'done', 'failed'] },
-      step: { type: 'number', description: 'Index of the step now in progress.' },
+      step: { type: 'number', description: 'Optional, not displayed.' },
       note: { type: 'string', description: 'One-line result or failure reason.' },
       agent: { type: 'string', description: 'The exact `description` passed to the Agent tool.' },
-      add_steps: { type: 'array', items: { type: 'string' }, description: 'Steps to append.' },
+      add_steps: { type: 'array', items: { type: 'string' }, description: 'Optional, not displayed.' },
     },
     required: ['action'],
   },
