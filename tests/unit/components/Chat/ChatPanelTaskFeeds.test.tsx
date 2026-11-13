@@ -266,6 +266,20 @@ describe('ChatPanel task feeds integration', () => {
       expect(streamTexts()).toContain('fix it');
     });
 
+    it('a queued message sent now while a task tab is open is neither tagged nor prefixed', async () => {
+      const props = { ...baseProps(), messageQueue: [{ id: 'q1', text: 'queued', fullText: 'queued' }] as any };
+      await mount(props);
+      fireEvent.click(tabFor('Alpha task'));
+      await act(async () => { await inputProps.onQueueSendNow('q1'); });
+      const msgs = await waitFor(() => {
+        const m = latestMessages(props);
+        expect(m.some((x) => x.content === 'queued')).toBe(true);
+        return m;
+      });
+      expect(msgs.find((x) => x.content === 'queued').taskId).toBeNull();
+      expect(sentPrompt()).toBe('queued');
+    });
+
     it('typing in All is unchanged', async () => {
       const props = baseProps();
       await mount(props);

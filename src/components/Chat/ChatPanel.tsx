@@ -2282,7 +2282,10 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
     return true;
   };
 
-  const handleSend = async (text: string, images?: string[]) => {
+  // `opts.taskCard` is passed only by the composer's own send; every other
+  // caller (retry, queue, suggestions) sends untagged and unprefixed.
+  const handleSend = async (text: string, images?: string[], opts?: { taskCard?: TaskCard | null }) => {
+    const directCard = taskUiEnabled ? opts?.taskCard ?? null : null;
     // Handle built-in commands locally
     if (import.meta.env.DEV && text.startsWith('/fake-error')) {
       handleFakeError(text);
@@ -2383,7 +2386,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
       timestamp: Date.now(),
       images: images?.length ? images : undefined,
       // A message typed on a task tab belongs to that task; stamping keeps an explicit tag.
-      ...(taskUiEnabled && openTaskCard ? { taskId: openTaskCard.tag } : {}),
+      ...(directCard ? { taskId: directCard.tag } : {}),
     }]);
 
     // Save images to temp files and get paths
@@ -2398,7 +2401,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
     // e.g. a failed resume) are real, not the killed agent's.
     loadGuardKillRef.current = null;
     const builtPrompt = activeFilePath && fileContextEnabled ? `[File: ${activeFilePath}]\n\n${text}` : text;
-    const prompt = taskUiEnabled && openTaskCard ? directAtTask(builtPrompt, openTaskCard.title) : builtPrompt;
+    const prompt = directCard ? directAtTask(builtPrompt, directCard.title) : builtPrompt;
     if (aiProvider === 'gemini') {
       (window.sai as any).geminiSend(projectPath, prompt, imagePaths, geminiApprovalMode, geminiConversationMode, geminiModel, 'chat');
     } else if (aiProvider === 'kimi') {
@@ -2814,7 +2817,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
           )}
           <ChatInput
             projectPath={projectPath}
-            onSend={handleSend}
+            onSend={(text: string, images?: string[]) => handleSend(text, images, { taskCard: openTaskCard })}
             overlayControl={overlayControl}
             onBeforeSend={(rect) => { pendingComposerRectRef.current = rect; }}
             disabled={!ready}
