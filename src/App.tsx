@@ -70,6 +70,7 @@ import { hasChatListener, scopeMessageBuffer } from './lib/chatFrameGate';
 import { convertAssistantEnvelope, appendAssistantChunk, mergePersistedWithBuffer } from './lib/backgroundMessageBuffer';
 import { bufferLoadGuardEvent } from './lib/loadGuardBuffer';
 import { isImageFile } from './utils/imageFiles';
+import { isModelFile } from './model3d/modelFiles';
 import { getMonacoEditorFor } from './utils/monacoEditorRegistry';
 import * as monaco from 'monaco-editor';
 import { motion, AnimatePresence } from 'motion/react';
@@ -1758,7 +1759,7 @@ export default function App() {
   const applyExternalChange = useCallback(async (projectPath: string, filePath: string) => {
     const ws = workspacesRef.current.get(projectPath);
     const file = ws?.openFiles.find(f => f.path === filePath);
-    if (!file) return;
+    if (!file || isModelFile(file.path)) return;
     if (file.isDirty) {
       setExternallyModified(prev => (prev.has(filePath) ? prev : new Set([...prev, filePath])));
       return;
@@ -1790,7 +1791,7 @@ export default function App() {
     const ws = workspacesRef.current.get(projectPath);
     if (!ws) return;
     const editorFiles = ws.openFiles.filter(
-      f => f.viewMode === 'editor' && f.diskMtime !== undefined
+      f => f.viewMode === 'editor' && f.diskMtime !== undefined && !isModelFile(f.path)
     );
     for (const file of editorFiles) {
       try {
@@ -2444,7 +2445,7 @@ export default function App() {
   const handleFileOpen = useCallback(async (filePath: string, line?: number) => {
     if (!activeProjectPath) return;
     try {
-      if (isImageFile(filePath)) {
+      if (isImageFile(filePath) || isModelFile(filePath)) {
         const { mtime } = await window.sai.fsMtime(filePath) as { mtime: number };
         updateWorkspace(activeProjectPath, ws => {
           const exists = ws.openFiles.some(f => f.path === filePath);

@@ -7,6 +7,8 @@ import MarkdownPreview from './MarkdownPreview';
 import MonacoEditor from '../FileExplorer/MonacoEditor';
 import ImageViewer from './ImageViewer';
 import { isImageFile } from '../../utils/imageFiles';
+import { isModelFile } from '../../model3d/modelFiles';
+import CodePanelModelView from '../../model3d/CodePanelModelView';
 
 interface CodePanelProps {
   openFiles: OpenFile[];
@@ -327,6 +329,8 @@ export default function CodePanel({
           editorFontSize={editorFontSize}
           editorMinimap={editorMinimap}
         />
+      ) : activeFile.viewMode === 'editor' && isModelFile(activeFile.path) ? (
+        <CodePanelModelView key={activeFile.path} path={activeFile.path} />
       ) : activeFile.viewMode === 'editor' && activeFile.content !== undefined ? (
         <MonacoEditor
           key={activeFile.path}
