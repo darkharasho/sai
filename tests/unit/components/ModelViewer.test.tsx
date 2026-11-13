@@ -139,4 +139,35 @@ describe('ModelViewer', () => {
     expect(onError).toHaveBeenCalledWith('append fail');
     expect(state.lost).toBeGreaterThanOrEqual(1);
   });
+
+  it('wheelZoom={false}: zoom disabled until pointerdown, re-disabled on pointerleave', async () => {
+    const onReady = vi.fn();
+    const { container } = render(<ModelViewer wheelZoom={false} load={async () => ({ buf: cubeStl(), ext: 'stl' })} onReady={onReady} />);
+    await waitFor(() => expect(onReady).toHaveBeenCalled());
+    const canvas = container.querySelector('canvas')!;
+    expect(state.controls.enableZoom).toBe(false);
+    (canvas as any).setPointerCapture = () => {};
+    (canvas as any).releasePointerCapture = () => {};
+    canvas.dispatchEvent(new Event('pointerdown'));
+    expect(state.controls.enableZoom).toBe(true);
+    canvas.dispatchEvent(new Event('pointerleave'));
+    expect(state.controls.enableZoom).toBe(false);
+  });
+
+  it('default wheelZoom keeps zoom enabled', async () => {
+    const onReady = vi.fn();
+    render(<ModelViewer load={async () => ({ buf: cubeStl(), ext: 'stl' })} onReady={onReady} />);
+    await waitFor(() => expect(onReady).toHaveBeenCalled());
+    expect(state.controls.enableZoom).toBe(true);
+  });
+
+  it('webglcontextlost shows the unavailable state and calls onError', async () => {
+    const onError = vi.fn();
+    const onReady = vi.fn();
+    const { container } = render(<ModelViewer load={async () => ({ buf: cubeStl(), ext: 'stl' })} onReady={onReady} onError={onError} />);
+    await waitFor(() => expect(onReady).toHaveBeenCalled());
+    container.querySelector('canvas')!.dispatchEvent(new Event('webglcontextlost', { cancelable: true }));
+    await waitFor(() => expect(screen.getByText(/3D view unavailable/)).toBeTruthy());
+    expect(onError).toHaveBeenCalledWith('WebGL context lost');
+  });
 });

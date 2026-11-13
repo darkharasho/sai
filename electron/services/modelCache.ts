@@ -7,8 +7,8 @@ import { modelExt, type ModelExt } from '../../src/model3d/modelFiles';
 export const MODEL_CACHE_CAP_BYTES = 200 * 1024 * 1024;
 
 const KEY_RE = /^[0-9a-f]{32}$/;
-// Cache entries: <32hex>.<ext>. The thumbnail (<key>.png) shares the stem and
-// is evicted/pruned together with the mesh.
+// Cache entries: <32hex>.<ext>. Thumbnails live in tool-result images now, not
+// here; prune still tolerates (and removes with the key) any stray <key>.png.
 const FILE_RE = /^([0-9a-f]{32})\.([A-Za-z0-9]+)$/;
 
 export function isVersionKey(k: unknown): k is string {

@@ -8,7 +8,7 @@ export type RenderModelResult =
   | {
       ok: true;
       renderId: string;
-      model: { versionKey: string; path: string; triangles: number; size: Size };
+      model: { versionKey: string; path: string; openPath: string; triangles: number; size: Size };
       __mcpImage?: CapturedImage;
     }
   | { ok: false; error: string };
@@ -21,6 +21,23 @@ export interface RenderModelDeps {
   thumbnail: (buf: ArrayBuffer, ext: ModelExt) => Promise<{ base64: string; triangles: number; size: Size }>;
   openInPanel: (absPath: string) => void;
 }
+
+/** Resolve against cwd WITHOUT realpath so it matches the tab paths the editor uses. */
+export function resolveOpenPath(cwd: string, p: string): string {
+  const isAbs = p.startsWith('/') || /^[A-Za-z]:[\\/]/.test(p);
+  const joined = isAbs || !cwd ? p : `${cwd.replace(/[\\/]+$/, '')}/${p}`;
+  const lead = joined.startsWith('/') ? '/' : '';
+  const out: string[] = [];
+  for (const seg of joined.split(/[\\/]/)) {
+    if (!seg || seg === '.') continue;
+    if (seg === '..') { if (out.length && out[out.length - 1] !== '..') out.pop(); else if (!lead) out.push('..'); continue; }
+    out.push(seg);
+  }
+  return lead + out.join('/');
+}
+
+export const clampModelHeight = (h: unknown, dflt = 360) =>
+  typeof h === 'number' && Number.isFinite(h) ? Math.min(1200, Math.max(160, h)) : dflt;
 
 const basename = (p: string) => p.split(/[\\/]/).filter(Boolean).pop() ?? p;
 
@@ -45,7 +62,8 @@ export async function handleRenderModelRequest(
     triangles = t.triangles;
     size = t.size;
     image = { base64: t.base64, mimeType: 'image/png' };
-  } catch {
+  } catch (err) {
+    console.warn('[render_model] thumbnail failed', err);
     // Best-effort: still report triangles/size if the mesh parses.
     try {
       const buf = await deps.readCached(snap.versionKey);
@@ -58,22 +76,23 @@ export async function handleRenderModelRequest(
     } catch { /* leave zeros */ }
   }
 
+  const openPath = resolveOpenPath(req.cwd, path);
   renderStore.upsert({
     renderId: req.renderId,
     kind: 'model',
-    payload: { path: snap.absPath, versionKey: snap.versionKey, ext: snap.ext },
+    payload: { path: openPath, versionKey: snap.versionKey, ext: snap.ext },
     title: (typeof input.title === 'string' && input.title) || basename(path),
     width: 480,
-    height: typeof input.height === 'number' ? input.height : 360,
+    height: clampModelHeight(input.height),
     status: 'ready',
   });
 
-  if (input.openInPanel !== false) deps.openInPanel(snap.absPath);
+  if (input.openInPanel !== false) deps.openInPanel(openPath);
 
   return {
     ok: true,
     renderId: req.renderId,
-    model: { versionKey: snap.versionKey, path: snap.absPath, triangles, size },
+    model: { versionKey: snap.versionKey, path: snap.absPath, openPath, triangles, size },
     ...(image ? { __mcpImage: image } : {}),
   };
 }

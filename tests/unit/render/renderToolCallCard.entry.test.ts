@@ -166,3 +166,20 @@ describe('entryFromToolCall — render_model failure states', () => {
     expect(entryFromToolCall(done, '/p')!.entry.payload.running).toBe(false);
   });
 });
+
+describe('entryFromToolCall — render_model symlink/ext/height', () => {
+  const KEY = 'a1b2c3d4e5f60718293a4b5c6d7e8f90';
+  const out = (path: string) => JSON.stringify({ ok: true, model: { versionKey: KEY, path, triangles: 1, size: { x: 1, y: 1, z: 1 } } });
+  it('uses the input path resolved against cwd, not the result realpath', () => {
+    const t = { ...tc('sai_render_model', { path: 'a.stl' }), output: out('/var/home/u/p/a.stl') } as ToolCall;
+    expect(entryFromToolCall(t, '/home/u/p')!.entry.payload.path).toBe('/home/u/p/a.stl');
+  });
+  it('prefers the result path ext over the input ext', () => {
+    const t = { ...tc('sai_render_model', { path: 'link.stl' }), output: out('/p/real.obj') } as ToolCall;
+    expect(entryFromToolCall(t, '/p')!.entry.payload.ext).toBe('obj');
+  });
+  it('clamps height', () => {
+    expect(entryFromToolCall(tc('sai_render_model', { path: 'a.stl', height: 5000 }), '/p')!.entry.height).toBe(1200);
+    expect(entryFromToolCall(tc('sai_render_model', { path: 'a.stl', height: 10 }), '/p')!.entry.height).toBe(160);
+  });
+});

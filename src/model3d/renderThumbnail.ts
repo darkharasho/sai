@@ -19,7 +19,8 @@ export async function renderModelThumbnail(
   const geoms: import('three').Object3D[] = [];
   try {
     renderer = new T.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
-    const bg = getComputedStyle(document.documentElement).getPropertyValue('--sai-surface').trim() || '#1e1e1e';
+    const cs = getComputedStyle(document.documentElement);
+    const bg = cs.getPropertyValue('--bg-primary').trim() || cs.getPropertyValue('--surface-1').trim() || '#1e1e1e';
     renderer.setPixelRatio(1);
     renderer.setSize(width, height, false);
     renderer.setClearColor(bg);

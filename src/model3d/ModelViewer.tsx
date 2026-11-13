@@ -16,6 +16,8 @@ export interface ModelViewerProps {
   onReady?: (info: { triangles: number; size: { x: number; y: number; z: number } }) => void;
   onError?: (msg: string) => void;
   height?: number | '100%';
+  /** When false, wheel-zoom is off until the user pointer-downs inside the canvas (so chat scrolling isn't hijacked). */
+  wheelZoom?: boolean;
 }
 
 interface Ctx {
@@ -73,6 +75,7 @@ export default function ModelViewer({
   onReady,
   onError,
   height = '100%',
+  wheelZoom = true,
 }: ModelViewerProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const hostRef = useRef<HTMLDivElement>(null);
@@ -90,16 +93,25 @@ export default function ModelViewer({
   const [wireframe, setWireframe] = useState(false);
   const wireframeRef = useRef(false);
   wireframeRef.current = wireframe;
+  const wheelZoomRef = useRef(wheelZoom);
+  wheelZoomRef.current = wheelZoom;
 
   // Renderer / scene / controls setup.
   useEffect(() => {
     let disposed = false;
     let created: Ctx | null = null;
     let ro: ResizeObserver | null = null;
+    let onDown: (() => void) | null = null;
+    let onLeave: (() => void) | null = null;
+    let onLost: ((ev: Event) => void) | null = null;
 
     rootRef.current?.removeAttribute('data-render-ready');
     const teardown = (c: Ctx) => {
       c.dead = true;
+      const el = c.renderer.domElement;
+      if (onDown) el.removeEventListener('pointerdown', onDown);
+      if (onLeave) el.removeEventListener('pointerleave', onLeave);
+      if (onLost) el.removeEventListener('webglcontextlost', onLost);
       c.controls?.removeEventListener('change', c.draw);
       c.controls?.dispose();
       if (c.mesh) disposeObject(c.mesh);
@@ -126,7 +138,8 @@ export default function ModelViewer({
       }
       const rd: THREE.WebGLRenderer = renderer;
       const host = hostRef.current;
-      const bg = getComputedStyle(rootRef.current).getPropertyValue('--sai-surface').trim() || '#1e1e1e';
+      const cs = getComputedStyle(rootRef.current);
+      const bg = cs.getPropertyValue('--bg-primary').trim() || cs.getPropertyValue('--surface-1').trim() || '#1e1e1e';
       renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
       renderer.setClearColor(bg);
       host.appendChild(renderer.domElement);
@@ -151,7 +164,23 @@ export default function ModelViewer({
       if (Controls) {
         c.controls = new Controls(camera, renderer.domElement);
         c.controls.addEventListener('change', c.draw);
+        if (!wheelZoomRef.current) {
+          const ctl = c.controls;
+          const el = renderer.domElement;
+          ctl.enableZoom = false;
+          onDown = () => { ctl.enableZoom = true; };
+          onLeave = () => { ctl.enableZoom = false; };
+          el.addEventListener('pointerdown', onDown);
+          el.addEventListener('pointerleave', onLeave);
+        }
       }
+      onLost = (ev: Event) => {
+        ev.preventDefault();
+        if (disposed) return;
+        setUnavailable(true);
+        onErrorRef.current?.('WebGL context lost');
+      };
+      renderer.domElement.addEventListener('webglcontextlost', onLost);
       const resize = () => {
         const w = host.clientWidth || 1;
         const h = host.clientHeight || 1;

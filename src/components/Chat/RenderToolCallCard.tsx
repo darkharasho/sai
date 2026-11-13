@@ -11,6 +11,7 @@ import { AppWindow } from 'lucide-react';
 import { buildChartHtml, buildDiffHtml, type ChartInput, type DiffInput } from '../../render/builtinRenderers';
 import { buildChoiceHtml } from '../../render/buildChoiceHtml';
 import { extractModelResult, extractModelError } from '../../model3d/modelResult';
+import { resolveOpenPath, clampModelHeight } from '../../render/renderModelTool';
 import { modelExt } from '../../model3d/modelFiles';
 import { registeredComponentKeys } from '../../render/componentRegistry';
 
@@ -98,8 +99,9 @@ export function entryFromToolCall(tc: ToolCall, cwd = ''): { entry: RenderEntry;
     const inPath = typeof input.path === 'string' ? input.path : '';
     if (!inPath) return null;
     const res = extractModelResult(tc.output);
-    const abs = res?.path || (inPath.startsWith('/') || !cwd ? inPath : `${cwd.replace(/\/$/, '')}/${inPath}`);
-    const ext = modelExt(inPath);
+    // Open the agent-supplied path (not the realpath) so tabs dedupe on symlinked homes.
+    const abs = inPath.startsWith('/') || cwd ? resolveOpenPath(cwd, inPath) : (res?.path || inPath);
+    const ext = (res?.path ? modelExt(res.path) : null) ?? modelExt(inPath);
     if (!ext) return null;
     const img = tc.resultImages?.[0];
     const modelError = res ? null : extractModelError(tc.output);
@@ -112,7 +114,7 @@ export function entryFromToolCall(tc: ToolCall, cwd = ''): { entry: RenderEntry;
         payload: { path: abs, versionKey: res?.versionKey ?? null, ext, thumbnailPath: img?.filePath, thumbnailDataUrl: img?.dataUrl, running: !modelError && !res && running },
         title: title || base,
         width: 480,
-        height: height ?? 360,
+        height: clampModelHeight(height),
         status: modelError ? 'error' : 'ready',
         ...(modelError ? { error: modelError } : {}),
       },

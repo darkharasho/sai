@@ -55,4 +55,35 @@ describe('handleRenderModelRequest', () => {
     expect(res.__mcpImage).toBeUndefined();
     expect(renderStore.get('r1')).toBeTruthy();
   });
+
+  it('opens the agent-supplied path resolved against cwd, not the realpath', async () => {
+    const deps = mkDeps({ snapshot: vi.fn(async () => ({ ...snap, absPath: '/var/home/u/proj/part.stl' })) });
+    const res: any = await handleRenderModelRequest({ input: { path: 'sub/../part.stl' }, renderId: 'r1', cwd: '/home/u/proj/' }, deps);
+    expect(deps.openInPanel).toHaveBeenCalledWith('/home/u/proj/part.stl');
+    expect(res.model.openPath).toBe('/home/u/proj/part.stl');
+    expect(res.model.path).toBe('/var/home/u/proj/part.stl');
+    expect(renderStore.get('r1')!.payload).toMatchObject({ path: '/home/u/proj/part.stl' });
+  });
+
+  it('absolute input path is used as-is for opening', async () => {
+    const deps = mkDeps();
+    await handleRenderModelRequest({ input: { path: '/home/u/a.stl' }, renderId: 'r1', cwd: '/p' }, deps);
+    expect(deps.openInPanel).toHaveBeenCalledWith('/home/u/a.stl');
+  });
+
+  it('clamps height to 160..1200', async () => {
+    await handleRenderModelRequest(req({ path: 'part.stl', height: 5 }), mkDeps());
+    expect(renderStore.get('r1')!.height).toBe(160);
+    await handleRenderModelRequest(req({ path: 'part.stl', height: 99999 }), mkDeps());
+    expect(renderStore.get('r1')!.height).toBe(1200);
+    await handleRenderModelRequest(req({ path: 'part.stl' }), mkDeps());
+    expect(renderStore.get('r1')!.height).toBe(360);
+  });
+
+  it('logs thumbnail failures', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await handleRenderModelRequest(req(), mkDeps({ thumbnail: vi.fn(async () => { throw new Error('webgl'); }) }));
+    expect(warn).toHaveBeenCalledWith('[render_model] thumbnail failed', expect.any(Error));
+    warn.mockRestore();
+  });
 });

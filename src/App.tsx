@@ -765,13 +765,19 @@ export default function App() {
         void (async () => {
           const { handleRenderModelRequest } = await import('./render/renderModelTool');
           const { renderModelThumbnail } = await import('./model3d/renderThumbnail');
+          // Resolve against the agent's workspace; only touch the code panel
+          // when that workspace is the one being viewed.
+          const normWs = (p: string) => p.replace(/^\/var\/home\//, '/home/').replace(/\/+$/, '');
+          const active = activeProjectPathRef.current ?? '';
+          const cwd = req.workspace || active;
+          const sameWs = !req.workspace || (!!active && normWs(req.workspace) === normWs(active));
           return handleRenderModelRequest(
-            { input: req.input, renderId: req.id, cwd: activeProjectPathRef.current ?? '' },
+            { input: req.input, renderId: req.id, cwd },
             {
               snapshot: saiAny.modelSnapshot.bind(sai),
               readCached: saiAny.modelReadCached.bind(sai),
               thumbnail: renderModelThumbnail,
-              openInPanel: (absPath) => { void handleFileOpenRef.current?.(absPath); },
+              openInPanel: (absPath) => { if (sameWs) void handleFileOpenRef.current?.(absPath); },
             },
           );
         })().then(

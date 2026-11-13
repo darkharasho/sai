@@ -52,7 +52,6 @@ export function ModelCard({ renderId, path, versionKey, ext, thumbnailPath, thum
   const active = useIsActiveModelCard(instanceKey);
   const [thumb, setThumb] = useState<string | null>(thumbnailDataUrl ?? null);
   const [missing, setMissing] = useState(false);
-  const [viewerError, setViewerError] = useState<string | null>(null);
 
   // The newest card claims the live viewer on mount; any card releases on unmount.
   useEffect(() => {
@@ -71,8 +70,9 @@ export function ModelCard({ renderId, path, versionKey, ext, thumbnailPath, thum
     return () => { alive = false; };
   }, [thumbnailPath, thumbnailDataUrl]);
 
+  // (The viewer renders its own unavailable/error text; the card doesn't repeat it.)
   // Reset error state when the version changes.
-  useEffect(() => { setMissing(false); setViewerError(null); }, [versionKey]);
+  useEffect(() => { setMissing(false); }, [versionKey]);
 
   const load = useCallback(async () => {
     const buf = await window.sai.modelReadCached!(versionKey as string);
@@ -108,9 +108,8 @@ export function ModelCard({ renderId, path, versionKey, ext, thumbnailPath, thum
         <ModelViewer
           load={load}
           height={height}
-          onError={(m) => setViewerError(m)}
+          wheelZoom={false}
         />
-        {viewerError && !missing && <div className="sai-render-card__err">{viewerError}</div>}
       </div>
     );
   }

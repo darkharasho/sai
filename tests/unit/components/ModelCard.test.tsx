@@ -2,7 +2,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, fireEvent, act } from '@testing-library/react';
 
 vi.mock('../../../src/model3d/ModelViewer', () => ({
-  default: ({ load, onError }: any) => {
+  default: ({ load, onError, wheelZoom }: any) => {
+    (globalThis as any).__viewerWheelZoom = wheelZoom;
     load().catch((e: Error) => onError?.(e.message));
     return <div data-testid="viewer" />;
   },
@@ -76,5 +77,14 @@ describe('ModelCard budget + states', () => {
     expect(screen.getByText('Preparing model…')).toBeTruthy();
     rerender(<ModelCard renderId="x" versionKey={null} isNewest {...base} />);
     expect(screen.getByText('Model unavailable')).toBeTruthy();
+  });
+
+  it('live viewer is mounted with wheelZoom={false} and card adds no duplicate error text', async () => {
+    act(() => { claim('x'); });
+    (window as any).sai.modelReadCached = vi.fn().mockRejectedValue(new Error('WebGL boom'));
+    const { container } = render(<ModelCard renderId="c1" versionKey={KEY} isNewest {...base} />);
+    expect(await screen.findByTestId('viewer')).toBeTruthy();
+    expect((globalThis as any).__viewerWheelZoom).toBe(false);
+    expect(container.querySelector('.sai-render-card__err')).toBeNull();
   });
 });
