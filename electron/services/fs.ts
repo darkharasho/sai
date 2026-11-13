@@ -7,6 +7,7 @@ import { listMetaWorkspaces } from './metaWorkspace';
 import { syntheticRootFor } from './metaSyntheticRoot';
 import { safeJoin } from './remote/safe-join';
 import { storeImageBase64, pruneOrphanImages } from './toolResultImageStore';
+import { createFileWatchRegistry, type FileWatchRegistry } from './fileWatch';
 
 function fileSha(content: string): string {
   return createHash('sha256').update(content, 'utf8').digest('hex').slice(0, 16);
@@ -121,6 +122,36 @@ export function registerFsHandlers(mainWindow: BrowserWindow) {
   ipcMain.handle('fs:readFile', async (_e, filePath: string) => {
     const r = await readFileImpl(filePath);
     return r.content;
+  });
+
+  ipcMain.handle('fs:readFileBuffer', async (_e, filePath: string) => {
+    const buf = await readFileBufImpl(filePath);
+    return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+  });
+
+  // One watch registry per renderer webContents, disposed when it is destroyed.
+  const watchRegistries = new Map<number, FileWatchRegistry>();
+  const registryFor = (sender: Electron.WebContents): FileWatchRegistry => {
+    let reg = watchRegistries.get(sender.id);
+    if (!reg) {
+      reg = createFileWatchRegistry(p => {
+        if (!sender.isDestroyed()) sender.send('fs:fileChanged', p);
+      });
+      watchRegistries.set(sender.id, reg);
+      const id = sender.id;
+      sender.once('destroyed', () => {
+        watchRegistries.get(id)?.disposeAll();
+        watchRegistries.delete(id);
+      });
+    }
+    return reg;
+  };
+  ipcMain.handle('fs:watchFile', (e, filePath: string) => {
+    if (e.sender.isDestroyed()) return;
+    registryFor(e.sender).watch(filePath);
+  });
+  ipcMain.handle('fs:unwatchFile', (e, filePath: string) => {
+    watchRegistries.get(e.sender.id)?.unwatch(filePath);
   });
 
   ipcMain.handle('fs:readFileBase64', async (_event, filePath: string) => {

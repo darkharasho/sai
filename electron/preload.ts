@@ -246,6 +246,14 @@ contextBridge.exposeInMainWorld('sai', {
     ipcRenderer.invoke('git:resolveAllConflicts', cwd, resolution),
   fsReadDir: (dirPath: string) => ipcRenderer.invoke('fs:readDir', dirPath),
   fsReadFile: (filePath: string) => ipcRenderer.invoke('fs:readFile', filePath),
+  fsReadFileBuffer: (filePath: string): Promise<ArrayBuffer> => ipcRenderer.invoke('fs:readFileBuffer', filePath),
+  fsWatchFile: (filePath: string): Promise<void> => ipcRenderer.invoke('fs:watchFile', filePath),
+  fsUnwatchFile: (filePath: string): Promise<void> => ipcRenderer.invoke('fs:unwatchFile', filePath),
+  onFsFileChanged: (callback: (path: string) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, p: string) => callback(p);
+    ipcRenderer.on('fs:fileChanged', listener);
+    return () => ipcRenderer.removeListener('fs:fileChanged', listener);
+  },
   fsReadFileBase64: (filePath: string) => ipcRenderer.invoke('fs:readFileBase64', filePath),
   storeToolResultImage: (dataUrl: string): Promise<string> => ipcRenderer.invoke('toolResultImage:store', dataUrl),
   pruneToolResultImages: (referenced: string[]): Promise<{ deleted: number; freedBytes: number }> =>

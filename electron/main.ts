@@ -162,6 +162,8 @@ if (process.env.SAI_REMOTE_DEBUG) {
 // Disable GPU acceleration so the app stays functional.
 if (process.platform === 'linux') {
   app.commandLine.appendSwitch('disable-gpu');
+  // WebGL (3D model viewer) runs on SwiftShader because the GPU is disabled.
+  app.commandLine.appendSwitch('enable-unsafe-swiftshader');
 }
 
 let mainWindow: BrowserWindow | null = null;

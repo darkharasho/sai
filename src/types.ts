@@ -494,6 +494,10 @@ declare global {
     loadGuardTopUsers?: () => Promise<import('../electron/services/loadGuard/types').TopUser[]>;
     loadGuardResume?: () => Promise<void>;
     loadGuardOnState?: (cb: (s: import('../electron/services/loadGuard').LoadGuardPublicState) => void) => () => void;
+    fsReadFileBuffer?: (path: string) => Promise<ArrayBuffer>;
+    fsWatchFile?: (path: string) => Promise<void>;
+    fsUnwatchFile?: (path: string) => Promise<void>;
+    onFsFileChanged?: (cb: (path: string) => void) => () => void;
     metaWorkspaceList?: () => Promise<any[]>;
     metaWorkspaceCreate?: (input: any) => Promise<any>;
     metaWorkspaceUpdate?: (id: string, patch: any) => Promise<any>;
