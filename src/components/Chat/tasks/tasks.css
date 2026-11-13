@@ -9,10 +9,6 @@
 .task-status--paused .task-card__dot { background: transparent; border: 1.5px solid var(--text-muted); }
 @keyframes task-card-glow { 0%, 100% { box-shadow: 0 0 3px var(--blue); } 50% { box-shadow: 0 0 9px var(--blue); } }
 
-.task-card__tail-line { color: var(--text-secondary); white-space: pre-wrap; overflow-wrap: anywhere; }
-.task-card__tail-line--error { color: var(--red); }
-.task-card__tail-line--live { color: var(--text); }
-
 .task-card__link { all: unset; cursor: pointer; color: var(--accent); font-size: var(--text-xs); }
 .task-card__link:hover { color: var(--accent-hover); }
 .task-card__link:focus-visible { outline: 1px solid var(--accent); }
@@ -33,7 +29,6 @@
 .task-stream__back:hover { color: var(--accent-hover); }
 .task-stream__back:focus-visible { outline: 1px solid var(--accent); }
 .task-stream__title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-base); }
-.task-stream__meta { color: var(--text-secondary); font-size: var(--text-xs); }
 .task-stream__body { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 12px; }
 .task-stream__empty { padding: 24px 0; text-align: center; color: var(--text-muted); }
 
@@ -68,7 +63,7 @@
 .task-tabs-fallback { border-bottom: 1px solid var(--border-subtle); background: var(--surface-1); }
 .task-tabs-fallback .task-tabs { height: 32px; padding: 0 8px; }
 .task-tabs__tab {
-  all: unset; box-sizing: border-box; position: relative; cursor: pointer;
+  all: unset; box-sizing: border-box; cursor: pointer;
   display: flex; align-items: center; gap: 6px; padding: 0 8px; white-space: nowrap;
   color: var(--text-secondary);
 }
@@ -78,13 +73,10 @@
 .task-tabs__tab:focus-visible { outline: 1px solid var(--border-strong); outline-offset: -1px; }
 .task-tabs__tab--active { color: var(--text); background: var(--surface-4); }
 .task-tabs__title { max-width: 140px; overflow: hidden; text-overflow: ellipsis; }
-.task-tabs__meta { color: var(--text-muted); font-size: var(--text-xs); }
-.task-tabs__underline { position: absolute; left: 7px; right: 7px; bottom: 2px; height: 2px; border-radius: 1px; background: var(--border-subtle); overflow: hidden; }
-.task-tabs__underline-fill { display: block; height: 100%; background: var(--blue); transition: width 0.3s ease; }
-.task-status--done .task-tabs__underline-fill { background: var(--green); }
-.task-status--failed .task-tabs__underline-fill { background: var(--red); }
-.task-status--waiting .task-tabs__underline-fill { background: var(--orange); }
-.task-tabs__tab--active .task-tabs__underline { background: var(--border-strong); }
+.task-tabs__now {
+  max-width: 180px; overflow: hidden; text-overflow: ellipsis;
+  color: var(--text-muted);
+}
 /* Collapsed: a finished batch keeps one line in the bar until dismissed. */
 .task-tabs--collapsed { align-items: center; gap: 4px; }
 .task-tabs__summary {
@@ -103,14 +95,16 @@
 .task-tabs__dismiss:focus-visible, .task-tabs__collapse:focus-visible { outline: 1px solid var(--border-strong); outline-offset: -1px; }
 .task-tabs__collapse { align-self: center; margin-left: auto; }
 
-/* Steps + live tail for the open task: inside the stream, not a bar of its own. */
-.task-stream__progress { display: flex; flex-direction: column; gap: 6px; padding: 8px 12px; border-bottom: 1px solid var(--border-hairline); background: var(--surface-0); }
-.task-stream__progress .task-card__tail { margin-top: 0; }
-.task-tabs__pills { display: flex; flex-wrap: wrap; gap: 4px; }
-.task-tabs__pill { padding: 2px 8px; border-radius: 10px; font-size: var(--text-xs); border: 1px solid var(--border-subtle); color: var(--text-muted); }
-.task-tabs__pill--done { color: var(--green); }
-.task-tabs__pill--current { color: var(--text); border-color: var(--accent); }
-
-@media (prefers-reduced-motion: reduce) {
-  .task-tabs__underline-fill { transition: none; }
+/* Task chip: marks where a task's run starts in All. Six colors by card index. */
+.task-chip {
+  align-self: flex-start; display: inline-block; max-width: 240px; margin: 0 16px 6px;
+  padding: 1px 8px; border-radius: 9px; border: 1px solid currentColor;
+  font-size: var(--text-xs); line-height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  background: color-mix(in srgb, currentColor 12%, transparent);
 }
+.task-chip--c0 { color: var(--blue); }
+.task-chip--c1 { color: var(--purple); }
+.task-chip--c2 { color: var(--turquoise); }
+.task-chip--c3 { color: var(--pink); }
+.task-chip--c4 { color: var(--yellow); }
+.task-chip--c5 { color: var(--green); }

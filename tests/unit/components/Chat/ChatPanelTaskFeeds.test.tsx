@@ -3,8 +3,17 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import type { ComponentProps } from 'react';
 import { installMockSai } from '../../../helpers/ipc-mock';
 
+// Mirrors the real renderer's one rule that matters here: a message holding
+// only sai_task calls (an empty "shell") renders nothing (TaskFeedView tests
+// check this against the real ChatMessage).
 vi.mock('../../../../src/components/Chat/ChatMessage', () => ({
-  default: ({ message }: any) => <div data-testid="msg">{typeof message?.content === 'string' ? message.content : ''}</div>,
+  default: ({ message }: any) => {
+    const calls: any[] = Array.isArray(message?.toolCalls) ? message.toolCalls : [];
+    const visible = calls.filter((c) => !String(c?.name ?? '').includes('sai_task'));
+    const text = typeof message?.content === 'string' ? message.content : '';
+    if (calls.length > 0 && visible.length === 0 && !text.trim()) return null;
+    return <div data-testid="msg" data-tools={visible.map((c) => c.name).join(',')}>{text}</div>;
+  },
 }));
 
 let inputProps: any;
@@ -91,7 +100,7 @@ describe('ChatPanel task feeds integration', () => {
     return r;
   };
   const msgTexts = () => screen.queryAllByTestId('msg').map((el) => el.textContent);
-  const streamTexts = () => within(screen.getByTestId('task-stream')).queryAllByTestId('msg').map((el) => el.textContent);
+  const streamTexts = () => within(screen.getByTestId('task-feed')).queryAllByTestId('msg').map((el) => el.textContent);
   const messageList = () => document.querySelector('.chat-messages') as HTMLElement;
 
   it('renders tabs whenever tasks exist', async () => {
@@ -106,7 +115,7 @@ describe('ChatPanel task feeds integration', () => {
     expect(streamTexts()).toEqual(['Alpha work in progress']);
     expect(messageList()).not.toBeVisible();
     fireEvent.click(screen.getByRole('tab', { name: 'All' }));
-    expect(screen.queryByTestId('task-stream')).toBeNull();
+    expect(screen.queryByTestId('task-feed')).toBeNull();
     expect(messageList()).toBeVisible();
     expect(msgTexts()).toContain('Intro before tasks');
   });
@@ -120,7 +129,7 @@ describe('ChatPanel task feeds integration', () => {
     expect(msgTexts()).toContain('Intro before tasks');
   });
 
-  it('no tabs when the chat has no task data', async () => {
+  it('no tasks → no tab bar', async () => {
     await mount({
       ...baseProps(),
       initialMessages: [
@@ -129,7 +138,110 @@ describe('ChatPanel task feeds integration', () => {
       ] as any,
     });
     expect(document.querySelector('.task-tabs')).toBeNull();
+    expect(document.querySelector('.task-chip')).toBeNull();
     expect(inputProps.todos).toBeUndefined();
     expect(msgTexts()).toEqual(['hello', 'hi there']);
+  });
+
+  const tabFor = (title: string) => screen.getAllByRole('tab').find((t) => t.textContent?.includes(title))!;
+  const feedEl = () => screen.getByTestId('task-feed');
+
+  it('All shows a chip at a task boundary only', async () => {
+    await mount({
+      ...baseProps(),
+      initialMessages: [
+        ...taskHistory(),
+        { id: 'a3b', role: 'assistant', content: 'More alpha work', timestamp: 6 },
+        { id: 'a5', role: 'assistant', content: '', timestamp: 7, toolCalls: [taskCall('t3', { action: 'update', id: 'beta', status: 'running', step: 0 })] },
+        { id: 'a6', role: 'assistant', content: 'Beta work', timestamp: 8 },
+      ] as any,
+    });
+    const chips = Array.from(document.querySelectorAll('.chat-messages .task-chip'));
+    expect(chips.map((c) => c.textContent)).toEqual(['Alpha task', 'Beta task']);
+    // Card index picks the color: alpha is card 0, beta card 1.
+    expect(chips.map((c) => c.className)).toEqual(['task-chip task-chip--c0', 'task-chip task-chip--c1']);
+    // The chip sits right above the first message of each run.
+    expect(chips[0].nextElementSibling?.textContent).toBe('Alpha work in progress');
+    expect(chips[1].nextElementSibling?.textContent).toBe('Beta work');
+    // All's messages are unchanged.
+    expect(msgTexts()).toEqual(['do alpha and beta', 'Intro before tasks', 'Alpha work in progress', 'More alpha work', 'Beta work']);
+  });
+
+  it("opening a tab shows only that task's items", async () => {
+    await mount(baseProps());
+    const all = msgTexts();
+    const pinnedBar = () => document.querySelector('.pinned-prompt-bar') as HTMLElement;
+    expect(pinnedBar().style.display).not.toBe('none');
+
+    fireEvent.click(tabFor('Alpha task'));
+    // a2 (the sai_task update) is in the feed as an empty shell and renders nothing.
+    expect(within(feedEl()).queryAllByTestId('msg')).toHaveLength(1);
+    expect(streamTexts()).toEqual(['Alpha work in progress']);
+    expect(messageList()).not.toBeVisible();
+    expect(pinnedBar().style.display).toBe('none');
+    // Chips belong to All only.
+    expect(feedEl().querySelector('.task-chip')).toBeNull();
+
+    fireEvent.click(screen.getByText('← All'));
+    expect(screen.queryByTestId('task-feed')).toBeNull();
+    expect(messageList()).toBeVisible();
+    expect(pinnedBar().style.display).not.toBe('none');
+    expect(msgTexts()).toEqual(all);
+  });
+
+  it('composer todos come from the board while the message list and composer stay mounted', async () => {
+    await mount(baseProps());
+    expect(msgTexts()).toContain('Intro before tasks');
+    expect(screen.getByTestId('chat-input')).toBeTruthy();
+    expect(inputProps.todos).toEqual([
+      expect.objectContaining({ content: 'Alpha task', status: 'in_progress' }),
+      expect.objectContaining({ content: 'Beta task', status: 'pending' }),
+    ]);
+  });
+
+  it('a tagged pending question renders in All and in the task tab, and the tab dot is waiting', async () => {
+    await mount({ ...baseProps(), awaitingQuestion: true, initialMessages: [...taskHistory(), askCall([pickQuestion])] as any });
+    const isAsk = (el: Element) => el.getAttribute('data-tools') === 'AskUserQuestion';
+    expect(screen.getAllByTestId('msg').filter(isAsk)).toHaveLength(1);
+    expect(tabFor('Alpha task').className).toContain('task-status--waiting');
+
+    fireEvent.click(tabFor('Alpha task'));
+    expect(within(feedEl()).getAllByTestId('msg').filter(isAsk)).toHaveLength(1);
+    // The feed header carries the waiting status too.
+    expect(feedEl().className).toContain('task-status--waiting');
+  });
+
+  it('a multi-question AskUserQuestion renders in the task tab', async () => {
+    await mount({
+      ...baseProps(), awaitingQuestion: true,
+      initialMessages: [...taskHistory(), askCall([pickQuestion, { ...pickQuestion, question: 'Which ORM?' }])] as any,
+    });
+    fireEvent.click(tabFor('Alpha task'));
+    expect(within(feedEl()).getAllByTestId('msg').filter((el) => el.getAttribute('data-tools') === 'AskUserQuestion')).toHaveLength(1);
+  });
+
+  it('pending approval UI stays visible while a task tab is open', async () => {
+    await mount({
+      ...baseProps(),
+      initialMessages: [
+        ...taskHistory(),
+        { id: 'a5', role: 'assistant', content: '', timestamp: 6, toolCalls: [{ id: 'toolu_bash', name: 'Bash', input: JSON.stringify({ command: 'rm -rf build' }) }] },
+      ] as any,
+      initialPendingApproval: { toolName: 'Bash', toolUseId: 'toolu_bash', command: 'rm -rf build', description: '', input: { command: 'rm -rf build' } },
+    });
+    expect(tabFor('Alpha task').className).toContain('task-status--waiting');
+    fireEvent.click(tabFor('Alpha task'));
+    expect(feedEl()).toBeTruthy();
+    expect(screen.getByTestId('chat-input')).toBeVisible();
+    expect(screen.getByTestId('chat-bottom-strip')).toBeVisible();
+    expect(inputProps.pendingApproval?.toolUseId).toBe('toolu_bash');
+  });
+
+  it('Stop in the feed header on an agent-backed card calls onStopBackgroundTask with the task id', async () => {
+    const onStop = vi.fn().mockResolvedValue(true);
+    await mount({ ...baseProps(), onStopBackgroundTask: onStop, backgroundTasks: [gammaTask] });
+    await act(async () => { fireEvent.click(tabFor('Research gamma')); });
+    fireEvent.click(within(feedEl()).getByRole('button', { name: 'Stop' }));
+    expect(onStop).toHaveBeenCalledWith('bg1');
   });
 });

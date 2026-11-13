@@ -1,4 +1,4 @@
-import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
+import { Fragment, useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronDown, CornerLeftUp } from 'lucide-react';
 import { stampTaskTags } from './tasks/taskTags';
@@ -83,6 +83,7 @@ import ChatMessage from './ChatMessage';
 import { watchTargetsFromMessage } from './githubRunResolver';
 
 const EMPTY_URL_SET: Set<string> = new Set();
+const NO_CHIPS: Map<string, TaskChipInfo> = new Map();
 const HIDDEN_STYLE = { display: 'none' } as const;
 import ChatInput, { type ContextItem } from './ChatInput';
 import type { ChatMessage as ChatMessageType, ToolCall, PendingApproval, PendingSudoPrompt, PendingCodexUserInput, PendingCodexMcpElicitation, QueuedMessage, TerminalTab } from '../../types';
@@ -95,7 +96,9 @@ import { parseAiError, looksLikeApiError } from './parseAiError';
 import { classifyToolType } from './tasks/toolType';
 import { useTaskBoard } from './tasks/useTaskBoard';
 import { TaskTabs, TASK_TABS_SLOT_ID } from './tasks/TaskTabs';
-import { TaskStreamView } from './tasks/TaskStreamView';
+import { TaskFeedView } from './tasks/TaskFeedView';
+import { TaskChip } from './tasks/TaskChip';
+import { taskChips, type TaskChipInfo } from './tasks/taskFeed';
 import type { TaskCard } from './tasks/types';
 import './tasks/tasks.css';
 import type { BackgroundTaskDetail } from '../../../electron/services/claudeBackend/backgroundTasks';
@@ -735,12 +738,17 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
 
   // Task tabs (display-only). The hook is a no-op when disabled.
   const [openTaskId, setOpenTaskId] = useState<string | null>(null);
-  const bottomStripRef = useRef<HTMLDivElement>(null);
   const taskBoard = useTaskBoard({
     enabled: taskUiEnabled, messages, claudeSessionId, backgroundTasks, isStreaming, awaitingQuestion,
+    pendingApprovalToolUseId: pendingApproval?.toolUseId ?? null,
   });
   const taskCards = taskBoard.board.cards;
   const showTaskUi = taskUiEnabled && taskCards.length > 0;
+  // Task chips in All (display-only): above the first message of each task run.
+  const chipBefore = useMemo(
+    () => (showTaskUi ? taskChips(messages, taskCards, taskBoard.tags) : NO_CHIPS),
+    [showTaskUi, messages, taskCards, taskBoard.tags],
+  );
   const openTaskCard = openTaskId ? taskCards.find(c => c.id === openTaskId) ?? null : null;
   // The tabs live in the host's Chat accordion bar rather than a bar of their
   // own. Only the visible panel claims the slot — background workspaces keep
@@ -2438,14 +2446,6 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
     const taskId = card.agent?.taskId;
     if (taskId) void onStopBackgroundTask?.(taskId);
   }, [onStopBackgroundTask]);
-  const taskQuestion = taskBoard.pendingQuestion;
-  const handleTaskAnswer = useCallback((option: string) => {
-    if (!taskQuestion?.answerable) return;
-    void handleAnswerQuestion(taskQuestion.toolUseId, { [taskQuestion.text]: taskQuestion.multiSelect ? [option] : option });
-  }, [taskQuestion, handleAnswerQuestion]);
-  const handleTaskReply = useCallback(() => {
-    bottomStripRef.current?.querySelector('textarea')?.focus();
-  }, []);
   const renderTaskMessage = (m: ChatMessageType) => (
     <ChatMessage message={m} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} renderToolCall={renderToolCall} metaRuntime={activeMetaRuntime} onAnswerQuestion={handleAnswerQuestion} onAnswerPlanReview={handleAnswerPlanReview} />
   );
@@ -2625,11 +2625,10 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
         )}
       </motion.div>
       {openTaskCard && (
-        <TaskStreamView
+        <TaskFeedView
           card={openTaskCard}
-          messages={taskBoard.streamMessages(openTaskCard)}
+          feed={taskBoard.feed(openTaskCard)}
           fallback={taskBoard.streamFallback(openTaskCard)}
-          tail={taskBoard.tails.get(openTaskCard.id)}
           onBack={() => setOpenTaskId(null)}
           renderMessage={renderTaskMessage}
           onStop={handleTaskStop}
@@ -2679,30 +2678,36 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
               </div>
             )}
             <TaskRegistryContext.Provider value={taskRegistry}>
-            {visibleMessages.map(msg => msg.role === 'user'
-                ? (
-                  <div
-                    key={msg.id}
-                    ref={el => { if (el) userMsgRefs.current.set(msg.id, el); else userMsgRefs.current.delete(msg.id); }}
-                    data-layout-id={`pinned-${msg.id}`}
-                  >
-                    <ChatMessage
-                      message={msg}
-                      projectPath={projectPath}
-                      onFileOpen={onFileOpen}
-                      aiProvider={aiProvider}
-                      toolCallsExpanded={toolCallsExpanded}
-                      pinnedLayoutId={`pinned-${msg.id}`}
-                      isFirstAssistantOfTurn={msg.id === firstAssistantOfTurnId}
-                      renderToolCall={renderToolCall}
-                      metaRuntime={activeMetaRuntime}
-                      onAnswerQuestion={handleAnswerQuestion}
-                      onAnswerPlanReview={handleAnswerPlanReview}
-                    />
-                  </div>
-                )
-                : <ChatMessage key={msg.id} message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} onRetry={msg.error ? () => handleRetry(msg.id) : undefined} onClearContext={msg.error ? handleClearContext : undefined} isFirstAssistantOfTurn={msg.id === firstAssistantOfTurnId} isStreaming={isStreaming && msg.id === lastAssistantId && !streamSettled} seedGrow={msg.id === seedGrowMsgId} renderToolCall={renderToolCall} metaRuntime={activeMetaRuntime} onAnswerQuestion={handleAnswerQuestion} onAnswerPlanReview={handleAnswerPlanReview} watcherUrlAllowlist={watcherUrlsByMessageId.get(msg.id) ?? EMPTY_URL_SET} />
-              )}
+            {visibleMessages.map(msg => {
+              const chip = chipBefore.get(msg.id);
+              return (
+                <Fragment key={msg.id}>
+                  {chip && <TaskChip title={chip.title} colorIndex={chip.colorIndex} />}
+                  {msg.role === 'user'
+                    ? (
+                      <div
+                        ref={el => { if (el) userMsgRefs.current.set(msg.id, el); else userMsgRefs.current.delete(msg.id); }}
+                        data-layout-id={`pinned-${msg.id}`}
+                      >
+                        <ChatMessage
+                          message={msg}
+                          projectPath={projectPath}
+                          onFileOpen={onFileOpen}
+                          aiProvider={aiProvider}
+                          toolCallsExpanded={toolCallsExpanded}
+                          pinnedLayoutId={`pinned-${msg.id}`}
+                          isFirstAssistantOfTurn={msg.id === firstAssistantOfTurnId}
+                          renderToolCall={renderToolCall}
+                          metaRuntime={activeMetaRuntime}
+                          onAnswerQuestion={handleAnswerQuestion}
+                          onAnswerPlanReview={handleAnswerPlanReview}
+                        />
+                      </div>
+                    )
+                    : <ChatMessage message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} onRetry={msg.error ? () => handleRetry(msg.id) : undefined} onClearContext={msg.error ? handleClearContext : undefined} isFirstAssistantOfTurn={msg.id === firstAssistantOfTurnId} isStreaming={isStreaming && msg.id === lastAssistantId && !streamSettled} seedGrow={msg.id === seedGrowMsgId} renderToolCall={renderToolCall} metaRuntime={activeMetaRuntime} onAnswerQuestion={handleAnswerQuestion} onAnswerPlanReview={handleAnswerPlanReview} watcherUrlAllowlist={watcherUrlsByMessageId.get(msg.id) ?? EMPTY_URL_SET} />}
+                </Fragment>
+              );
+            })}
             </TaskRegistryContext.Provider>
             {isWaiting && waiting && (
               <div className="chat-waiting-row">
@@ -2761,7 +2766,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
         </AnimatePresence>
       </div>
       <LayoutGroup>
-        <div data-testid="chat-bottom-strip" className="chat-bottom-strip" ref={bottomStripRef}>
+        <div data-testid="chat-bottom-strip" className="chat-bottom-strip">
           {/* The WaitingIndicator pill in the transcript owns the waiting
               affordance; the composer keeps its stop button live instead of
               growing a second cancel row here. */}

@@ -20,8 +20,8 @@ const CLOSED: BatchView = { batch: null, open: false, dismissed: false };
 
 /**
  * A row of task tabs. Rendered into the Chat accordion bar (ChatPanel portals
- * it there) so running tasks never cost the conversation a second bar — hence
- * no step pills or tail here; the stream view carries those.
+ * it there) so running tasks never cost the conversation a second bar. Each
+ * tab carries its status dot, title and one-line "now" label.
  */
 export function TaskTabs({ board, activeId, onSelect }: TaskTabsProps) {
   // Derived against batchStartedAt so a new batch starts fresh without an effect.
@@ -71,7 +71,6 @@ export function TaskTabs({ board, activeId, onSelect }: TaskTabsProps) {
           All
         </button>
         {board.cards.map((c) => {
-          const pct = c.totalCount > 0 ? Math.min(100, Math.max(0, (c.doneCount / c.totalCount) * 100)) : 0;
           const isActive = active?.id === c.id;
           return (
             <button
@@ -81,10 +80,7 @@ export function TaskTabs({ board, activeId, onSelect }: TaskTabsProps) {
             >
               <span className="task-card__dot" aria-hidden="true" />
               <span className="task-tabs__title">{c.title}</span>
-              {c.totalCount > 0 && <span className="task-tabs__meta">{c.doneCount}/{c.totalCount}</span>}
-              <span className="task-tabs__underline" aria-hidden="true">
-                <span className="task-tabs__underline-fill" style={{ width: `${pct}%` }} />
-              </span>
+              {c.now && <span className="task-tabs__now">{c.now}</span>}
             </button>
           );
         })}

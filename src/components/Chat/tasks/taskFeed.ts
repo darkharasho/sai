@@ -2,6 +2,7 @@
 // plus (for agent-backed tasks) the subagent transcript. Display-only.
 
 import type { ChatMessage } from '../../../types';
+import type { TaskCard } from './types';
 import { itemKey } from './declaredCards';
 import { buildTailLines } from './tailLines';
 import { isSaiTaskToolName } from '../../../lib/saiTaskTool';
@@ -74,4 +75,49 @@ export function nowLabel(feed: ChatMessage[]): string | null {
   const line = buildTailLines(visible, 1)[0];
   if (!line) return null;
   return line.tone === 'live' ? `${line.text}…` : line.text;
+}
+
+export interface TaskChipInfo { title: string; colorIndex: number }
+
+const hasText = (v: unknown) => (typeof v === 'string' ? v.trim() !== '' : !!v);
+
+/**
+ * Where All shows a task chip: keyed by message id. A message gets one when
+ * its first tagged item (non-null effective tag) belongs to a current-batch
+ * card and differs from the previous tagged item's tag. Only items All shows
+ * count: message text/reasoning when non-empty, and tool calls other than
+ * sai_task (the renderer hides those). colorIndex = the card's index.
+ */
+export function taskChips(
+  messages: ChatMessage[],
+  cards: TaskCard[],
+  computed: Map<string, string | null>,
+): Map<string, TaskChipInfo> {
+  const out = new Map<string, TaskChipInfo>();
+  if (cards.length === 0) return out;
+  const byTag = new Map<string, TaskChipInfo>();
+  cards.forEach((c, i) => byTag.set(c.tag, { title: c.title, colorIndex: i }));
+  let prev: string | null = null;
+  for (const m of messages ?? []) {
+    if (!m || typeof m.id !== 'string') continue;
+    const itemTags: Array<string | null> = [];
+    if (m.role === 'user' || hasText(m.content) || hasText(m.reasoning)) {
+      itemTags.push(effectiveTag(m.taskId, computed.get(itemKey(m.id))));
+    }
+    (Array.isArray(m.toolCalls) ? m.toolCalls : []).forEach((c, i) => {
+      if (!c || isSaiTaskToolName(String(c.name ?? ''))) return;
+      itemTags.push(effectiveTag(c.taskId, computed.get(itemKey(m.id, c.id, i))));
+    });
+    let first = true;
+    for (const t of itemTags) {
+      if (t === null) continue;
+      if (first) {
+        first = false;
+        const chip = t !== prev ? byTag.get(t) : undefined;
+        if (chip) out.set(m.id, chip);
+      }
+      prev = t;
+    }
+  }
+  return out;
 }

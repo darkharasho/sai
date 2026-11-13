@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  effectiveTag, filterMessagesForTask, mergeFeed, nowLabel,
+  effectiveTag, filterMessagesForTask, mergeFeed, nowLabel, taskChips,
 } from '../../../../../src/components/Chat/tasks/taskFeed';
 import { itemKey } from '../../../../../src/components/Chat/tasks/declaredCards';
 import type { ChatMessage, ToolCall } from '../../../../../src/types';
@@ -104,5 +104,42 @@ describe('nowLabel', () => {
 
   it('is null for an empty feed', () => {
     expect(nowLabel([])).toBeNull();
+  });
+});
+
+describe('taskChips', () => {
+  const card = (id: string, tag: string, title: string): any => ({ id, tag, title });
+  const cards = [card('t1', T1, 'One'), card('t2', T2, 'Two')];
+
+  it('chips the first message of each run; untagged items do not reset the run', () => {
+    const msgs = [
+      asst('a', 1, { content: 'x', taskId: T1 }),
+      asst('b', 2, { content: 'y', taskId: null }),
+      asst('c', 3, { content: 'z', taskId: T1 }),
+      asst('d', 4, { content: 'w', taskId: T2 }),
+    ];
+    const chips = taskChips(msgs, cards, new Map());
+    expect([...chips.entries()]).toEqual([
+      ['a', { title: 'One', colorIndex: 0 }],
+      ['d', { title: 'Two', colorIndex: 1 }],
+    ]);
+  });
+
+  it('ignores sai_task calls and empty text, and uses computed tags for legacy items', () => {
+    const msgs = [
+      asst('a', 1, { toolCalls: [tool('s1', 'mcp__sai__sai_task', { taskId: T2 })] }),
+      asst('b', 2, { content: 'x' }),
+    ];
+    const chips = taskChips(msgs, cards, new Map([[itemKey('a'), T2], [itemKey('b'), T2]]));
+    expect([...chips.keys()]).toEqual(['b']);
+  });
+
+  it('no chip for a tag outside the current batch, but it still counts as the previous tag', () => {
+    const msgs = [
+      asst('a', 1, { content: 'x', taskId: '50:old' }),
+      asst('b', 2, { content: 'y', taskId: T1 }),
+    ];
+    expect([...taskChips(msgs, cards, new Map()).keys()]).toEqual(['b']);
+    expect(taskChips(msgs, [], new Map()).size).toBe(0);
   });
 });

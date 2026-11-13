@@ -1,20 +1,19 @@
 import { useEffect, useLayoutEffect, useRef } from 'react';
 import type { ReactNode } from 'react';
 import type { ChatMessage } from '../../../types';
-import type { TaskCard, TailLine } from './types';
+import type { TaskCard } from './types';
 import type { StreamFallback } from './useTaskBoard';
 import { formatElapsed } from './formatElapsed';
 import './tasks.css';
 
-export interface TaskStreamViewProps {
+export interface TaskFeedViewProps {
   card: TaskCard;
-  /** null = nothing to stream; `fallback` says why. */
-  messages: ChatMessage[] | null;
-  /** Shown in place of the stream when `messages` is null. */
+  /** The card's feed (TaskBoardState.feed); null = nothing to show, `fallback` says why. */
+  feed: ChatMessage[] | null;
+  /** Shown in place of the feed when `feed` is null. */
   fallback?: StreamFallback | null;
-  /** Live tool lines for this card; the last few show under the header. */
-  tail?: TailLine[];
   onBack(): void;
+  /** The same message renderer All uses. */
   renderMessage(m: ChatMessage): ReactNode;
   /** Stop this card's background task (shown while it runs). */
   onStop?(card: TaskCard): void;
@@ -28,7 +27,7 @@ const REASON_TEXT: Record<StreamFallback['reason'], string> = {
   missing: 'This task finished without leaving a transcript on disk.',
 };
 
-/** Status panel shown instead of a stream: better than a dead end when there is no transcript. */
+/** Status panel shown instead of a feed: better than a dead end when there is nothing to show. */
 function StreamFallbackView({ card, fallback }: { card: TaskCard; fallback: StreamFallback }) {
   const d = fallback.detail;
   const started = card.startedAt ?? d?.startedAt ?? null;
@@ -58,14 +57,14 @@ function StreamFallbackView({ card, fallback }: { card: TaskCard; fallback: Stre
   );
 }
 
-export function TaskStreamView({ card, messages, fallback, tail = [], onBack, renderMessage, onStop }: TaskStreamViewProps) {
+/** One task's feed: its filed chat items (plus subagent transcript), rendered like All. */
+export function TaskFeedView({ card, feed, fallback, onBack, renderMessage, onStop }: TaskFeedViewProps) {
   const bodyRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
-  const count = messages?.length ?? 0;
-  const last = messages && messages.length > 0 ? messages[messages.length - 1] : null;
+  const count = feed?.length ?? 0;
+  const last = feed && feed.length > 0 ? feed[feed.length - 1] : null;
   const lastLen = last && typeof last.content === 'string' ? last.content.length : 0;
   const lastCardId = useRef(card.id);
-  const recentTail = tail.slice(-4);
 
   useEffect(() => {
     const el = bodyRef.current;
@@ -87,47 +86,24 @@ export function TaskStreamView({ card, messages, fallback, tail = [], onBack, re
   }, [card.id, count, lastLen]);
 
   return (
-    <div className={`task-stream task-status--${card.status}`} data-testid="task-stream">
+    <div className={`task-stream task-status--${card.status}`} data-testid="task-feed">
       <div className="task-stream__header">
         <button type="button" className="task-stream__back" onClick={onBack}>← All</button>
         <span className="task-card__dot" aria-hidden="true" />
         <span className="task-stream__title">{card.title}</span>
-        {card.totalCount > 0 && (
-          <span className="task-stream__meta">{card.doneCount}/{card.totalCount}</span>
-        )}
         {onStop && card.status === 'running' && !!card.agent?.taskId && (
           <button type="button" className="task-card__link task-card__link--stop" onClick={() => onStop(card)}>Stop</button>
         )}
       </div>
-      {(card.steps.length > 0 || recentTail.length > 0) && (
-        <div className="task-stream__progress">
-          {card.steps.length > 0 && (
-            <div className="task-tabs__pills">
-              {card.steps.map((s, i) => (
-                <span key={i} className={`task-tabs__pill task-tabs__pill--${s.state}`}>{s.label}</span>
-              ))}
-            </div>
-          )}
-          {recentTail.length > 0 && (
-            <div className="task-tabs__tail">
-              {recentTail.map((l, i) => (
-                <div key={i} className={`task-card__tail-line task-card__tail-line--${l.tone}`}>{l.text}</div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
       <div className="task-stream__body" ref={bodyRef}>
-        {messages === null ? (
+        {feed === null ? (
           fallback
             ? <StreamFallbackView card={card} fallback={fallback} />
             : <div className="task-stream__empty">Transcript unavailable</div>
-        ) : messages.length === 0 ? (
-          <div className="task-stream__empty">
-            {card.status === 'running' ? 'Waiting for the first activity…' : 'No activity yet'}
-          </div>
+        ) : feed.length === 0 ? (
+          <div className="task-stream__empty">Nothing filed under this task yet</div>
         ) : (
-          messages.map((m) => <div key={m.id} className="task-stream__message">{renderMessage(m)}</div>)
+          feed.map((m) => <div key={m.id} className="task-stream__message">{renderMessage(m)}</div>)
         )}
       </div>
     </div>

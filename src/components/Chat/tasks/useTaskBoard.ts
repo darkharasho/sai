@@ -60,6 +60,8 @@ export interface TaskBoardState {
   /** One todo per card for the composer ring; undefined = no cards or only the TodoWrite fallback card, keep the composer's own todo derivation. */
   todos: Todo[] | null | undefined;
   pendingQuestion: PendingTaskQuestion | null;
+  /** The fold's computed tag per item (itemKey); pair with effectiveTag() for stored tags. Empty when disabled. */
+  tags: Map<string, string | null>;
   /** A card's feed (the chat filtered to its tag, plus its agent transcript); null = see streamFallback. */
   feed(card: TaskCard): ChatMessage[] | null;
   /** Why feed returned null, for the feed view's empty state. */
@@ -223,5 +225,5 @@ export function useTaskBoard({
     return { reason, detail };
   };
 
-  return { board, todos, pendingQuestion, feed, streamFallback };
+  return { board, todos, pendingQuestion, tags, feed, streamFallback };
 }

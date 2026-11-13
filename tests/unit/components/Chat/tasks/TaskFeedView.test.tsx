@@ -1,12 +1,12 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
-import { TaskStreamView } from '../../../../../src/components/Chat/tasks/TaskStreamView';
+import { TaskFeedView } from '../../../../../src/components/Chat/tasks/TaskFeedView';
+import ChatMessage from '../../../../../src/components/Chat/ChatMessage';
 import type { TaskCard } from '../../../../../src/components/Chat/tasks/types';
 
 const card: TaskCard = {
-  id: 'a', source: 'declared', title: 'Alpha', status: 'running',
-  steps: [], doneCount: 2, totalCount: 5, currentLabel: null,
+  id: 'a', source: 'declared', title: 'Alpha', tag: '0:a', status: 'running', now: null,
   startedAt: 0, endedAt: null, result: null, agent: null, messageIds: [], question: null,
 };
 const msgs: any[] = [
@@ -15,43 +15,40 @@ const msgs: any[] = [
 ];
 afterEach(cleanup);
 
-describe('TaskStreamView', () => {
-  it('renders the card header and each message via renderMessage', () => {
-    render(<TaskStreamView card={card} messages={msgs} onBack={() => {}} renderMessage={(m) => <b>msg:{m.content}</b>} />);
+describe('TaskFeedView', () => {
+  it('renders feed through renderMessage', () => {
+    const { container } = render(<TaskFeedView card={card} feed={msgs} onBack={() => {}} renderMessage={(m) => <b>msg:{m.content}</b>} />);
     expect(screen.getByText('Alpha')).toBeTruthy();
-    expect(screen.getByText('2/5')).toBeTruthy();
     expect(screen.getByText('msg:one')).toBeTruthy();
     expect(screen.getByText('msg:two')).toBeTruthy();
-  });
-  it('shows the card step pills and the last few tail lines', () => {
-    const steps = [
-      { label: 'Plan', state: 'done' as const },
-      { label: 'Build', state: 'current' as const },
-      { label: 'Ship', state: 'pending' as const },
-    ];
-    const tail = Array.from({ length: 6 }, (_, i) => ({ text: `line${i}`, tone: 'normal' as const }));
-    render(<TaskStreamView card={{ ...card, steps }} messages={msgs} tail={tail} onBack={() => {}} renderMessage={() => null} />);
-    expect(screen.getByText('Plan')).toBeTruthy();
-    expect(screen.getByText('Build').className).toContain('pill--current');
-    expect(screen.getByText('Ship').className).toContain('pill--pending');
-    expect(screen.queryByText('line1')).toBeNull();
-    expect(screen.getByText('line2')).toBeTruthy();
-    expect(screen.getByText('line5')).toBeTruthy();
-  });
-  it('omits the progress block when there are no steps and no tail', () => {
-    const { container } = render(<TaskStreamView card={card} messages={msgs} onBack={() => {}} renderMessage={() => null} />);
+    // No pills, no tail, no n/m.
     expect(container.querySelector('.task-stream__progress')).toBeNull();
+    expect(container.textContent).not.toMatch(/\d+\/\d+/);
   });
-  it('shows unavailable state when transcript is null', () => {
-    render(<TaskStreamView card={card} messages={null} onBack={() => {}} renderMessage={() => null} />);
+  it('empty feed message', () => {
+    render(<TaskFeedView card={card} feed={[]} onBack={() => {}} renderMessage={() => null} />);
+    expect(screen.getByText('Nothing filed under this task yet')).toBeTruthy();
+  });
+  it('an empty shell (only a sai_task call) renders nothing visible through the real renderer', () => {
+    const shell: any = {
+      id: 'a2', role: 'assistant', content: '', timestamp: 4,
+      toolCalls: [{ id: 't2', name: 'mcp__sai__sai_task', input: JSON.stringify({ action: 'update', id: 'a', status: 'running' }) }],
+    };
+    render(
+      <TaskFeedView
+        card={card}
+        feed={[shell, msgs[0]]}
+        onBack={() => {}}
+        renderMessage={(m) => <ChatMessage message={m} projectPath="/p" />}
+      />,
+    );
+    const body = screen.getByTestId('task-feed').querySelector('.task-stream__body')!;
+    expect(body.querySelectorAll('[data-testid="chat-msg"]')).toHaveLength(1);
+    expect(body.textContent).toContain('one');
+  });
+  it('shows unavailable state when the feed is null', () => {
+    render(<TaskFeedView card={card} feed={null} onBack={() => {}} renderMessage={() => null} />);
     expect(screen.getByText('Transcript unavailable')).toBeTruthy();
-  });
-  it('shows empty state for no messages', () => {
-    render(<TaskStreamView card={{ ...card, status: 'done' }} messages={[]} onBack={() => {}} renderMessage={() => null} />);
-    expect(screen.getByText('No activity yet')).toBeTruthy();
-    cleanup();
-    render(<TaskStreamView card={card} messages={[]} onBack={() => {}} renderMessage={() => null} />);
-    expect(screen.getByText('Waiting for the first activity…')).toBeTruthy();
   });
   it('renders a status panel instead of the dead end when a fallback is given', () => {
     const detail: any = {
@@ -60,9 +57,9 @@ describe('TaskStreamView', () => {
       totalTokens: null, toolUses: 3, lastToolName: 'Bash', summary: null, error: null, toolUseId: null,
     };
     render(
-      <TaskStreamView
+      <TaskFeedView
         card={{ ...card, agent: { description: 'npm test', toolUseId: null, taskId: 'bg1' } }}
-        messages={null}
+        feed={null}
         fallback={{ reason: 'shell', detail }}
         onBack={() => {}}
         renderMessage={() => null}
@@ -82,9 +79,9 @@ describe('TaskStreamView', () => {
       totalTokens: 1234, toolUses: null, lastToolName: null, summary: null, error: 'agent crashed', toolUseId: 'tu',
     };
     render(
-      <TaskStreamView
+      <TaskFeedView
         card={{ ...card, status: 'failed', agent: { description: 'd', toolUseId: 'tu', taskId: 'bg2' } }}
-        messages={null}
+        feed={null}
         fallback={{ reason: 'missing', detail }}
         onBack={() => {}}
         renderMessage={() => null}
@@ -96,19 +93,19 @@ describe('TaskStreamView', () => {
   });
   it('back button calls onBack', () => {
     const onBack = vi.fn();
-    render(<TaskStreamView card={card} messages={[]} onBack={onBack} renderMessage={() => null} />);
+    render(<TaskFeedView card={card} feed={[]} onBack={onBack} renderMessage={() => null} />);
     fireEvent.click(screen.getByText('← All'));
     expect(onBack).toHaveBeenCalled();
   });
   it('header Stop shows for a running agent card and calls onStop', () => {
     const agentCard: TaskCard = { ...card, agent: { description: 'd', toolUseId: 'tu', taskId: 'bg1' } };
     const onStop = vi.fn();
-    const { rerender } = render(<TaskStreamView card={agentCard} messages={msgs} onBack={() => {}} renderMessage={() => null} onStop={onStop} />);
+    const { rerender } = render(<TaskFeedView card={agentCard} feed={msgs} onBack={() => {}} renderMessage={() => null} onStop={onStop} />);
     fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
     expect(onStop).toHaveBeenCalledWith(agentCard);
-    rerender(<TaskStreamView card={{ ...agentCard, status: 'done' }} messages={msgs} onBack={() => {}} renderMessage={() => null} onStop={onStop} />);
+    rerender(<TaskFeedView card={{ ...agentCard, status: 'done' }} feed={msgs} onBack={() => {}} renderMessage={() => null} onStop={onStop} />);
     expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull();
-    rerender(<TaskStreamView card={card} messages={msgs} onBack={() => {}} renderMessage={() => null} onStop={onStop} />);
+    rerender(<TaskFeedView card={card} feed={msgs} onBack={() => {}} renderMessage={() => null} onStop={onStop} />);
     expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull();
   });
 });

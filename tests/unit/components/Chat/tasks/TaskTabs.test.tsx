@@ -5,8 +5,7 @@ import { TaskTabs } from '../../../../../src/components/Chat/tasks/TaskTabs';
 import type { TaskBoard, TaskCard } from '../../../../../src/components/Chat/tasks/types';
 
 const card = (o: Partial<TaskCard>): TaskCard => ({
-  id: 'a', source: 'declared', title: 'Alpha', status: 'running',
-  steps: [], doneCount: 0, totalCount: 0, currentLabel: null,
+  id: 'a', source: 'declared', title: 'Alpha', tag: '0:a', status: 'running', now: null,
   startedAt: 0, endedAt: null, result: null, agent: null, messageIds: [], question: null, ...o,
 });
 const board = (cards: TaskCard[]): TaskBoard => ({ cards, batchStartedAt: 0, allDone: false });
@@ -17,13 +16,13 @@ const doneBoard = (over: Partial<TaskBoard> = {}): TaskBoard => ({
   ],
   batchStartedAt: 0, allDone: true, ...over,
 });
-const two = board([card({ id: 'a', title: 'Alpha', doneCount: 1, totalCount: 3 }), card({ id: 'b', title: 'Beta' })]);
+const two = board([card({ id: 'a', title: 'Alpha' }), card({ id: 'b', title: 'Beta' })]);
 afterEach(cleanup);
 
 describe('TaskTabs', () => {
   it('All plus one tab per card', () => {
     render(<TaskTabs board={two} activeId={null} onSelect={() => {}} />);
-    expect(screen.getAllByRole('tab').map((t) => t.textContent)).toEqual(['All', 'Alpha1/3', 'Beta']);
+    expect(screen.getAllByRole('tab').map((t) => t.textContent)).toEqual(['All', 'Alpha', 'Beta']);
     expect(screen.getByRole('tab', { name: 'All' }).getAttribute('aria-selected')).toBe('true');
   });
   it('renders nothing for an empty board', () => {
@@ -38,18 +37,20 @@ describe('TaskTabs', () => {
     fireEvent.click(screen.getByRole('tab', { name: 'All' }));
     expect(onSelect).toHaveBeenLastCalledWith(null);
   });
-  // The tabs are a bare row — steps, tail and Stop belong to the stream view
-  // so the tabs fit inside the host's Chat bar (see TaskStreamView tests).
-  it('renders no step pills, tail or Stop of its own', () => {
-    const b = board([card({
-      id: 'a',
-      agent: { description: 'd', toolUseId: 'tu', taskId: 'bg1' },
-      steps: [{ label: 'Plan', state: 'done' }, { label: 'Build', state: 'current' }],
-    })]);
-    const { container } = render(<TaskTabs board={b} activeId="a" onSelect={() => {}} />);
-    expect(screen.queryByText('Plan')).toBeNull();
+  it('shows the now label and no progress', () => {
+    const b = board([card({ id: 'a', now: '$ npx vitest run…' })]);
+    const { container } = render(<TaskTabs board={b} activeId={null} onSelect={() => {}} />);
+    const now = screen.getByText('$ npx vitest run…');
+    expect(now.className).toBe('task-tabs__now');
+    expect(container.textContent).not.toMatch(/\d+\/\d+/);
+    expect(container.querySelector('.task-tabs__underline')).toBeNull();
+  });
+  // The tabs are a bare row: Stop belongs to the feed view so the tabs fit
+  // inside the host's Chat bar (see TaskFeedView tests).
+  it('renders no Stop of its own', () => {
+    const b = board([card({ id: 'a', agent: { description: 'd', toolUseId: 'tu', taskId: 'bg1' } })]);
+    render(<TaskTabs board={b} activeId="a" onSelect={() => {}} />);
     expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull();
-    expect(container.querySelector('.task-tabs__tail')).toBeNull();
   });
 
   it('a finished batch collapses to a summary line, and expands again on click', () => {
