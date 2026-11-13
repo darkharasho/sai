@@ -1590,6 +1590,11 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
             border-top: 1px dashed var(--border-hairline);
             margin: 3px 12px;
           }
+          /* Frame this card used to inherit from the (removed) task rail's .task-card rule. */
+          .tool-call-body.task-card {
+            border: 1px solid var(--border-subtle); border-radius: 8px;
+            background: var(--surface-2); overflow: hidden;
+          }
           .task-card { padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
           .task-card-head { display: flex; align-items: baseline; gap: 8px; }
           .task-card-title { font-size: 12.5px; color: var(--text); font-weight: 600; flex: 1; word-break: break-word; }

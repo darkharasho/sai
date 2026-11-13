@@ -389,7 +389,7 @@ export default function App() {
   const sessionLoadSeqRef = useRef(0);
   const [focusedChat, setFocusedChat] = useState(false);
   const [overlayEnabled, setOverlayEnabled] = useState(false);
-  // Task rail/tabs (Claude SDK chats only). claudeBackendSetting is a load-time
+  // Task tabs (Claude SDK chats only). claudeBackendSetting is a load-time
   // snapshot: the backend only switches after a restart, so a live settings
   // change must not flip the task UI. It starts as 'cli' so a CLI user never
   // sees a flash of task UI before settings load.
@@ -1008,7 +1008,7 @@ export default function App() {
   }, [workspaces]);
 
   const activeWorkspace = activeProjectPath ? getWorkspace(activeProjectPath) : null;
-  // Task rail/tabs gate: Claude chats on the SDK backend.
+  // Task tabs gate: Claude chats on the SDK backend.
   const taskUiEnabled = aiProvider === 'claude' && claudeBackendSetting !== 'cli';
   // Background-work sidebar follows the active Claude chat (same key as the
   // waiting= lookup on the ChatPanel mount).

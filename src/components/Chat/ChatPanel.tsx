@@ -221,7 +221,7 @@ interface ChatPanelProps {
   liveBackgroundTaskCount?: number;
   onToggleBackgroundTasks?: () => void;
   backgroundTasksOpen?: boolean;
-  /** Task rail/tabs: App sets this for Claude SDK chats only. */
+  /** Task tabs: App sets this for Claude SDK chats only. */
   taskUiEnabled?: boolean;
   /** This chat's background task snapshots (App's sidebar tasks for the scope). */
   backgroundTasks?: BackgroundTaskDetail[];
@@ -733,7 +733,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
   const localMentionInsertRef = useRef<((linkName: string) => void) | null>(null);
   const mentionInsertRef = mentionInsertRefProp ?? localMentionInsertRef;
 
-  // Task rail/tabs (display-only). The hook is a no-op when disabled.
+  // Task tabs (display-only). The hook is a no-op when disabled.
   const [openTaskId, setOpenTaskId] = useState<string | null>(null);
   const bottomStripRef = useRef<HTMLDivElement>(null);
   const taskBoard = useTaskBoard({
