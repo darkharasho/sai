@@ -110,7 +110,6 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
   const [claudeBackend, setClaudeBackend] = useState<'cli' | 'sdk'>('sdk');
   const [claudeShowReasoning, setClaudeShowReasoning] = useState(false);
   const [claudeAgentProgressSummaries, setClaudeAgentProgressSummaries] = useState(true);
-  const [taskView, setTaskView] = useState<'rail' | 'tabs'>('rail');
   const [claudeMaxBudgetUsd, setClaudeMaxBudgetUsd] = useState(0);
   const [claude1MContext, setClaude1MContext] = useState(false);
   const [lowTokenMode, setLowTokenMode] = useState(false);
@@ -295,7 +294,6 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
     });
     window.sai.settingsGet('claudeShowReasoning', false).then((v: boolean) => setClaudeShowReasoning(!!v));
     window.sai.settingsGet('claudeAgentProgressSummaries', true).then((v: boolean) => setClaudeAgentProgressSummaries(v !== false));
-    window.sai.settingsGet('taskView', 'rail').then((v: string) => setTaskView(v === 'tabs' ? 'tabs' : 'rail'));
     window.sai.settingsGet('claudeMaxBudgetUsd', 0).then((v: number) => setClaudeMaxBudgetUsd(Number(v) || 0));
     window.sai.settingsGet('claude1MContext', false).then((v: boolean) => setClaude1MContext(!!v));
     window.sai.settingsGet('lowTokenMode', false).then((v: boolean) => setLowTokenMode(!!v));
@@ -528,12 +526,6 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
     setClaudeAgentProgressSummaries(value);
     window.sai.settingsSet('claudeAgentProgressSummaries', value);
     onSettingChange?.('claudeAgentProgressSummaries', value);
-  };
-
-  const handleTaskViewChange = (value: 'rail' | 'tabs') => {
-    setTaskView(value);
-    window.sai.settingsSet('taskView', value);
-    onSettingChange?.('taskView', value);
   };
 
   const handleLowTokenModeChange = async (enabled: boolean) => {
@@ -1381,22 +1373,6 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
         >
           <span className="settings-toggle-thumb" />
         </button>
-      </div>
-      <div className="settings-row">
-        <div className="settings-row-info">
-          <div className="settings-row-name">Task view</div>
-          <div className="settings-row-desc">How task cards show when you ask for several things at once: a <b>Rail</b> beside the chat or <b>Tabs</b> above it. SDK backend only.</div>
-        </div>
-        <select
-          className="settings-select"
-          value={taskView}
-          onChange={e => handleTaskViewChange(e.target.value === 'tabs' ? 'tabs' : 'rail')}
-          disabled={claudeBackend !== 'sdk'}
-          aria-label="Task view"
-        >
-          <option value="rail">Rail</option>
-          <option value="tabs">Tabs</option>
-        </select>
       </div>
       <div className="settings-row">
         <div className="settings-row-info">

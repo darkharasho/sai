@@ -49,3 +49,16 @@ describe('SettingsModal low token mode snapshot', () => {
     expect(mock.settingsSet).not.toHaveBeenCalledWith(expect.stringMatching(/^swarm\./), expect.anything());
   });
 });
+
+describe('SettingsModal task view setting', () => {
+  it('has no task view setting', async () => {
+    const mock = createMockSai();
+    mock.settingsGet = vi.fn((_key: string, d?: unknown) => Promise.resolve(d ?? undefined));
+    installMockSai(mock);
+    render(<SettingsModal onClose={vi.fn()} onSettingChange={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: /^Claude$/ }));
+    await waitFor(() => expect(screen.getByText('Low token mode')).toBeInTheDocument());
+    expect(screen.queryByText(/Rail/)).toBeNull();
+    expect(screen.queryByText('Task view')).toBeNull();
+  });
+});

@@ -393,14 +393,6 @@ export default function App() {
   // snapshot: the backend only switches after a restart, so a live settings
   // change must not flip the task UI. It starts as 'cli' so a CLI user never
   // sees a flash of task UI before settings load.
-  const [taskView, setTaskView] = useState<'rail' | 'tabs'>('rail');
-  // Rail dismissed by the user. Persisted, so "I don't care about this" sticks
-  // across restarts and new task batches; the Chat bar keeps a way back in.
-  const [taskRailHidden, setTaskRailHidden] = useState(false);
-  const handleTaskRailHiddenChange = useCallback((hidden: boolean) => {
-    setTaskRailHidden(hidden);
-    try { window.sai.settingsSet('taskRailHidden', hidden); } catch { /* noop */ }
-  }, []);
   const [claudeBackendSetting, setClaudeBackendSetting] = useState<'cli' | 'sdk'>('cli');
   // Session-scoped overlay mode from the inline control under the chat input.
   const [overlayMode, setOverlayMode] = useState<'on' | 'off' | 'persist'>('on');
@@ -1266,8 +1258,6 @@ export default function App() {
     const guard = <T,>(fn: (v: T) => void) => (v: T) => { if (!cancelled) fn(v); };
     window.sai.settingsGet('focusedChat', false).then(guard((v: boolean) => setFocusedChat(v)));
     window.sai.settingsGet('overlayEnabled', false).then(guard((v: boolean) => setOverlayEnabled(!!v)));
-    window.sai.settingsGet('taskView', 'rail').then(guard((v: string) => setTaskView(v === 'tabs' ? 'tabs' : 'rail')));
-    window.sai.settingsGet('taskRailHidden', false).then(guard((v: boolean) => setTaskRailHidden(!!v)));
     window.sai.settingsGet('claudeBackend', 'sdk').then(guard((v: string) => setClaudeBackendSetting(v === 'cli' ? 'cli' : 'sdk')));
     window.sai.settingsGet('overlayMode', 'on').then(guard((v: string) => {
       if (v === 'on' || v === 'off' || v === 'persist') setOverlayMode(v);
@@ -3379,9 +3369,6 @@ export default function App() {
                   onQueuePromote={handleQueuePromote}
                   sessionId={ws.activeSession.id}
                   taskUiEnabled={taskUiEnabled}
-                  taskView={taskView}
-                  taskRailHidden={taskRailHidden}
-                  onTaskRailHiddenChange={handleTaskRailHiddenChange}
                   backgroundTasks={aiProvider === 'claude' ? selectSidebarTasks(backgroundTasksByScope, `${wsPath}:${ws.activeSession.id}`) : undefined}
                   onStopBackgroundTask={(taskId: string) => window.sai.claudeStopTask?.(wsPath, ws.activeSession.id, taskId) ?? Promise.resolve(false)}
                   claudeSessionId={ws.activeSession.claudeSessionId}
@@ -3958,8 +3945,6 @@ export default function App() {
           if (key === 'codexEffort' && (value === undefined || isCodexEffort(value))) handleCodexEffortChange(value);
           if (key === 'focusedChat') { setFocusedChat(value); if (value) { setExpanded(['chat', 'terminal']); setSplitRatio(0.66); } }
           if (key === 'overlayEnabled') setOverlayEnabled(!!value);
-          if (key === 'taskView') setTaskView(value === 'tabs' ? 'tabs' : 'rail');
-          if (key === 'taskRailHidden') setTaskRailHidden(!!value);
           if (key === 'defaultView') { /* persisted only, applies on next launch */ }
           if (key === 'sidebarWidth') document.documentElement.style.setProperty('--sidebar-width', `${value}px`);
         }}

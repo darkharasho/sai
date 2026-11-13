@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import type { ChatMessage } from '../../../types';
 import type { TaskCard, TailLine } from './types';
 import type { StreamFallback } from './useTaskBoard';
-import { formatElapsed } from './TaskCardView';
+import { formatElapsed } from './formatElapsed';
 import './tasks.css';
 
 export interface TaskStreamViewProps {

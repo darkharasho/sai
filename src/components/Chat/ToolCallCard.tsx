@@ -640,7 +640,7 @@ function parseTaskFields(input: string): TaskFields {
   } catch { return {}; }
 }
 
-function TaskCardView({ kind, fields, resolved }: { kind: 'create' | 'update'; fields: TaskFields; resolved?: TaskInfo }) {
+function SaiTaskToolCard({ kind, fields, resolved }: { kind: 'create' | 'update'; fields: TaskFields; resolved?: TaskInfo }) {
   const title = fields.subject || resolved?.subject || `Task #${fields.taskId ?? '?'}`;
   const description = fields.description || (kind === 'update' ? resolved?.description : undefined);
   const activeForm = fields.activeForm || (kind === 'update' ? resolved?.activeForm : undefined);
@@ -1214,7 +1214,7 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
             )}
             {isTodo && <TodoListView input={toolCall.input || ''} />}
             {isTask && taskFields && (
-              <TaskCardView kind={isTaskCreate ? 'create' : 'update'} fields={taskFields} resolved={taskResolved} />
+              <SaiTaskToolCard kind={isTaskCreate ? 'create' : 'update'} fields={taskFields} resolved={taskResolved} />
             )}
             {isAskUserQuestion && (
               <AskUserQuestionView

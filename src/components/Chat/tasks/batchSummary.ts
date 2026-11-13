@@ -1,5 +1,5 @@
 import type { TaskBoard } from './types';
-import { formatElapsed } from './TaskCardView';
+import { formatElapsed } from './formatElapsed';
 
 /**
  * One-line recap of a finished batch, e.g. `3 tasks done · 1m 20s` or

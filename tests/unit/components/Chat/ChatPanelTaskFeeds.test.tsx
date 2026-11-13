@@ -52,7 +52,7 @@ const askCall = (questions: unknown[]) => ({
 });
 const pickQuestion = { question: 'Which DB?', header: 'DB', multiSelect: false, options: [{ label: 'Postgres', description: '' }, { label: 'SQLite', description: '' }] };
 
-describe('ChatPanel task rail integration', () => {
+describe('ChatPanel task feeds integration', () => {
   let mockSai: ReturnType<typeof installMockSai>;
 
   const baseProps = (): Props => ({
@@ -68,7 +68,7 @@ describe('ChatPanel task rail integration', () => {
     isStreaming: true,
     messageQueue: [], onQueueAdd: vi.fn(), onQueueRemove: vi.fn(), onQueueShift: vi.fn(),
     sessionId: 'session-1', terminalTabs: [], onSlashCommandsUpdate: vi.fn(),
-    taskUiEnabled: true, taskView: 'rail', backgroundTasks: [], onStopBackgroundTask: vi.fn().mockResolvedValue(true),
+    taskUiEnabled: true, backgroundTasks: [], onStopBackgroundTask: vi.fn().mockResolvedValue(true),
   });
 
   beforeEach(() => {
@@ -94,50 +94,8 @@ describe('ChatPanel task rail integration', () => {
   const streamTexts = () => within(screen.getByTestId('task-stream')).queryAllByTestId('msg').map((el) => el.textContent);
   const messageList = () => document.querySelector('.chat-messages') as HTMLElement;
 
-  it('renders rail with cards when taskUiEnabled and taskView rail', async () => {
+  it('renders tabs whenever tasks exist', async () => {
     await mount(baseProps());
-    const rail = screen.getByRole('complementary', { name: 'Tasks' });
-    expect(rail.textContent).toContain('Alpha task');
-    expect(rail.textContent).toContain('Beta task');
-    expect(document.querySelector('.task-tabs')).toBeNull();
-    // Messages and composer stay mounted next to the rail.
-    expect(msgTexts()).toContain('Intro before tasks');
-    expect(screen.getByTestId('chat-input')).toBeTruthy();
-    // The running card's steps drive the composer's todo ring.
-    expect(inputProps.todos).toEqual([
-      expect.objectContaining({ content: 'Read', status: 'in_progress' }),
-      expect.objectContaining({ content: 'Write', status: 'pending' }),
-    ]);
-  });
-
-  it('hides the rail on request and offers a chip to bring it back', async () => {
-    const onTaskRailHiddenChange = vi.fn();
-    const props = { ...baseProps(), onTaskRailHiddenChange };
-    const { rerender } = await mount(props);
-    fireEvent.click(screen.getByRole('button', { name: 'Hide tasks' }));
-    expect(onTaskRailHiddenChange).toHaveBeenCalledWith(true);
-
-    // Hidden: no rail, no reserved column, but the count chip remains.
-    rerender(<ChatPanel {...props} taskRailHidden />);
-    expect(screen.queryByRole('complementary', { name: 'Tasks' })).toBeNull();
-    expect(document.querySelector('.chat-panel--task-rail')).toBeNull();
-    const chip = screen.getByRole('button', { name: /task/ });
-    expect(chip.textContent).toContain('2 tasks');
-    // Alpha is running, so the chip carries that status through.
-    expect(chip.closest('.task-tabs')?.className).toContain('task-status--running');
-    fireEvent.click(chip);
-    expect(onTaskRailHiddenChange).toHaveBeenLastCalledWith(false);
-  });
-
-  it('leaves the rail alone when hidden but the view is tabs', async () => {
-    await mount({ ...baseProps(), taskView: 'tabs', taskRailHidden: true, onTaskRailHiddenChange: vi.fn() });
-    expect(screen.getAllByRole('tab').length).toBeGreaterThan(1);
-    expect(screen.queryByRole('button', { name: /^\d+ tasks?$/ })).toBeNull();
-  });
-
-  it('renders tabs instead when taskView tabs', async () => {
-    await mount({ ...baseProps(), taskView: 'tabs' });
-    expect(screen.queryByRole('complementary', { name: 'Tasks' })).toBeNull();
     const tabs = screen.getAllByRole('tab').map((t) => t.textContent);
     expect(tabs[0]).toBe('All');
     expect(tabs.some((t) => t?.includes('Alpha task'))).toBe(true);
@@ -153,42 +111,16 @@ describe('ChatPanel task rail integration', () => {
     expect(msgTexts()).toContain('Intro before tasks');
   });
 
-  it('renders no rail or tabs when taskUiEnabled is false even with sai_task history', async () => {
+  it('renders no tabs when taskUiEnabled is false even with sai_task history', async () => {
     await mount({ ...baseProps(), taskUiEnabled: false, claudeSessionId: 'claude-sess', backgroundTasks: [gammaTask] });
     await act(async () => { await Promise.resolve(); });
     expect((window.sai as any).claudeSubagentTranscript).not.toHaveBeenCalled();
-    expect(screen.queryByRole('complementary', { name: 'Tasks' })).toBeNull();
     expect(document.querySelector('.task-tabs')).toBeNull();
-    expect(document.querySelector('.task-rail')).toBeNull();
     expect(inputProps.todos).toBeUndefined();
     expect(msgTexts()).toContain('Intro before tasks');
   });
 
-  it("Open stream swaps the message list for the task's attributed messages and back restores it", async () => {
-    await mount(baseProps());
-    const all = msgTexts();
-    expect(all).toContain('Intro before tasks');
-    expect(all).toContain('Alpha work in progress');
-
-    fireEvent.click(screen.getByTestId('task-card-alpha').querySelector('.task-card__main')!);
-    fireEvent.click(screen.getByText('Open stream →'));
-
-    expect(streamTexts()).toEqual(['Alpha work in progress']);
-    expect(messageList()).not.toBeVisible();
-    // The rail stays visible beside the stream.
-    expect(screen.getByRole('complementary', { name: 'Tasks' })).toBeTruthy();
-
-    const pinnedBar = () => document.querySelector('.pinned-prompt-bar') as HTMLElement;
-    expect(pinnedBar().style.display).toBe('none');
-
-    fireEvent.click(screen.getByText('← All'));
-    expect(screen.queryByTestId('task-stream')).toBeNull();
-    expect(messageList()).toBeVisible();
-    expect(pinnedBar().style.display).not.toBe('none');
-    expect(msgTexts()).toEqual(all);
-  });
-
-  it('no rail when the chat has no task data', async () => {
+  it('no tabs when the chat has no task data', async () => {
     await mount({
       ...baseProps(),
       initialMessages: [
@@ -196,42 +128,8 @@ describe('ChatPanel task rail integration', () => {
         { id: 'a1', role: 'assistant', content: 'hi there', timestamp: 2 },
       ] as any,
     });
-    expect(document.querySelector('.task-rail')).toBeNull();
     expect(document.querySelector('.task-tabs')).toBeNull();
     expect(inputProps.todos).toBeUndefined();
     expect(msgTexts()).toEqual(['hello', 'hi there']);
-  });
-
-  it('Stop on an agent card calls onStopBackgroundTask with the task id', async () => {
-    const onStop = vi.fn().mockResolvedValue(true);
-    await mount({
-      ...baseProps(),
-      onStopBackgroundTask: onStop,
-      backgroundTasks: [gammaTask],
-    });
-    await act(async () => {
-      fireEvent.click(screen.getByTestId('task-card-bg:bg1').querySelector('.task-card__main')!);
-    });
-    fireEvent.click(screen.getByText('Stop'));
-    expect(onStop).toHaveBeenCalledWith('bg1');
-  });
-  it('Answer on a waiting card calls claudeAnswerQuestion with the question and option', async () => {
-    (window.sai as any).claudeAnswerQuestion = vi.fn().mockResolvedValue(undefined);
-    await mount({ ...baseProps(), awaitingQuestion: true, initialMessages: [...taskHistory(), askCall([pickQuestion])] as any });
-    const alpha = screen.getByTestId('task-card-alpha');
-    expect(alpha.textContent).toContain('Which DB?');
-    fireEvent.click(within(alpha).getByRole('button', { name: 'SQLite' }));
-    expect((window.sai as any).claudeAnswerQuestion).toHaveBeenCalledWith('/project', 'toolu_ask', { 'Which DB?': 'SQLite' }, 'chat');
-  });
-
-  it('a multi-question AskUserQuestion shows Reply only, no quick answers', async () => {
-    await mount({
-      ...baseProps(), awaitingQuestion: true,
-      initialMessages: [...taskHistory(), askCall([pickQuestion, { ...pickQuestion, question: 'Which ORM?' }])] as any,
-    });
-    const alpha = screen.getByTestId('task-card-alpha');
-    expect(within(alpha).getByRole('button', { name: 'Reply…' })).toBeTruthy();
-    expect(within(alpha).queryByRole('button', { name: 'SQLite' })).toBeNull();
-    expect(alpha.textContent).not.toContain('Which DB?');
   });
 });
