@@ -2285,7 +2285,8 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
   // `opts.taskCard` is passed only by the composer's own send; every other
   // caller (retry, queue, suggestions) sends untagged and unprefixed.
   const handleSend = async (text: string, images?: string[], opts?: { taskCard?: TaskCard | null }) => {
-    const directCard = taskUiEnabled ? opts?.taskCard ?? null : null;
+    // Slash commands must reach the command handler as typed, so they are never redirected.
+    const directCard = taskUiEnabled && !text.trim().startsWith('/') ? opts?.taskCard ?? null : null;
     // Handle built-in commands locally
     if (import.meta.env.DEV && text.startsWith('/fake-error')) {
       handleFakeError(text);

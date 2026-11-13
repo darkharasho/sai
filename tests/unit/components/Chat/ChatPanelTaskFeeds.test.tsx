@@ -280,6 +280,24 @@ describe('ChatPanel task feeds integration', () => {
       expect(sentPrompt()).toBe('queued');
     });
 
+    it('slash commands typed on a task tab are not tagged or prefixed', async () => {
+      const props = baseProps();
+      await mount(props);
+      fireEvent.click(tabFor('Alpha task'));
+      (window.sai as any).claudeCompact = vi.fn();
+      await act(async () => { await inputProps.onSend('/compact'); });
+      expect((window.sai as any).claudeCompact).toHaveBeenCalled();
+      expect(window.sai.claudeSend).not.toHaveBeenCalled();
+      await act(async () => { await inputProps.onSend('/review'); });
+      const msgs = await waitFor(() => {
+        const m = latestMessages(props);
+        expect(m.some((x) => x.content === '/review')).toBe(true);
+        return m;
+      });
+      expect(msgs.find((x) => x.content === '/review').taskId).toBeNull();
+      expect(sentPrompt()).toBe('/review');
+    });
+
     it('typing in All is unchanged', async () => {
       const props = baseProps();
       await mount(props);
