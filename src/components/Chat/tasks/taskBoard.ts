@@ -5,28 +5,26 @@
 
 import type { ChatMessage } from '../../../types';
 import type { BackgroundTaskDetail } from '../../../../electron/services/claudeBackend/backgroundTasks';
-import type { CardStatus, TaskBoard, TaskCard, TaskStep } from './types';
-import { deriveDeclaredCards } from './declaredCards';
+import type { CardStatus, TaskBoard, TaskCard } from './types';
+import { deriveDeclaredCards, itemKey, type DeclaredCards } from './declaredCards';
+import { effectiveTag } from './taskFeed';
 import { findLatestTodos } from '../TodoProgress';
 
 export interface BoardRuntime {
   backgroundTasks: BackgroundTaskDetail[];
   isStreaming: boolean;
-  pendingQuestion: { text: string; options: string[] } | null;
+  /** The pending AskUserQuestion: its call's tag picks the waiting card. */
+  pendingQuestion: { toolUseId: string; text: string; options: string[] } | null;
+  /** tool_use id of the call awaiting approval: its tag picks the waiting card. */
+  pendingApprovalToolUseId: string | null;
   /** Keyed by the Agent call's tool_use id. */
-  agentInfo: Map<string, { finished: boolean; steps: TaskStep[] }>;
+  agentInfo: Map<string, { finished: boolean }>;
 }
 
 const EMPTY_BOARD: TaskBoard = { cards: [], batchStartedAt: null, allDone: false };
 
 const text = (v: unknown): string => (typeof v === 'string' ? v : '');
 const isFinished = (s: CardStatus) => s === 'done' || s === 'failed';
-
-function recount(c: TaskCard): void {
-  c.totalCount = c.steps.length;
-  c.doneCount = c.steps.filter((s) => s.state === 'done').length;
-  c.currentLabel = c.steps.find((s) => s.state === 'current')?.label ?? null;
-}
 
 /** Map a background task's status to a card status (rule 2). */
 function runtimeStatus(t: BackgroundTaskDetail): CardStatus {
@@ -45,10 +43,16 @@ function runtimeResult(t: BackgroundTaskDetail, fallback: string | null): string
   return null;
 }
 
-function agentSteps(rt: BoardRuntime, toolUseId: string | null): TaskStep[] {
-  if (!toolUseId) return [];
-  const steps = rt.agentInfo?.get?.(toolUseId)?.steps;
-  return Array.isArray(steps) ? steps.filter((s) => s && typeof s.label === 'string').map((s) => ({ ...s })) : [];
+/** Effective tag of the tool call with this tool_use id, or null when absent/untagged. */
+function callTag(messages: ChatMessage[], tags: Map<string, string | null>, toolUseId: string | null): string | null {
+  if (!toolUseId) return null;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (!m || typeof m.id !== 'string' || !Array.isArray(m.toolCalls)) continue;
+    const idx = m.toolCalls.findIndex((c) => c?.id === toolUseId);
+    if (idx >= 0) return effectiveTag(m.toolCalls[idx].taskId, tags.get(itemKey(m.id, toolUseId, idx)));
+  }
+  return null;
 }
 
 interface AgentCall { id: string; description: string; timestamp: number }
@@ -90,35 +94,32 @@ function fallbackCard(messages: ChatMessage[], isStreaming: boolean): TaskCard |
   if (!isStreaming && !todosInLatestTurn(messages)) return null;
   let todos: ReturnType<typeof findLatestTodos> = null;
   try { todos = findLatestTodos(messages); } catch { return null; }
-  if (!Array.isArray(todos) || todos.length === 0) return null;
-  const steps: TaskStep[] = todos.filter(Boolean).map((t) => ({
-    label: text(t.content) || text(t.activeForm),
-    state: t.status === 'completed' ? 'done' : t.status === 'in_progress' ? 'current' : 'pending',
-  }));
-  if (steps.length === 0) return null;
-  const allComplete = steps.every((s) => s.state === 'done');
+  const list = Array.isArray(todos) ? todos.filter(Boolean) : [];
+  if (list.length === 0) return null;
+  const allComplete = list.every((t) => t.status === 'completed');
   if (allComplete && !isStreaming) return null;
-  const card: TaskCard = {
-    id: 'current-work', source: 'fallback', title: 'Current work',
-    status: allComplete ? 'done' : isStreaming ? 'running' : 'paused',
-    steps, doneCount: 0, totalCount: 0, currentLabel: null, startedAt: null, endedAt: null,
-    result: null, agent: null, messageIds: [], question: null,
+  return {
+    id: 'current-work', source: 'fallback', title: 'Current work', tag: 'current-work',
+    status: allComplete ? 'done' : isStreaming ? 'running' : 'paused', now: null,
+    startedAt: null, endedAt: null, result: null, agent: null, messageIds: [], question: null,
   };
-  recount(card);
-  return card;
 }
 
-export function deriveTaskBoard(messages: ChatMessage[], rt: BoardRuntime): TaskBoard {
+/**
+ * `folded` lets a caller that already folded `messages` (useTaskBoard, which
+ * also needs the fold's tags) skip a second fold; it is never mutated.
+ */
+export function deriveTaskBoard(messages: ChatMessage[], rt: BoardRuntime, folded?: DeclaredCards): TaskBoard {
   try {
     const msgs = Array.isArray(messages) ? messages : [];
     const isStreaming = rt?.isStreaming === true;
     const pendingQuestion = rt?.pendingQuestion ?? null;
+    const agentInfo: BoardRuntime['agentInfo'] = rt?.agentInfo ?? new Map();
     const tasks = (Array.isArray(rt?.backgroundTasks) ? rt.backgroundTasks : []).filter(
       (t): t is BackgroundTaskDetail => !!t && typeof t.id === 'string',
     );
-    const runtime: BoardRuntime = { backgroundTasks: tasks, isStreaming, pendingQuestion, agentInfo: rt?.agentInfo ?? new Map() };
 
-    const declared = deriveDeclaredCards(msgs);
+    const declared = folded ?? deriveDeclaredCards(msgs);
     const calls = agentCalls(msgs);
     // description → tool_use id of the latest Agent/Task call carrying it.
     const callIds = new Map<string, string>();
@@ -169,7 +170,7 @@ export function deriveTaskBoard(messages: ChatMessage[], rt: BoardRuntime): Task
     }
 
     const cards: TaskCard[] = declared.cards.map((orig) => {
-      const card: TaskCard = { ...orig, steps: orig.steps.map((s) => ({ ...s })), messageIds: [...orig.messageIds] };
+      const card: TaskCard = { ...orig, messageIds: [...orig.messageIds] };
 
       let detail: BackgroundTaskDetail | undefined;
       if (card.agent) {
@@ -182,7 +183,7 @@ export function deriveTaskBoard(messages: ChatMessage[], rt: BoardRuntime): Task
       if (backed) {
         // Rule 2: runtime overrides the model's claim.
         const toolUseId = card.agent!.toolUseId;
-        const info = toolUseId ? runtime.agentInfo.get?.(toolUseId) : undefined;
+        const info = toolUseId ? agentInfo.get?.(toolUseId) : undefined;
         if (detail) {
           card.status = runtimeStatus(detail);
           if (isFinished(card.status)) {
@@ -195,32 +196,27 @@ export function deriveTaskBoard(messages: ChatMessage[], rt: BoardRuntime): Task
         } else if (info?.finished !== true && card.status === 'running' && !isStreaming) {
           card.status = 'paused';
         }
-        if (card.steps.length === 0) card.steps = agentSteps(runtime, toolUseId);
-        if (card.status === 'done') card.steps.forEach((s) => { s.state = 'done'; });
       } else if (card.status === 'running') {
         // Rule 3: inline card (including an agent string we couldn't resolve).
         if (!isStreaming) card.status = 'paused';
       }
 
       if (!isFinished(card.status)) card.result = null;
-      recount(card);
       return card;
     });
 
-    // Rule 3 (question): the active inline card, else the first running inline card.
-    if (pendingQuestion) {
-      // An inline card here is running or (not streaming) paused; both were declared `running`.
-      const inlineRunning = (c: TaskCard) =>
-        (c.status === 'running' || c.status === 'paused') &&
-        (!c.agent || (c.agent.toolUseId === null && c.agent.taskId === null));
-      const card = declared.activeCardId
-        ? cards.find((c) => c.id === declared.activeCardId && inlineRunning(c))
-        : cards.find(inlineRunning);
-      if (card) {
-        card.status = 'waiting';
-        card.question = { text: text(pendingQuestion.text), options: Array.isArray(pendingQuestion.options) ? pendingQuestion.options.filter((o) => typeof o === 'string') : [] };
-      }
+    // Rule 3 (waiting): the unfinished card the pending question's / approval's call is tagged to.
+    const waitOn = (toolUseId: string | null | undefined) => {
+      const tag = callTag(msgs, declared.tags, typeof toolUseId === 'string' ? toolUseId : null);
+      return tag === null ? undefined : cards.find((c) => c.tag === tag && !isFinished(c.status));
+    };
+    const asked = pendingQuestion ? waitOn(pendingQuestion.toolUseId) : undefined;
+    if (asked) {
+      asked.status = 'waiting';
+      asked.question = { text: text(pendingQuestion!.text), options: Array.isArray(pendingQuestion!.options) ? pendingQuestion!.options.filter((o) => typeof o === 'string') : [] };
     }
+    const approving = waitOn(rt?.pendingApprovalToolUseId);
+    if (approving) approving.status = 'waiting';
 
     // Rule 5: fallback card when the model declared nothing.
     if (cards.length === 0) {
@@ -236,16 +232,14 @@ export function deriveTaskBoard(messages: ChatMessage[], rt: BoardRuntime): Task
         const description = text(t.description);
         const toolUseId = typeof t.toolUseId === 'string' ? t.toolUseId : null;
         const status = runtimeStatus(t);
-        const card: TaskCard = {
-          id: 'bg:' + t.id, source: 'runtime', title: description || text(t.kind) || 'task', status,
-          steps: agentSteps(runtime, toolUseId), doneCount: 0, totalCount: 0, currentLabel: null,
+        const id = 'bg:' + t.id;
+        return {
+          id, source: 'runtime', title: description || text(t.kind) || 'task', tag: id, status, now: null,
           startedAt: typeof t.startedAt === 'number' ? t.startedAt : null,
           endedAt: typeof t.endedAt === 'number' ? t.endedAt : null,
           result: isFinished(status) ? runtimeResult(t, null) : null,
           agent: { description, toolUseId, taskId: t.id }, messageIds: [], question: null,
         };
-        recount(card);
-        return card;
       });
     cards.push(...runtimeCards);
 

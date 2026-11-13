@@ -1,15 +1,14 @@
 export type CardStatus = 'queued' | 'running' | 'waiting' | 'paused' | 'done' | 'failed';
-export interface TaskStep { label: string; state: 'done' | 'current' | 'pending' }
 export interface TailLine { text: string; tone: 'normal' | 'error' | 'live' }
 export interface TaskCard {
   id: string;                      // model id | `bg:<taskId>` | 'current-work'
   source: 'declared' | 'runtime' | 'fallback';
   title: string;
+  /** Feed key: taskTag(batchStartedAt, id) for declared cards, the card id otherwise. */
+  tag: string;
   status: CardStatus;
-  steps: TaskStep[];               // [] = indeterminate
-  doneCount: number;
-  totalCount: number;
-  currentLabel: string | null;
+  /** One-line "now" label from the card's feed (nowLabel); null = nothing yet. */
+  now: string | null;
   startedAt: number | null;
   endedAt: number | null;
   result: string | null;

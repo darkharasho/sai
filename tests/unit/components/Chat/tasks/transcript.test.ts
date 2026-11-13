@@ -36,4 +36,13 @@ describe('transcriptToChatMessages', () => {
     const out = transcriptToChatMessages([user('u', 'do it')]);
     expect(out).toEqual([expect.objectContaining({ id: 'u', role: 'user', content: 'do it' })]);
   });
+
+  it('carries the entry timestamp so a task feed can interleave it with the chat', () => {
+    const out = transcriptToChatMessages([
+      { ...asst('a', 'hi'), timestamp: '2026-10-16T03:06:06.025Z' },
+      { ...user('u', 'go'), timestamp: 'not a date' },
+      user('v', 'again'),
+    ]);
+    expect(out.map((m) => m.timestamp)).toEqual([Date.parse('2026-10-16T03:06:06.025Z'), 0, 0]);
+  });
 });

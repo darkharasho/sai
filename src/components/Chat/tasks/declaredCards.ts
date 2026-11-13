@@ -1,5 +1,5 @@
 import type { ChatMessage, ToolCall } from '../../../types';
-import type { TaskCard, TaskStep } from './types';
+import type { TaskCard } from './types';
 import { isSaiTaskToolName, validateSaiTaskInput } from '../../../lib/saiTaskTool';
 
 export interface DeclaredCards {
@@ -42,7 +42,6 @@ export function itemKey(messageId: string, toolCallId?: string, index?: number):
 const isPendingPromptTool = (name: unknown) => name === 'AskUserQuestion' || name === 'ExitPlanMode';
 
 const isFinished = (c: TaskCard) => c.status === 'done' || c.status === 'failed';
-const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((s): s is string => typeof s === 'string') : []);
 
 function parseInput(raw: unknown): Record<string, any> | null {
   try {
@@ -52,12 +51,6 @@ function parseInput(raw: unknown): Record<string, any> | null {
   } catch {
     return null;
   }
-}
-
-function recount(c: TaskCard): void {
-  c.totalCount = c.steps.length;
-  c.doneCount = c.steps.filter((s) => s.state === 'done').length;
-  c.currentLabel = c.steps.find((s) => s.state === 'current')?.label ?? null;
 }
 
 /**
@@ -113,16 +106,13 @@ export function deriveDeclaredCards(messages: ChatMessage[]): DeclaredCards {
       for (const t of input.tasks as any[]) {
         if (!t || typeof t.id !== 'string' || typeof t.title !== 'string') continue;
         if (cards.some((c) => c.id === t.id)) continue;
-        const steps: TaskStep[] = strings(t.steps).map((label) => ({ label, state: 'pending' }));
-        const card: TaskCard = {
-          id: t.id, source: 'declared', title: t.title, status: 'queued', steps,
-          doneCount: 0, totalCount: 0, currentLabel: null, startedAt: null, endedAt: null,
-          result: null,
+        // steps are still accepted from the model but no longer displayed.
+        cards.push({
+          id: t.id, source: 'declared', title: t.title, tag: tagOf(t.id), status: 'queued', now: null,
+          startedAt: null, endedAt: null, result: null,
           agent: typeof t.agent === 'string' && t.agent ? { description: t.agent, toolUseId: null, taskId: null } : null,
           messageIds: [], question: null,
-        };
-        recount(card);
-        cards.push(card);
+        });
       }
       return active;
     }
@@ -134,19 +124,12 @@ export function deriveDeclaredCards(messages: ChatMessage[]): DeclaredCards {
     if (typeof input.agent === 'string' && input.agent) {
       card.agent = { description: input.agent, toolUseId: null, taskId: null };
     }
-    const extra = strings(input.add_steps);
-    for (const label of extra) card.steps.push({ label, state: 'pending' });
 
     if (input.status === 'running') {
-      const curIdx = card.steps.findIndex((s) => s.state === 'current');
-      const want = typeof input.step === 'number' ? Math.trunc(input.step) : Math.max(curIdx, 0);
-      const k = Math.min(Math.max(want, 0), Math.max(card.steps.length - 1, 0));
-      card.steps.forEach((s, i) => { s.state = i < k ? 'done' : i === k ? 'current' : 'pending'; });
       card.status = 'running';
       card.endedAt = null;
       if (card.startedAt == null) card.startedAt = ts;
     } else if (input.status === 'done') {
-      card.steps.forEach((s) => { s.state = 'done'; });
       card.status = 'done';
       card.endedAt = ts;
       card.result = note;
@@ -155,14 +138,12 @@ export function deriveDeclaredCards(messages: ChatMessage[]): DeclaredCards {
       card.endedAt = ts;
       card.result = note ?? 'Failed';
     }
-    recount(card);
 
     // Any update tags the card: the model touching a task is the signal that
     // what it does next belongs to that task. Finishing it untags.
-    // Agent-backed cards are tagged too — the renderer prefers the subagent
-    // transcript when there is one, so this only surfaces on cards that
-    // never got an agent (an unresolved agent string, a failed spawn).
-    const tag = tagOf(card.id);
+    // Agent-backed cards are tagged too: their feed merges these items with
+    // the subagent transcript by timestamp.
+    const tag = card.tag;
     if (input.status === 'done' || input.status === 'failed') {
       if (active === tag) active = null;
     } else {
@@ -221,7 +202,7 @@ export function deriveDeclaredCards(messages: ChatMessage[]): DeclaredCards {
   try {
     if (batchStartedAt !== null) {
       for (const card of cards) {
-        const tag = tagOf(card.id);
+        const tag = card.tag;
         const ids = new Set<string>();
         for (const [id, t] of attributions) if (t === tag) ids.add(id);
         card.messageIds = [...ids];

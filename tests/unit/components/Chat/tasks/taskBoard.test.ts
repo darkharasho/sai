@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest';
 import { deriveTaskBoard, agentToolUseIds, type BoardRuntime } from '../../../../../src/components/Chat/tasks/taskBoard';
 import type { ChatMessage, ToolCall } from '../../../../../src/types';
 import type { BackgroundTaskDetail } from '../../../../../electron/services/claudeBackend/backgroundTasks';
-import type { TaskStep } from '../../../../../src/components/Chat/tasks/types';
 
 let n = 0;
 const call = (input: unknown, name = 'sai_task', id?: string): ToolCall => ({
@@ -22,7 +21,7 @@ const bg = (over: Partial<BackgroundTaskDetail>): BackgroundTaskDetail => ({
 });
 
 const rt = (over: Partial<BoardRuntime> = {}): BoardRuntime => ({
-  backgroundTasks: [], isStreaming: true, pendingQuestion: null, agentInfo: new Map(), ...over,
+  backgroundTasks: [], isStreaming: true, pendingQuestion: null, pendingApprovalToolUseId: null, agentInfo: new Map(), ...over,
 });
 
 describe('deriveTaskBoard', () => {
@@ -44,19 +43,16 @@ describe('deriveTaskBoard', () => {
   });
 
   it('agent card done from transcript finished flag when no live detail', () => {
-    const steps: TaskStep[] = [{ label: 'Read files', state: 'done' }, { label: 'Summarize', state: 'current' }];
     const messages = [
       msg([create([{ id: 'a', title: 'Research', steps: [] }])], 1),
       msg([upd({ id: 'a', status: 'running', agent: 'Research auth' })], 2),
       msg([agentCall('Research auth', 'toolu_A')], 3),
     ];
-    const done = deriveTaskBoard(messages, rt({ agentInfo: new Map([['toolu_A', { finished: true, steps }]]) }));
+    const done = deriveTaskBoard(messages, rt({ agentInfo: new Map([['toolu_A', { finished: true }]]) }));
     expect(done.cards[0].status).toBe('done');
-    expect(done.cards[0].totalCount).toBe(2);
 
-    const paused = deriveTaskBoard(messages, rt({ isStreaming: false, agentInfo: new Map([['toolu_A', { finished: false, steps }]]) }));
+    const paused = deriveTaskBoard(messages, rt({ isStreaming: false, agentInfo: new Map([['toolu_A', { finished: false }]]) }));
     expect(paused.cards[0].status).toBe('paused');
-    expect(paused.cards[0].steps.map((s) => s.label)).toEqual(['Read files', 'Summarize']);
     expect(paused.cards[0].result).toBeNull();
   });
 
@@ -129,18 +125,49 @@ describe('deriveTaskBoard', () => {
     expect(board.allDone).toBe(false);
   });
 
-  it('pending question marks active inline card waiting', () => {
-    const q = { text: 'Which db?', options: ['pg', 'sqlite'] };
-    const messages = [
-      msg([create([{ id: 'a', title: 'A', steps: ['x'] }, { id: 'b', title: 'B', steps: ['y'] }])], 1),
-      msg([upd({ id: 'a', status: 'done' })], 2),
-      msg([upd({ id: 'b', status: 'running' })], 3),
+  describe('waiting follows the tag of the pending tool call', () => {
+    const ask = (id: string) => call({ questions: [{ question: 'Which db?', options: [] }] }, 'AskUserQuestion', id);
+    const q = { toolUseId: 'toolu_Q', text: 'Which db?', options: ['pg', 'sqlite'] };
+    const history = () => [
+      msg([create([{ id: 'a', title: 'A' }, { id: 'b', title: 'B' }])], 1),
+      msg([upd({ id: 'a', status: 'running' })], 2),
+      msg([ask('toolu_Q')], 3),
+      msg([upd({ id: 'b', status: 'running' })], 4),
+      msg([call({ command: 'rm -rf build' }, 'Bash', 'toolu_P')], 5),
     ];
-    const board = deriveTaskBoard(messages, rt({ isStreaming: false, pendingQuestion: q }));
-    const b = board.cards.find((c) => c.id === 'b')!;
-    expect(b.status).toBe('waiting');
-    expect(b.question).toEqual(q);
-    expect(board.cards.find((c) => c.id === 'a')!.question).toBeNull();
+
+    it('a pending question marks the card its call is tagged to, not the active one', () => {
+      const board = deriveTaskBoard(history(), rt({ isStreaming: false, pendingQuestion: q }));
+      const a = board.cards.find((c) => c.id === 'a')!;
+      expect(a.status).toBe('waiting');
+      expect(a.question).toEqual({ text: 'Which db?', options: ['pg', 'sqlite'] });
+      expect(board.cards.find((c) => c.id === 'b')!).toMatchObject({ status: 'paused', question: null });
+    });
+
+    it('a pending approval marks the card its call is tagged to', () => {
+      const board = deriveTaskBoard(history(), rt({ isStreaming: false, pendingApprovalToolUseId: 'toolu_P' }));
+      expect(board.cards.find((c) => c.id === 'b')!).toMatchObject({ status: 'waiting', question: null });
+      expect(board.cards.find((c) => c.id === 'a')!.status).toBe('paused');
+    });
+
+    it('a stored tag on the pending call wins', () => {
+      const messages = history();
+      messages[2] = { ...messages[2], toolCalls: [{ ...messages[2].toolCalls![0], taskId: null }] };
+      const board = deriveTaskBoard(messages, rt({ isStreaming: false, pendingQuestion: q }));
+      expect(board.cards.some((c) => c.status === 'waiting')).toBe(false);
+    });
+
+    it('an untagged pending call marks nothing', () => {
+      const messages = [msg([create([{ id: 'a', title: 'A' }])], 1), msg([ask('toolu_Q')], 2)];
+      const board = deriveTaskBoard(messages, rt({ pendingQuestion: q }));
+      expect(board.cards[0]).toMatchObject({ status: 'queued', question: null });
+    });
+  });
+
+  it('declared cards carry their batch-scoped tag; runtime cards their id; now starts null', () => {
+    const board = deriveTaskBoard([msg([create([{ id: 'a', title: 'A' }])], 7)], rt({ backgroundTasks: [bg({ id: 'r' })] }));
+    expect(board.cards.map((c) => [c.tag, c.now])).toEqual([['7:a', null], ['bg:r', null]]);
+    expect(board.cards[0]).not.toHaveProperty('steps');
   });
 
   it('unmatched agent string yields declared card plus runtime card', () => {
@@ -173,8 +200,8 @@ describe('deriveTaskBoard', () => {
     const board = deriveTaskBoard(messages, rt());
     expect(board.cards).toHaveLength(1);
     const c = board.cards[0];
-    expect(c).toMatchObject({ id: 'current-work', source: 'fallback', title: 'Current work', status: 'running', doneCount: 1, totalCount: 3 });
-    expect(c.steps.map((s) => s.state)).toEqual(['done', 'current', 'pending']);
+    expect(c).toMatchObject({ id: 'current-work', tag: 'current-work', source: 'fallback', title: 'Current work', status: 'running', now: null });
+    expect(c).not.toHaveProperty('steps');
     expect(deriveTaskBoard(messages, rt({ isStreaming: false })).cards[0].status).toBe('paused');
 
     const allDone = deriveTaskBoard([msg([call({ todos: todos.map((t) => ({ ...t, status: 'completed' })) }, 'TodoWrite')], 1)], rt());

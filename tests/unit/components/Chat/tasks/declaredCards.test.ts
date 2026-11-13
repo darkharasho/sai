@@ -13,13 +13,14 @@ const create = (tasks: any[]) => ({ action: 'create', tasks });
 const upd = (o: any) => ({ action: 'update', ...o });
 
 describe('deriveDeclaredCards', () => {
-  it('create makes queued cards with pending steps', () => {
+  it('create makes queued cards tagged with the batch, ignoring steps', () => {
     const r = deriveDeclaredCards([msg([call(create([
       { id: 'a', title: 'A', steps: ['1', '2', '3'] }, { id: 'b', title: 'B', steps: ['x', 'y'] },
     ]))], 100)]);
     expect(r.cards.map((c) => c.status)).toEqual(['queued', 'queued']);
-    expect(r.cards.map((c) => c.totalCount)).toEqual([3, 2]);
-    expect(r.cards[0].steps.every((s) => s.state === 'pending')).toBe(true);
+    expect(r.cards.map((c) => c.tag)).toEqual([taskTag(100, 'a'), taskTag(100, 'b')]);
+    expect(r.cards.map((c) => c.now)).toEqual([null, null]);
+    expect(r.cards[0]).not.toHaveProperty('steps');
     expect(r.batchStartedAt).toBe(100);
   });
 
@@ -33,27 +34,24 @@ describe('deriveDeclaredCards', () => {
     expect(r.cards[1].agent).toEqual({ description: 'List files', toolUseId: null, taskId: null });
   });
 
-  it('running with step marks earlier steps done', () => {
-    const steps = ['s0', 's1', 's2', 's3', 's4'];
+  it('running sets status and startedAt; step and add_steps are accepted but ignored', () => {
     const r = deriveDeclaredCards([
-      msg([call(create([{ id: 'a', title: 'A', steps }]))], 1),
-      msg([call(upd({ id: 'a', status: 'running', step: 2 }))], 2),
+      msg([call(create([{ id: 'a', title: 'A', steps: ['s0', 's1', 's2'] }]))], 1),
+      msg([call(upd({ id: 'a', status: 'running', step: 2, add_steps: ['s3'] }))], 2),
     ]);
     const c = r.cards[0];
-    expect(c.doneCount).toBe(2);
-    expect(c.currentLabel).toBe('s2');
     expect(c.status).toBe('running');
     expect(c.startedAt).toBe(2);
   });
 
-  it('done sets result and endedAt; failed keeps steps', () => {
+  it('done sets result and endedAt; failed defaults its result', () => {
     const r = deriveDeclaredCards([
       msg([call(create([{ id: 'a', title: 'A', steps: ['1', '2'] }, { id: 'b', title: 'B', steps: ['1', '2'] }]))], 1),
       msg([call(upd({ id: 'a', status: 'done', note: 'ok' })), call(upd({ id: 'b', status: 'running', step: 1 })), call(upd({ id: 'b', status: 'failed' }))], 5),
     ]);
     const [a, b] = r.cards;
-    expect(a.status).toBe('done'); expect(a.doneCount).toBe(2); expect(a.result).toBe('ok'); expect(a.endedAt).toBe(5);
-    expect(b.status).toBe('failed'); expect(b.result).toBe('Failed'); expect(b.doneCount).toBe(1); expect(b.steps[1].state).toBe('current');
+    expect(a.status).toBe('done'); expect(a.result).toBe('ok'); expect(a.endedAt).toBe(5);
+    expect(b.status).toBe('failed'); expect(b.result).toBe('Failed'); expect(b.endedAt).toBe(5);
   });
 
   it('create after all done starts a new batch; create while one running appends', () => {
@@ -137,14 +135,6 @@ describe('deriveDeclaredCards', () => {
     // Tags are keyed per item, so compare everything but the tag map.
     const strip = ({ tags: _t, ...rest }: ReturnType<typeof deriveDeclaredCards>) => rest;
     expect(strip(deriveDeclaredCards(bad))).toEqual(strip(deriveDeclaredCards(good)));
-  });
-
-  it('drops non-string step labels', () => {
-    const r = deriveDeclaredCards([
-      msg([call(create([{ id: 'a', title: 'A', steps: ['1', 2, null] }]))], 1),
-      msg([call(upd({ id: 'a', add_steps: ['x', {}] }))], 2),
-    ]);
-    expect(r.cards[0].steps.map((s) => s.label)).toEqual(['1', 'x']);
   });
 
   describe('abandoned batch', () => {
@@ -323,8 +313,7 @@ describe('deriveDeclaredCards', () => {
       let r!: ReturnType<typeof deriveDeclaredCards>;
       expect(() => { r = deriveDeclaredCards([msg([call(create([{ id: 't1', title: 'No steps' }]))], 1)]); }).not.toThrow();
       expect(r.cards).toHaveLength(1);
-      expect(r.cards[0].steps).toEqual([]);
-      expect(r.cards[0].totalCount).toBe(0);
+      expect(r.cards[0]).toMatchObject({ id: 't1', title: 'No steps', tag: taskTag(1, 't1') });
     });
   });
 });

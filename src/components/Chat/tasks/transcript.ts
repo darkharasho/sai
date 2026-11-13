@@ -17,9 +17,15 @@ function resultText(content: unknown): string {
   return '';
 }
 
+/** Entry time in ms. The SDK passes the JSONL ISO `timestamp` through (untyped); 0 when absent. */
+function entryTime(v: unknown): number {
+  const t = typeof v === 'number' ? v : typeof v === 'string' ? Date.parse(v) : NaN;
+  return Number.isFinite(t) ? t : 0;
+}
+
 /** Convert SDK SessionMessages (a subagent transcript) into ChatMessages. */
 export function transcriptToChatMessages(
-  msgs: Array<{ type: string; uuid: string; message: unknown }>,
+  msgs: Array<{ type: string; uuid: string; message: unknown; timestamp?: unknown }>,
 ): ChatMessage[] {
   const out: ChatMessage[] = [];
   const toolById = new Map<string, ToolCall>();
@@ -28,6 +34,7 @@ export function transcriptToChatMessages(
     const body = m?.message as { content?: unknown } | null | undefined;
     if (!body || typeof body !== 'object') continue;
     const content = body.content;
+    const timestamp = entryTime(m.timestamp);
 
     if (m.type === 'assistant') {
       const blocks = Array.isArray(content) ? content : typeof content === 'string' ? [{ type: 'text', text: content }] : [];
@@ -48,12 +55,12 @@ export function transcriptToChatMessages(
           if (tc.id) toolById.set(tc.id, tc);
         }
       }
-      const msg: ChatMessage = { id: m.uuid, role: 'assistant', content: texts.join(''), timestamp: 0 } as ChatMessage;
+      const msg: ChatMessage = { id: m.uuid, role: 'assistant', content: texts.join(''), timestamp } as ChatMessage;
       if (toolCalls.length) msg.toolCalls = toolCalls;
       out.push(msg);
     } else if (m.type === 'user') {
       if (typeof content === 'string') {
-        out.push({ id: m.uuid, role: 'user', content, timestamp: 0 } as ChatMessage);
+        out.push({ id: m.uuid, role: 'user', content, timestamp } as ChatMessage);
       } else if (Array.isArray(content)) {
         const texts: string[] = [];
         for (const b of content as any[]) {
@@ -63,7 +70,7 @@ export function transcriptToChatMessages(
             if (tc) tc.output = resultText(b.content);
           } else if (b.type === 'text' && typeof b.text === 'string') texts.push(b.text);
         }
-        if (texts.length) out.push({ id: m.uuid, role: 'user', content: texts.join(''), timestamp: 0 } as ChatMessage);
+        if (texts.length) out.push({ id: m.uuid, role: 'user', content: texts.join(''), timestamp } as ChatMessage);
       }
     }
   }

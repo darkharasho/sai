@@ -1,15 +1,17 @@
-// ChatPanel's task-board derivation: board, subagent transcripts, card tails,
-// the composer todo override and the pending AskUserQuestion. Display-only;
-// nothing here feeds turn completion, notifications or wait state.
+// ChatPanel's task-board derivation: board, subagent transcripts, per-card
+// feeds and "now" labels, the composer todo override and the pending
+// AskUserQuestion. Display-only; nothing here feeds turn completion,
+// notifications, wait state or isStreaming.
 
 import { useMemo } from 'react';
 import type { ChatMessage } from '../../../types';
 import type { BackgroundTaskDetail } from '../../../../electron/services/claudeBackend/backgroundTasks';
-import type { TailLine, TaskBoard, TaskCard, TaskStep } from './types';
+import type { CardStatus, TaskBoard, TaskCard } from './types';
 import { agentToolUseIds, deriveTaskBoard, type BoardRuntime } from './taskBoard';
+import { deriveDeclaredCards } from './declaredCards';
+import { filterMessagesForTask, mergeFeed, nowLabel } from './taskFeed';
 import { useAgentTranscripts, type AgentTranscript } from './useAgentTranscripts';
-import { buildTailLines } from './tailLines';
-import { findLatestTodos, type Todo } from '../TodoProgress';
+import type { Todo } from '../TodoProgress';
 
 export interface PendingTaskQuestion {
   toolUseId: string;
@@ -30,8 +32,8 @@ export interface UseTaskBoardArgs {
   backgroundTasks: BackgroundTaskDetail[] | undefined;
   isStreaming: boolean;
   awaitingQuestion: boolean;
-  /** Card whose steps drive the composer todo ring (selected or open). */
-  focusId: string | null;
+  /** tool_use id of the call awaiting approval: the card it is tagged to shows waiting. */
+  pendingApprovalToolUseId: string | null;
 }
 
 /**
@@ -53,14 +55,14 @@ export interface StreamFallback {
 }
 
 export interface TaskBoardState {
+  /** Cards carry their `now` label. */
   board: TaskBoard;
-  tails: Map<string, TailLine[]>;
-  /** undefined = no cards, keep the composer's own todo derivation. */
+  /** One todo per card for the composer ring; undefined = no cards, keep the composer's own todo derivation. */
   todos: Todo[] | null | undefined;
   pendingQuestion: PendingTaskQuestion | null;
-  /** Stream view messages for a card; null = nothing to stream (see streamFallback). */
-  streamMessages(card: TaskCard): ChatMessage[] | null;
-  /** Why streamMessages returned null, for the stream view's empty state. */
+  /** A card's feed (the chat filtered to its tag, plus its agent transcript); null = see streamFallback. */
+  feed(card: TaskCard): ChatMessage[] | null;
+  /** Why feed returned null, for the feed view's empty state. */
   streamFallback(card: TaskCard): StreamFallback | null;
 }
 
@@ -69,8 +71,7 @@ const EMPTY_TASKS: BackgroundTaskDetail[] = [];
 const EMPTY_IDS: string[] = [];
 const EMPTY_SET: ReadonlySet<string> = new Set();
 const EMPTY_INFO: BoardRuntime['agentInfo'] = new Map();
-const EMPTY_TAILS = new Map<string, TailLine[]>();
-const NO_MESSAGES: ChatMessage[] = [];
+const NO_TAGS = new Map<string, string | null>();
 
 const str = (v: unknown): string => (typeof v === 'string' ? v : '');
 
@@ -101,71 +102,64 @@ export function findPendingTaskQuestion(messages: ChatMessage[]): PendingTaskQue
   return null;
 }
 
-function stepsFromTranscript(t: AgentTranscript): TaskStep[] {
-  let todos: Todo[] | null = null;
-  try { todos = findLatestTodos(t.messages); } catch { return []; }
-  if (!Array.isArray(todos)) return [];
-  return todos.filter(Boolean).map((td) => ({
-    label: str(td.content) || str(td.activeForm),
-    state: td.status === 'completed' ? 'done' : td.status === 'in_progress' ? 'current' : 'pending',
-  }));
-}
-
-function stepsToTodos(card: TaskCard): Todo[] {
-  return card.steps.map((s, i) => ({
-    id: `${card.id}:${i}`,
-    content: s.label,
-    status: s.state === 'done' ? 'completed' : s.state === 'current' ? 'in_progress' : 'pending',
-  }));
-}
-
-/** Agent-backed cards read a subagent transcript; others use the chat's attributed messages. */
+/** Agent-backed cards read a subagent transcript too; others only the chat items filed under their tag. */
 const transcriptId = (card: TaskCard): string | null => card.agent?.toolUseId ?? null;
 const isAgentBacked = (card: TaskCard) => !!card.agent && (card.agent.toolUseId !== null || card.agent.taskId !== null);
 
 /**
- * What a card's stream and tail read from, in order: its subagent transcript,
- * then the chat messages the model tagged onto it, then nothing (null — the
- * stream view shows task status instead).
+ * A card's feed: its tagged chat items, merged by timestamp with its subagent
+ * transcript when it has one. null = nothing to show (the feed view shows task
+ * status instead): an agent-backed card with no readable transcript and no
+ * tagged items.
  */
-function cardSource(
+function cardFeed(
   card: TaskCard,
   transcripts: Map<string, AgentTranscript>,
   messages: ChatMessage[],
+  tags: Map<string, string | null>,
 ): ChatMessage[] | null {
-  const tagged = () => (card.messageIds.length === 0 ? NO_MESSAGES : messages.filter((m) => card.messageIds.includes(m.id)));
+  let tagged: ChatMessage[];
+  try { tagged = filterMessagesForTask(messages, card.tag, tags); } catch { tagged = []; }
   const tid = transcriptId(card);
   if (tid) {
     const t = transcripts.get(tid);
-    if (!t) return NO_MESSAGES; // not loaded yet
-    if (!t.unavailable) return t.messages;
+    if (!t) return tagged; // transcript not loaded yet
+    if (!t.unavailable) return mergeFeed(tagged, t.messages);
   } else if (!isAgentBacked(card)) {
-    return tagged();
+    return tagged;
   }
-  const fallback = tagged();
-  return fallback.length > 0 ? fallback : null;
+  return tagged.length > 0 ? tagged : null;
 }
 
+const TODO_STATUS: Record<CardStatus, Todo['status']> = {
+  done: 'completed', failed: 'completed', running: 'in_progress', waiting: 'in_progress', queued: 'pending', paused: 'pending',
+};
+
 export function useTaskBoard({
-  enabled, messages, claudeSessionId, backgroundTasks, isStreaming, awaitingQuestion, focusId,
+  enabled, messages, claudeSessionId, backgroundTasks, isStreaming, awaitingQuestion, pendingApprovalToolUseId,
 }: UseTaskBoardArgs): TaskBoardState {
   const tasks = backgroundTasks ?? EMPTY_TASKS;
+  const approvalId = enabled ? pendingApprovalToolUseId ?? null : null;
 
   const pendingQuestion = useMemo(
     () => (enabled && awaitingQuestion ? findPendingTaskQuestion(messages) : null),
     [enabled, awaitingQuestion, messages],
   );
   const runtimeQuestion = useMemo(
-    () => (pendingQuestion ? { text: pendingQuestion.text, options: pendingQuestion.options } : null),
+    () => (pendingQuestion ? { toolUseId: pendingQuestion.toolUseId, text: pendingQuestion.text, options: pendingQuestion.options } : null),
     [pendingQuestion],
   );
 
+  // One fold per messages change: the board passes and the feeds share it.
+  const declared = useMemo(() => (enabled ? deriveDeclaredCards(messages) : null), [enabled, messages]);
+  const tags = declared?.tags ?? NO_TAGS;
+
   // First pass without transcript info: which agent transcripts to load, and which are live.
   const baseBoard = useMemo(
-    () => (enabled
-      ? deriveTaskBoard(messages, { backgroundTasks: tasks, isStreaming, pendingQuestion: runtimeQuestion, agentInfo: EMPTY_INFO })
+    () => (declared
+      ? deriveTaskBoard(messages, { backgroundTasks: tasks, isStreaming, pendingQuestion: runtimeQuestion, pendingApprovalToolUseId: approvalId, agentInfo: EMPTY_INFO }, declared)
       : EMPTY_BOARD),
-    [enabled, messages, tasks, isStreaming, runtimeQuestion],
+    [declared, messages, tasks, isStreaming, runtimeQuestion, approvalId],
   );
   const ids = useMemo(() => (enabled ? agentToolUseIds(baseBoard) : EMPTY_IDS), [enabled, baseBoard]);
   const liveKey = baseBoard.cards
@@ -185,40 +179,41 @@ export function useTaskBoard({
   const agentInfo = useMemo(() => {
     if (transcripts.size === 0) return EMPTY_INFO;
     const info: BoardRuntime['agentInfo'] = new Map();
-    for (const [id, t] of transcripts) info.set(id, { finished: t.finished, steps: stepsFromTranscript(t) });
+    for (const [id, t] of transcripts) info.set(id, { finished: t.finished });
     return info;
   }, [transcripts]);
 
-  const board = useMemo(
-    () => (!enabled ? EMPTY_BOARD
+  const runtimeBoard = useMemo(
+    () => (!declared ? EMPTY_BOARD
       : agentInfo === EMPTY_INFO ? baseBoard
-      : deriveTaskBoard(messages, { backgroundTasks: tasks, isStreaming, pendingQuestion: runtimeQuestion, agentInfo })),
-    [enabled, baseBoard, agentInfo, messages, tasks, isStreaming, runtimeQuestion],
+      : deriveTaskBoard(messages, { backgroundTasks: tasks, isStreaming, pendingQuestion: runtimeQuestion, pendingApprovalToolUseId: approvalId, agentInfo }, declared)),
+    [declared, baseBoard, agentInfo, messages, tasks, isStreaming, runtimeQuestion, approvalId],
   );
 
-  const tails = useMemo(() => {
-    if (board.cards.length === 0) return EMPTY_TAILS;
-    const out = new Map<string, TailLine[]>();
-    for (const card of board.cards) {
-      const source = cardSource(card, transcripts, messages) ?? NO_MESSAGES;
-      let lines: TailLine[] = [];
-      try { lines = buildTailLines(source); } catch { /* display-only: never throw into render */ }
-      out.set(card.id, lines);
-    }
-    return out;
-  }, [board, transcripts, messages]);
+  // Feeds per card id, and the board with each card's "now" label filled in.
+  const { board, feeds } = useMemo(() => {
+    const feeds = new Map<string, ChatMessage[] | null>();
+    if (runtimeBoard.cards.length === 0) return { board: runtimeBoard, feeds };
+    const cards = runtimeBoard.cards.map((card) => {
+      const feed = cardFeed(card, transcripts, messages, tags);
+      feeds.set(card.id, feed);
+      let now: string | null = null;
+      try { now = nowLabel(feed ?? []); } catch { /* display-only: never throw into render */ }
+      return { ...card, now };
+    });
+    return { board: { ...runtimeBoard, cards }, feeds };
+  }, [runtimeBoard, transcripts, messages, tags]);
 
   const todos = useMemo(() => {
     if (board.cards.length === 0) return undefined;
-    const focus = (focusId ? board.cards.find((c) => c.id === focusId) : undefined)
-      ?? board.cards.find((c) => c.status === 'running');
-    return focus ? stepsToTodos(focus) : null;
-  }, [board, focusId]);
+    return board.cards.map((c): Todo => ({ id: c.id, content: c.title, status: TODO_STATUS[c.status] ?? 'pending' }));
+  }, [board]);
 
-  const streamMessages = (card: TaskCard): ChatMessage[] | null => cardSource(card, transcripts, messages);
+  const feed = (card: TaskCard): ChatMessage[] | null =>
+    (feeds.has(card.id) ? feeds.get(card.id)! : cardFeed(card, transcripts, messages, tags));
 
   const streamFallback = (card: TaskCard): StreamFallback | null => {
-    if (streamMessages(card) !== null) return null;
+    if (feed(card) !== null) return null;
     const taskId = card.agent?.taskId ?? null;
     const detail = taskId ? tasks.find((t) => t.id === taskId) ?? null : null;
     const reason: StreamFallbackReason = detail?.isShell
@@ -227,5 +222,5 @@ export function useTaskBoard({
     return { reason, detail };
   };
 
-  return { board, tails, todos, pendingQuestion, streamMessages, streamFallback };
+  return { board, todos, pendingQuestion, feed, streamFallback };
 }
