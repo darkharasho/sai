@@ -64,6 +64,17 @@ interface WorkflowJobDef {
 }
 
 const POLL_ACTIVE_MS = 5000;
+const RETRY_MAX_MS = 60_000;
+const RETRY_MAX_FAILURES = 8;
+
+/**
+ * Backoff after the Nth consecutive poll failure (1-based): 5s, 10s, 20s, 40s,
+ * then 60s. Returns null once the card should give up and show the error.
+ */
+export function watcherRetryDelay(failures: number): number | null {
+  if (failures >= RETRY_MAX_FAILURES) return null;
+  return Math.min(RETRY_MAX_MS, POLL_ACTIVE_MS * 2 ** Math.max(0, failures - 1));
+}
 
 // Module-level cache so cards remounted after a workspace swap reattach with last-known
 // status instead of flashing "Fetching…" again. Keyed by canonical github URL.
@@ -350,6 +361,7 @@ export default function GitHubWatcherCard({ target, messageId, seedSnapshot }: G
   const [run, setRun] = useState<RunState | null>(cached?.run ?? seededRun);
   const [jobs, setJobs] = useState<JobState[] | null>(cached?.jobs ?? seededJobs);
   const [error, setError] = useState<string | null>(null);
+  const [retryNote, setRetryNote] = useState<string | null>(null);
   const visibleRef = useRef<boolean>(typeof document === 'undefined' ? true : document.visibilityState === 'visible');
   const pop = useReducedMotionTransition(SPRING.pop);
   // Capture the seed once on mount. seedSnapshot is re-derived from message state
@@ -448,16 +460,20 @@ export default function GitHubWatcherCard({ target, messageId, seedSnapshot }: G
     const jobsPath = `/repos/${target.owner}/${target.repo}/actions/runs/${target.runId}/jobs`;
 
     const sai = (window as any).sai;
+    // Errors carry the failing path + status so the devlog shows WHICH request broke.
+    const httpError = (path: string, status: number, message: string) =>
+      Object.assign(new Error(`${status}${message ? ` ${message}` : ''}`), { path, status });
     const fetchJson = async (path: string): Promise<any> => {
       if (sai?.githubApiGet) {
         const r = await sai.githubApiGet(path);
-        if (!r.ok) throw new Error(`${r.status}${r.body?.message ? ` ${r.body.message}` : ''}`);
+        if (!r.ok) throw httpError(path, r.status, r.body?.message ?? '');
         return r.body;
       }
       const res = await fetch(`https://api.github.com${path}`, { headers: { Accept: 'application/vnd.github+json' } });
-      if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+      if (!res.ok) throw httpError(path, res.status, res.statusText);
       return await res.json();
     };
+    let failures = 0;
 
     async function tick() {
       if (cancelled) return;
@@ -509,6 +525,11 @@ export default function GitHubWatcherCard({ target, messageId, seedSnapshot }: G
           if (cancelled) return;
           if (defs) nextJobs = mergeWithWorkflow(liveJobs, defs);
         }
+        if (failures > 0) {
+          sai?.devlog?.('ghWatcher.recovered', { url: target.url, afterFailures: failures });
+          failures = 0;
+        }
+        setRetryNote(null);
         setRun(nextRun);
         setJobs(nextJobs);
         STATUS_CACHE.set(target.url, { run: nextRun, jobs: nextJobs });
@@ -517,7 +538,19 @@ export default function GitHubWatcherCard({ target, messageId, seedSnapshot }: G
         }
       } catch (e) {
         if (cancelled) return;
-        setError(e instanceof Error ? e.message : String(e));
+        failures++;
+        const message = e instanceof Error ? e.message : String(e);
+        const delay = watcherRetryDelay(failures);
+        const info = { url: target.url, path: (e as any)?.path ?? null, status: (e as any)?.status ?? null, message, failures };
+        console.warn('[gh-watcher] poll failed', info);
+        sai?.devlog?.(delay === null ? 'ghWatcher.gaveUp' : 'ghWatcher.pollError', { ...info, retryInMs: delay });
+        if (delay === null) {
+          setRetryNote(null);
+          setError(message);
+          return;
+        }
+        setRetryNote(`Retrying (${message})…`);
+        timer = setTimeout(tick, delay);
       }
     }
 
@@ -711,7 +744,8 @@ export default function GitHubWatcherCard({ target, messageId, seedSnapshot }: G
           );
         })()}
         {error && <div className="gh-watcher-error">{error}</div>}
-        {!error && !run && <div className="gh-watcher-pending">Watching…</div>}
+        {!error && retryNote && <div className="gh-watcher-pending">{retryNote}</div>}
+        {!error && !retryNote && !run && <div className="gh-watcher-pending">Watching…</div>}
         <div className="gh-watcher-foot">
           <a
             href={target.url}
