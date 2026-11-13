@@ -1,6 +1,5 @@
 // ChatPanel's task-board derivation: board, subagent transcripts, per-card
-// feeds and "now" labels, the composer todo override and the pending
-// AskUserQuestion. Display-only; nothing here feeds turn completion,
+// feeds and "now" labels, the composer todo override. Display-only; nothing here feeds turn completion,
 // notifications, wait state or isStreaming.
 
 import { useMemo } from 'react';
@@ -57,9 +56,8 @@ export interface StreamFallback {
 export interface TaskBoardState {
   /** Cards carry their `now` label. */
   board: TaskBoard;
-  /** One todo per card for the composer ring; undefined = no cards or only the TodoWrite fallback card, keep the composer's own todo derivation. */
+  /** One todo per card for the composer ring; undefined = no declared cards, keep the composer's own todo derivation. */
   todos: Todo[] | null | undefined;
-  pendingQuestion: PendingTaskQuestion | null;
   /** The fold's computed tag per item (itemKey); pair with effectiveTag() for stored tags. Empty when disabled. */
   tags: Map<string, string | null>;
   /** A card's feed (the chat filtered to its tag, plus its agent transcript); null = see streamFallback. */
@@ -207,9 +205,10 @@ export function useTaskBoard({
   }, [runtimeBoard, transcripts, messages, tags]);
 
   const todos = useMemo(() => {
-    // Only the TodoWrite fallback card (or none): keep the composer's own TodoWrite ring.
-    if (board.cards.every((c) => c.source === 'fallback')) return undefined;
-    return board.cards.map((c): Todo => ({ id: c.id, content: c.title, status: TODO_STATUS[c.status] ?? 'pending' }));
+    // No declared cards: keep the composer's own TodoWrite ring (runtime and fallback cards never override it).
+    const declaredCards = board.cards.filter((c) => c.source === 'declared');
+    if (declaredCards.length === 0) return undefined;
+    return declaredCards.map((c): Todo => ({ id: c.id, content: c.title, status: TODO_STATUS[c.status] ?? 'pending' }));
   }, [board]);
 
   const feed = (card: TaskCard): ChatMessage[] | null =>
@@ -225,5 +224,5 @@ export function useTaskBoard({
     return { reason, detail };
   };
 
-  return { board, todos, pendingQuestion, tags, feed, streamFallback };
+  return { board, todos, tags, feed, streamFallback };
 }

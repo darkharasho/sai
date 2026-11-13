@@ -188,6 +188,25 @@ describe('useTaskBoard feeds', () => {
     expect(tasked.result.current.todos).toEqual([{ id: 'a', content: 'A', status: 'pending' }]);
   });
 
+  it('runtime cards never override the composer todos', async () => {
+    const todoOnly: any[] = [
+      { id: 'm0', role: 'assistant', content: '', timestamp: 1, toolCalls: [{ id: 'tw', type: 'other', name: 'TodoWrite', input: json({ todos: [{ id: '1', content: 'X', status: 'pending' }] }), output: 'ok' }] },
+    ];
+    const withShell = hook(todoOnly, { backgroundTasks: [task({ id: 'bg1', kind: 'shell', isShell: true, description: 'npm run dev' })] });
+    await flush();
+    expect(withShell.result.current.board.cards.length).toBeGreaterThan(1);
+    expect(withShell.result.current.todos).toBeUndefined();
+    const shellOnly = hook([], { backgroundTasks: [task({ id: 'bg1', kind: 'shell', isShell: true, description: 'npm run dev' })] });
+    await flush();
+    expect(shellOnly.result.current.board.cards).toHaveLength(1);
+    expect(shellOnly.result.current.todos).toBeUndefined();
+    const declaredPlusShell = hook([
+      { id: 'm1', role: 'assistant', content: '', timestamp: 2, toolCalls: [sai('c0', { action: 'create', tasks: [{ id: 'a', title: 'A' }] })] },
+    ], { backgroundTasks: [task({ id: 'bg1', kind: 'shell', isShell: true, description: 'npm run dev' })] });
+    await flush();
+    expect(declaredPlusShell.result.current.todos).toEqual([{ id: 'a', content: 'A', status: 'pending' }]);
+  });
+
   it('an agent-backed card interleaves its transcript with its tagged chat items', async () => {
     const ts = (ms: number) => new Date(ms).toISOString();
     fetchFn.mockResolvedValue({

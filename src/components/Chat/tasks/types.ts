@@ -19,7 +19,7 @@ export interface TaskCard {
 export interface TaskBoard { cards: TaskCard[]; batchStartedAt: number | null; allDone: boolean }
 export interface SaiTaskInput {
   action: 'create' | 'update';
-  tasks?: { id: string; title: string; steps: string[] }[];
+  tasks?: { id: string; title: string; steps?: string[] }[];
   id?: string;
   status?: 'running' | 'done' | 'failed';
   step?: number;

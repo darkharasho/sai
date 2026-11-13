@@ -144,6 +144,66 @@ describe('ChatPanel task feeds integration', () => {
     expect(msgTexts()).toEqual(['hello', 'hi there']);
   });
 
+  const tdoo = { id: 'tw', name: 'TodoWrite', input: JSON.stringify({ todos: [{ id: '1', content: 'Write', status: 'pending' }] }), output: 'ok' };
+  const shellTask = { ...gammaTask, id: 'sh1', description: 'npm run dev', kind: 'shell', isShell: true, isAgent: false, toolUseId: 'toolu_sh' };
+
+  it('TodoWrite-only and runtime-only chats get no tab bar', async () => {
+    const r = await mount({
+      ...baseProps(),
+      initialMessages: [
+        { id: 'u1', role: 'user', content: 'go', timestamp: 1 },
+        { id: 'a1', role: 'assistant', content: 'ok', timestamp: 2, toolCalls: [tdoo] },
+      ] as any,
+    });
+    expect(document.querySelector('.task-tabs')).toBeNull();
+    expect(screen.queryAllByRole('tab')).toHaveLength(0);
+    expect(inputProps.todos).toBeUndefined();
+    r.unmount();
+    inputProps = undefined;
+    await mount({ ...baseProps(), initialMessages: [{ id: 'u1', role: 'user', content: 'go', timestamp: 1 }] as any, backgroundTasks: [shellTask] });
+    expect(screen.queryAllByRole('tab')).toHaveLength(0);
+    expect(inputProps.todos).toBeUndefined();
+  });
+
+  it('declared plus runtime cards show only declared tabs', async () => {
+    await mount({ ...baseProps(), backgroundTasks: [shellTask] });
+    const tabs = screen.getAllByRole('tab').map((t) => t.textContent);
+    expect(tabs.some((t) => t?.includes('Alpha task'))).toBe(true);
+    expect(tabs.some((t) => t?.includes('npm run dev'))).toBe(false);
+  });
+
+  it('a new batch reusing a task id closes the open tab', async () => {
+    await mount(baseProps());
+    fireEvent.click(tabFor('Alpha task'));
+    expect(screen.getByTestId('task-feed')).toBeTruthy();
+    const handlers = mockSai.claudeOnMessage.mock.calls.map(([h]: any[]) => h as (m: any) => void);
+    const emit = (msg: any) => { for (const h of handlers) h({ projectPath: '/project', scope: 'chat', ...msg }); };
+    const tu = (id: string, input: unknown) => ({ type: 'tool_use', id, name: 'mcp__sai__sai_task', input });
+    await act(async () => {
+      emit({ type: 'assistant', message: { content: [
+        tu('n1', { action: 'update', id: 'alpha', status: 'done' }),
+        tu('n2', { action: 'update', id: 'beta', status: 'done' }),
+      ] } });
+    });
+    await act(async () => {
+      emit({ type: 'assistant', message: { content: [tu('n3', { action: 'create', tasks: [{ id: 'alpha', title: 'Alpha again' }] })] } });
+    });
+    await waitFor(() => expect(screen.getAllByRole('tab').some((t) => t.textContent?.includes('Alpha again'))).toBe(true));
+    expect(screen.queryByTestId('task-feed')).toBeNull();
+  });
+
+  it('does not stamp taskId on sent messages when the task UI is off', async () => {
+    const props = { ...baseProps(), taskUiEnabled: false };
+    await mount(props);
+    await act(async () => { await inputProps.onSend('hello'); });
+    const msgs = await waitFor(() => {
+      const m = (props.onMessagesChange as any).mock.calls.at(-1)[0] as any[];
+      expect(m.some((x) => x.content === 'hello')).toBe(true);
+      return m;
+    });
+    expect(msgs.every((m) => !('taskId' in m))).toBe(true);
+  });
+
   const tabFor = (title: string) => screen.getAllByRole('tab').find((t) => t.textContent?.includes(title))!;
   const feedEl = () => screen.getByTestId('task-feed');
 
@@ -240,8 +300,12 @@ describe('ChatPanel task feeds integration', () => {
 
   it('Stop in the feed header on an agent-backed card calls onStopBackgroundTask with the task id', async () => {
     const onStop = vi.fn().mockResolvedValue(true);
-    await mount({ ...baseProps(), onStopBackgroundTask: onStop, backgroundTasks: [gammaTask] });
-    await act(async () => { fireEvent.click(tabFor('Research gamma')); });
+    const agentHistory: any[] = [
+      ...taskHistory(),
+      { id: 'a7', role: 'assistant', content: '', timestamp: 7, toolCalls: [taskCall('t7', { action: 'update', id: 'beta', status: 'running', agent: 'Research gamma' })] },
+    ];
+    await mount({ ...baseProps(), initialMessages: agentHistory, onStopBackgroundTask: onStop, backgroundTasks: [gammaTask] });
+    await act(async () => { fireEvent.click(tabFor('Beta task')); });
     fireEvent.click(within(feedEl()).getByRole('button', { name: 'Stop' }));
     expect(onStop).toHaveBeenCalledWith('bg1');
   });

@@ -742,7 +742,11 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
     enabled: taskUiEnabled, messages, claudeSessionId, backgroundTasks, isStreaming, awaitingQuestion,
     pendingApprovalToolUseId: pendingApproval?.toolUseId ?? null,
   });
-  const taskCards = taskBoard.board.cards;
+  // Tabs, chips and the tab bar exist only for tasks the model declared; runtime
+  // (bg shells, undeclared agents) and TodoWrite fallback cards never make tabs.
+  const allCards = taskBoard.board.cards;
+  const taskCards = useMemo(() => allCards.filter(c => c.source === 'declared'), [allCards]);
+  const tabBoard = useMemo(() => ({ ...taskBoard.board, cards: taskCards, allDone: taskCards.every(c => c.status === 'done' || c.status === 'failed') }), [taskBoard.board, taskCards]);
   const showTaskUi = taskUiEnabled && taskCards.length > 0;
   // Task chips in All (display-only): above the first message of each task run.
   const chipBefore = useMemo(
@@ -762,6 +766,9 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
   useEffect(() => {
     if (openTaskId && !openTaskCard) setOpenTaskId(null);
   }, [openTaskId, openTaskCard]);
+  // A new batch may reuse ids: never let the open tab jump to the new task.
+  const batchStartedAt = taskBoard.board.batchStartedAt;
+  useEffect(() => { setOpenTaskId(null); }, [batchStartedAt]);
   // The message list is display:none while a stream is open, which drops its
   // scroll offset; remember it on open and put it back on return.
   const listScrollRef = useRef<number | null>(null);
@@ -2286,7 +2293,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
   // caller (retry, queue, suggestions) sends untagged and unprefixed.
   const handleSend = async (text: string, images?: string[], opts?: { taskCard?: TaskCard | null }) => {
     // Slash commands must reach the command handler as typed, so they are never redirected.
-    const directCard = taskUiEnabled && !text.trim().startsWith('/') ? opts?.taskCard ?? null : null;
+    const directCard = taskUiEnabled && !text.trim().startsWith('/') && opts?.taskCard?.source === 'declared' ? opts.taskCard : null;
     // Handle built-in commands locally
     if (import.meta.env.DEV && text.startsWith('/fake-error')) {
       handleFakeError(text);
@@ -2602,7 +2609,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
     <div className="chat-panel">
       <LoadGuardBanner state={loadGuard} />
       {wantsBarSlot && (() => {
-        const content = <TaskTabs board={taskBoard.board} activeId={openTaskCard?.id ?? null} onSelect={openTaskStream} />;
+        const content = <TaskTabs board={tabBoard} activeId={openTaskCard?.id ?? null} onSelect={openTaskStream} />;
         // No slot (another host, or a background workspace): keep the old
         // in-panel strip rather than dropping the control entirely.
         return tabsSlot ? createPortal(content, tabsSlot) : <div className="task-tabs-fallback">{content}</div>;
