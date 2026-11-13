@@ -763,14 +763,11 @@ export default function App() {
           return;
         }
         void (async () => {
-          const { handleRenderModelRequest } = await import('./render/renderModelTool');
+          const { handleRenderModelRequest, resolveRenderModelCwd } = await import('./render/renderModelTool');
           const { renderModelThumbnail } = await import('./model3d/renderThumbnail');
           // Resolve against the agent's workspace; only touch the code panel
           // when that workspace is the one being viewed.
-          const normWs = (p: string) => p.replace(/^\/var\/home\//, '/home/').replace(/\/+$/, '');
-          const active = activeProjectPathRef.current ?? '';
-          const cwd = req.workspace || active;
-          const sameWs = !req.workspace || (!!active && normWs(req.workspace) === normWs(active));
+          const { cwd, sameWs } = resolveRenderModelCwd(req.workspace, activeProjectPathRef.current ?? '');
           return handleRenderModelRequest(
             { input: req.input, renderId: req.id, cwd },
             {

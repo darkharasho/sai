@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { handleRenderModelRequest } from '../../../src/render/renderModelTool';
+import { handleRenderModelRequest, resolveRenderModelCwd, resolveOpenPath } from '../../../src/render/renderModelTool';
 import { renderStore } from '../../../src/render/renderStore';
 
 const snap = { ok: true as const, versionKey: 'k'.repeat(32), ext: 'stl' as const, absPath: '/p/part.stl', bytes: 10 };
@@ -85,5 +85,23 @@ describe('handleRenderModelRequest', () => {
     await handleRenderModelRequest(req(), mkDeps({ thumbnail: vi.fn(async () => { throw new Error('webgl'); }) }));
     expect(warn).toHaveBeenCalledWith('[render_model] thumbnail failed', expect.any(Error));
     warn.mockRestore();
+  });
+});
+
+describe('resolveRenderModelCwd', () => {
+  it('uses the viewed spelling when the agent workspace is the viewed one via the /var/home symlink', () => {
+    const r = resolveRenderModelCwd('/var/home/u/proj', '/home/u/proj');
+    expect(r).toEqual({ cwd: '/home/u/proj', sameWs: true });
+    // relative path now resolves to the same string as the editor's tab
+    expect(resolveOpenPath(r.cwd, 'out/part.stl')).toBe('/home/u/proj/out/part.stl');
+  });
+  it('falls back to the active workspace when the agent gives none', () => {
+    expect(resolveRenderModelCwd(undefined, '/home/u/proj')).toEqual({ cwd: '/home/u/proj', sameWs: true });
+  });
+  it('keeps the agent workspace and never opens the panel for a background workspace', () => {
+    expect(resolveRenderModelCwd('/home/u/other', '/home/u/proj')).toEqual({ cwd: '/home/u/other', sameWs: false });
+  });
+  it('treats an agent workspace with no active project as background', () => {
+    expect(resolveRenderModelCwd('/home/u/proj', '')).toEqual({ cwd: '/home/u/proj', sameWs: false });
   });
 });

@@ -36,7 +36,21 @@ export function resolveOpenPath(cwd: string, p: string): string {
   return lead + out.join('/');
 }
 
-export const clampModelHeight = (h: unknown, dflt = 360) =>
+const normWs = (p: string) => p.replace(/^\/var\/home\//, '/home/').replace(/[\\/]+$/, '');
+
+/**
+ * Pick the cwd for a render_model call and whether it may touch the code panel.
+ * When the agent's workspace IS the viewed one, resolve against the viewed
+ * spelling (e.g. /home/… not /var/home/…) so the opened path matches existing
+ * editor tabs instead of opening a duplicate.
+ */
+export function resolveRenderModelCwd(workspace: string | undefined, active: string): { cwd: string; sameWs: boolean } {
+  const sameWs = !workspace || (!!active && normWs(workspace) === normWs(active));
+  const cwd = sameWs ? (active || workspace || '') : workspace!;
+  return { cwd, sameWs };
+}
+
+export const clampModelHeight =(h: unknown, dflt = 360) =>
   typeof h === 'number' && Number.isFinite(h) ? Math.min(1200, Math.max(160, h)) : dflt;
 
 const basename = (p: string) => p.split(/[\\/]/).filter(Boolean).pop() ?? p;
