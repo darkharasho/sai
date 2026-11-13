@@ -38,6 +38,12 @@ export interface ChatMessage {
   /** Load-guard chat event (Stopped card / "System load:" note). role 'system',
    *  empty content; never sent to the AI. */
   loadGuard?: LoadGuardChatEvent;
+  /**
+   * Task-feed tag (batch-scoped `${batchStartedAt}:${taskId}`, see taskTag()).
+   * string = filed under that task; null = stamped, belongs to no task;
+   * undefined = legacy/unstamped, the task fold derives it. Display-only.
+   */
+  taskId?: string | null;
 }
 
 /** Mirrors electron/services/loadGuard LoadGuardChatEvent; re-declared so types.ts stays electron-free. */
@@ -121,6 +127,12 @@ export interface ToolCall {
   resultImages?: ToolResultImage[];
   startedAt?: number;
   durationMs?: number;
+  /**
+   * Task-feed tag (batch-scoped `${batchStartedAt}:${taskId}`, see taskTag()).
+   * string = filed under that task; null = stamped, belongs to no task;
+   * undefined = legacy/unstamped, the task fold derives it. Display-only.
+   */
+  taskId?: string | null;
 }
 
 export interface ToolResultImage {

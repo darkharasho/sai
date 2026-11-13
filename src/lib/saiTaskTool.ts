@@ -25,7 +25,7 @@ export const SAI_TASK_TOOL: SaiToolDef = {
             steps: { type: 'array', items: { type: 'string' }, description: 'The real steps, in order.' },
             agent: { type: 'string', description: 'If a background agent will do this task: the exact `description` you will pass to the Agent tool.' },
           },
-          required: ['id', 'title', 'steps'],
+          required: ['id', 'title'],
         },
       },
       id: { type: 'string', description: 'For update: the task id. Also tags the work that follows onto this task\'s card.' },
@@ -51,8 +51,11 @@ export function validateSaiTaskInput(input: unknown): { ok: true } | { ok: false
     }
     for (const t of i.tasks) {
       const r = t as Record<string, unknown> | null;
-      if (!r || typeof r.id !== 'string' || typeof r.title !== 'string' || !Array.isArray(r.steps)) {
-        return { ok: false, error: 'each task needs string id, string title and steps array' };
+      if (!r || typeof r.id !== 'string' || typeof r.title !== 'string') {
+        return { ok: false, error: 'each task needs string id and string title' };
+      }
+      if (r.steps !== undefined && !Array.isArray(r.steps)) {
+        return { ok: false, error: 'steps must be an array of strings' };
       }
     }
     return { ok: true };

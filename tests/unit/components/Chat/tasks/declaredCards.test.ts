@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { deriveDeclaredCards } from '../../../../../src/components/Chat/tasks/declaredCards';
+import { deriveDeclaredCards, itemKey, taskTag } from '../../../../../src/components/Chat/tasks/declaredCards';
 import type { ChatMessage, ToolCall } from '../../../../../src/types';
 
 let n = 0;
@@ -134,7 +134,9 @@ describe('deriveDeclaredCards', () => {
         call(upd({ id: 'a', status: 'running', step: 99, note: 5, agent: 7 })),
       ], 2),
     ];
-    expect(deriveDeclaredCards(bad)).toEqual(deriveDeclaredCards(good));
+    // Tags are keyed per item, so compare everything but the tag map.
+    const strip = ({ tags: _t, ...rest }: ReturnType<typeof deriveDeclaredCards>) => rest;
+    expect(strip(deriveDeclaredCards(bad))).toEqual(strip(deriveDeclaredCards(good)));
   });
 
   it('drops non-string step labels', () => {
@@ -182,6 +184,147 @@ describe('deriveDeclaredCards', () => {
       ]);
       expect(r.cards.map((c) => c.id)).toEqual(['a', 'b']);
       expect(r.batchStartedAt).toBe(1);
+    });
+  });
+  describe('per-item tags', () => {
+    const user = (ts: number, extra: Partial<ChatMessage> = {}): ChatMessage =>
+      ({ id: `u${++n}`, role: 'user', content: 'hi', timestamp: ts, ...extra });
+    const two = () => msg([call(create([{ id: 't1', title: 'One', steps: ['a'] }, { id: 't2', title: 'Two', steps: ['b'] }]))], 100);
+
+    it('tags the sai_task switch call with the task it switches to', () => {
+      const sw = call(upd({ id: 't2', status: 'running' }));
+      sw.id = 'tu-sw';
+      const m = msg([sw], 101);
+      const r = deriveDeclaredCards([two(), m]);
+      expect(r.tags.get(itemKey(m.id, 'tu-sw'))).toBe(taskTag(100, 't2'));
+      expect(r.activeTag).toBe(taskTag(100, 't2'));
+    });
+
+    it('per-item granularity', () => {
+      const bash: ToolCall = { id: 'b1', type: 'terminal_command', name: 'Bash', input: '{}' };
+      const sw = { ...call(upd({ id: 't2', status: 'running' })), id: 's1' };
+      const read: ToolCall = { id: 'r1', type: 'file_read', name: 'Read', input: '{}' };
+      const m = msg([bash, sw, read], 102, 'doing');
+      const r = deriveDeclaredCards([two(), msg([call(upd({ id: 't1', status: 'running' }))], 101), m]);
+      expect(r.tags.get(itemKey(m.id))).toBe(taskTag(100, 't1'));
+      expect(r.tags.get(itemKey(m.id, 'b1'))).toBe(taskTag(100, 't1'));
+      expect(r.tags.get(itemKey(m.id, 's1'))).toBe(taskTag(100, 't2'));
+      expect(r.tags.get(itemKey(m.id, 'r1'))).toBe(taskTag(100, 't2'));
+    });
+
+    it('falls back to the call index for id-less tool calls', () => {
+      const read: ToolCall = { type: 'file_read', name: 'Read', input: '{}' };
+      const m = msg([call(upd({ id: 't1', status: 'running' })), read], 101);
+      const r = deriveDeclaredCards([two(), m]);
+      expect(itemKey(m.id, undefined, 1)).toBe(`${m.id}#1`);
+      expect(r.tags.get(`${m.id}#1`)).toBe(taskTag(100, 't1'));
+      expect(r.tags.get(`${m.id}#0`)).toBe(taskTag(100, 't1'));
+    });
+
+    it('user message clears the active task', () => {
+      const u = user(102);
+      const t = msg(undefined, 103, 'text');
+      const r = deriveDeclaredCards([two(), msg([call(upd({ id: 't1', status: 'running' }))], 101), u, t]);
+      expect(r.tags.get(itemKey(u.id))).toBeNull();
+      expect(r.tags.get(itemKey(t.id))).toBeNull();
+      expect(r.activeTag).toBeNull();
+      expect(r.activeCardId).toBeNull();
+    });
+
+    it('reply to a tagged pending question keeps the task', () => {
+      const ask: ToolCall = { id: 'q1', type: 'question', name: 'AskUserQuestion', input: '{}' };
+      const u = user(103);
+      const t = msg(undefined, 104, 'text');
+      const r = deriveDeclaredCards([two(), msg([call(upd({ id: 't1', status: 'running' }))], 101), msg([ask], 102), u, t]);
+      expect(r.tags.get(itemKey(u.id))).toBe(taskTag(100, 't1'));
+      expect(r.tags.get(itemKey(t.id))).toBe(taskTag(100, 't1'));
+    });
+
+    it('an answered question does not capture the next user message', () => {
+      const ask: ToolCall = { id: 'q1', type: 'question', name: 'AskUserQuestion', input: '{}', output: 'answered' };
+      const u = user(103);
+      const r = deriveDeclaredCards([two(), msg([call(upd({ id: 't1', status: 'running' }))], 101), msg([ask], 102), u]);
+      expect(r.tags.get(itemKey(u.id))).toBeNull();
+    });
+
+    it('done clears; switching moves', () => {
+      const fin = { ...call(upd({ id: 't1', status: 'done' })), id: 'f1' };
+      const m = msg([fin], 102);
+      const t = msg(undefined, 103, 'text');
+      const r = deriveDeclaredCards([two(), msg([call(upd({ id: 't1', status: 'running' }))], 101), m, t]);
+      expect(r.tags.get(itemKey(m.id, 'f1'))).toBe(taskTag(100, 't1'));
+      expect(r.tags.get(itemKey(t.id))).toBeNull();
+      const s = msg(undefined, 104, 'more');
+      const r2 = deriveDeclaredCards([two(), msg([call(upd({ id: 't1', status: 'running' }))], 101), msg([call(upd({ id: 't2', status: 'running' }))], 102), s]);
+      expect(r2.tags.get(itemKey(s.id))).toBe(taskTag(100, 't2'));
+    });
+
+    it('create does not change the active task', () => {
+      const c = { ...call(create([{ id: 't3', title: 'Three' }])), id: 'c3' };
+      const m = msg([c], 102);
+      const r = deriveDeclaredCards([two(), msg([call(upd({ id: 't1', status: 'running' }))], 101), m]);
+      expect(r.tags.get(itemKey(m.id, 'c3'))).toBe(taskTag(100, 't1'));
+      expect(r.activeCardId).toBe('t1');
+    });
+
+    it('system rows are null and never change active', () => {
+      const sys: ChatMessage = { id: 'sys1', role: 'system', content: 'note', timestamp: 102 };
+      const t = msg(undefined, 103, 'text');
+      const r = deriveDeclaredCards([two(), msg([call(upd({ id: 't1', status: 'running' }))], 101), sys, t]);
+      expect(r.tags.get('sys1')).toBeNull();
+      expect(r.tags.get(itemKey(t.id))).toBe(taskTag(100, 't1'));
+    });
+
+    it('batch-scoped tags', () => {
+      const ta = msg(undefined, 3, 'a text');
+      const tb = msg(undefined, 13, 'b text');
+      const r = deriveDeclaredCards([
+        msg([call(create([{ id: 't1', title: 'A' }]))], 1),
+        msg([call(upd({ id: 't1', status: 'running' }))], 2),
+        ta,
+        msg([call(upd({ id: 't1', status: 'done' }))], 4),
+        user(5),
+        msg([call(create([{ id: 't1', title: 'B' }]))], 11),
+        msg([call(upd({ id: 't1', status: 'running' }))], 12),
+        tb,
+      ]);
+      const a = r.tags.get(itemKey(ta.id));
+      const b = r.tags.get(itemKey(tb.id));
+      expect(a).not.toBe(b);
+      expect(a!.startsWith('1:')).toBe(true);
+      expect(b!.startsWith('11:')).toBe(true);
+      expect(r.cards[0].messageIds).toEqual([tb.id]);
+    });
+
+    it('stored tags win', () => {
+      const t: ChatMessage = { ...msg(undefined, 102, 'text'), taskId: null };
+      const r = deriveDeclaredCards([two(), msg([call(upd({ id: 't1', status: 'running' }))], 101), t]);
+      expect(r.tags.get(itemKey(t.id))).toBeNull();
+      expect(r.activeCardId).toBe('t1');
+    });
+
+    it('a stored string tag on a user message makes it active', () => {
+      const u = user(102, { taskId: taskTag(100, 't2') });
+      const t = msg(undefined, 103, 'text');
+      const r = deriveDeclaredCards([two(), u, t]);
+      expect(r.tags.get(itemKey(u.id))).toBe(taskTag(100, 't2'));
+      expect(r.tags.get(itemKey(t.id))).toBe(taskTag(100, 't2'));
+      expect(r.activeCardId).toBe('t2');
+    });
+
+    it('a stored tag on a tool call wins', () => {
+      const read: ToolCall = { id: 'r1', type: 'file_read', name: 'Read', input: '{}', taskId: taskTag(100, 't2') };
+      const m = msg([read], 102);
+      const r = deriveDeclaredCards([two(), msg([call(upd({ id: 't1', status: 'running' }))], 101), m]);
+      expect(r.tags.get(itemKey(m.id, 'r1'))).toBe(taskTag(100, 't2'));
+    });
+
+    it('steps optional', () => {
+      let r!: ReturnType<typeof deriveDeclaredCards>;
+      expect(() => { r = deriveDeclaredCards([msg([call(create([{ id: 't1', title: 'No steps' }]))], 1)]); }).not.toThrow();
+      expect(r.cards).toHaveLength(1);
+      expect(r.cards[0].steps).toEqual([]);
+      expect(r.cards[0].totalCount).toBe(0);
     });
   });
 });

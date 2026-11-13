@@ -38,4 +38,10 @@ describe('saiTaskTool', () => {
     expect(isSaiTaskToolName('mcp__evil__sai_task')).toBe(false);
     expect(isSaiTaskToolName('not_sai_task')).toBe(false);
   });
+  it('steps are optional on create but must be an array when present', () => {
+    expect(validateSaiTaskInput({ action: 'create', tasks: [{ id: 't1', title: 'A' }] }).ok).toBe(true);
+    expect(validateSaiTaskInput({ action: 'create', tasks: [{ id: 't1', title: 'A', steps: 'x' }] }).ok).toBe(false);
+    const items = (SAI_TASK_TOOL.input_schema as any).properties.tasks.items;
+    expect(items.required).toEqual(['id', 'title']);
+  });
 });
