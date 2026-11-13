@@ -98,7 +98,7 @@ import { useTaskBoard } from './tasks/useTaskBoard';
 import { TaskTabs, TASK_TABS_SLOT_ID } from './tasks/TaskTabs';
 import { TaskFeedView } from './tasks/TaskFeedView';
 import { TaskChip } from './tasks/TaskChip';
-import { taskChips, type TaskChipInfo } from './tasks/taskFeed';
+import { taskChips, directAtTask, type TaskChipInfo } from './tasks/taskFeed';
 import type { TaskCard } from './tasks/types';
 import './tasks/tasks.css';
 import type { BackgroundTaskDetail } from '../../../electron/services/claudeBackend/backgroundTasks';
@@ -2382,6 +2382,8 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
       content: text,
       timestamp: Date.now(),
       images: images?.length ? images : undefined,
+      // A message typed on a task tab belongs to that task; stamping keeps an explicit tag.
+      ...(taskUiEnabled && openTaskCard ? { taskId: openTaskCard.tag } : {}),
     }]);
 
     // Save images to temp files and get paths
@@ -2395,7 +2397,8 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
     // Our own send starts a fresh turn: its errors (even before streaming_start,
     // e.g. a failed resume) are real, not the killed agent's.
     loadGuardKillRef.current = null;
-    const prompt = activeFilePath && fileContextEnabled ? `[File: ${activeFilePath}]\n\n${text}` : text;
+    const builtPrompt = activeFilePath && fileContextEnabled ? `[File: ${activeFilePath}]\n\n${text}` : text;
+    const prompt = taskUiEnabled && openTaskCard ? directAtTask(builtPrompt, openTaskCard.title) : builtPrompt;
     if (aiProvider === 'gemini') {
       (window.sai as any).geminiSend(projectPath, prompt, imagePaths, geminiApprovalMode, geminiConversationMode, geminiModel, 'chat');
     } else if (aiProvider === 'kimi') {

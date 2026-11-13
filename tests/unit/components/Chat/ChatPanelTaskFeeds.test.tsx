@@ -26,6 +26,7 @@ vi.mock('../../../../src/components/Chat/ChatInput', () => ({
 vi.mock('../../../../src/components/Chat/MessageQueue', () => ({ default: () => <div /> }));
 vi.mock('../../../../src/components/ThinkingAnimation', () => ({ default: () => <div /> }));
 
+import { directAtTask } from '../../../../src/components/Chat/tasks/taskFeed';
 import ChatPanel from '../../../../src/components/Chat/ChatPanel';
 
 type Props = ComponentProps<typeof ChatPanel>;
@@ -243,5 +244,39 @@ describe('ChatPanel task feeds integration', () => {
     await act(async () => { fireEvent.click(tabFor('Research gamma')); });
     fireEvent.click(within(feedEl()).getByRole('button', { name: 'Stop' }));
     expect(onStop).toHaveBeenCalledWith('bg1');
+  });
+
+  describe('directing typed messages', () => {
+    const sentPrompt = () => (window.sai.claudeSend as any).mock.calls.at(-1)[1];
+    const latestMessages = (props: Props) => (props.onMessagesChange as any).mock.calls.at(-1)[0] as any[];
+
+    it('message typed on a task tab is tagged and prefixed', async () => {
+      const props = baseProps();
+      await mount(props);
+      fireEvent.click(tabFor('Alpha task'));
+      await act(async () => { await inputProps.onSend('fix it'); });
+      const msgs = await waitFor(() => {
+        const m = latestMessages(props);
+        expect(m.some((x) => x.content === 'fix it')).toBe(true);
+        return m;
+      });
+      const sent = msgs.find((x) => x.content === 'fix it');
+      expect(sent.taskId).toMatch(/:alpha$/);
+      expect(sentPrompt()).toBe(directAtTask('fix it', 'Alpha task'));
+      expect(streamTexts()).toContain('fix it');
+    });
+
+    it('typing in All is unchanged', async () => {
+      const props = baseProps();
+      await mount(props);
+      await act(async () => { await inputProps.onSend('fix it'); });
+      const msgs = await waitFor(() => {
+        const m = latestMessages(props);
+        expect(m.some((x) => x.content === 'fix it')).toBe(true);
+        return m;
+      });
+      expect(msgs.find((x) => x.content === 'fix it').taskId).toBeNull();
+      expect(sentPrompt()).toBe('fix it');
+    });
   });
 });

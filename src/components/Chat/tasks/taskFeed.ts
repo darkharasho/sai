@@ -121,3 +121,8 @@ export function taskChips(
   }
   return out;
 }
+
+/** Points a prompt typed on a task tab at that task. */
+export function directAtTask(prompt: string, title: string): string {
+  return `About task "${title}": ${prompt}`;
+}
