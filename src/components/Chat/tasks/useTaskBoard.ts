@@ -57,7 +57,7 @@ export interface StreamFallback {
 export interface TaskBoardState {
   /** Cards carry their `now` label. */
   board: TaskBoard;
-  /** One todo per card for the composer ring; undefined = no cards, keep the composer's own todo derivation. */
+  /** One todo per card for the composer ring; undefined = no cards or only the TodoWrite fallback card, keep the composer's own todo derivation. */
   todos: Todo[] | null | undefined;
   pendingQuestion: PendingTaskQuestion | null;
   /** A card's feed (the chat filtered to its tag, plus its agent transcript); null = see streamFallback. */
@@ -205,7 +205,8 @@ export function useTaskBoard({
   }, [runtimeBoard, transcripts, messages, tags]);
 
   const todos = useMemo(() => {
-    if (board.cards.length === 0) return undefined;
+    // Only the TodoWrite fallback card (or none): keep the composer's own TodoWrite ring.
+    if (board.cards.every((c) => c.source === 'fallback')) return undefined;
     return board.cards.map((c): Todo => ({ id: c.id, content: c.title, status: TODO_STATUS[c.status] ?? 'pending' }));
   }, [board]);
 

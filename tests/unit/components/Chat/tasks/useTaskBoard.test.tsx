@@ -166,6 +166,28 @@ describe('useTaskBoard feeds', () => {
     expect(hook([]).result.current.todos).toBeUndefined();
   });
 
+  it('a TodoWrite-only chat leaves todos undefined so the composer keeps its own TodoWrite ring', async () => {
+    const todoList = [
+      { id: '1', content: 'Write tests', status: 'completed' },
+      { id: '2', content: 'Implement', status: 'in_progress' },
+    ];
+    const todoOnly: any[] = [
+      { id: 'm0', role: 'assistant', content: '', timestamp: 1, toolCalls: [{ id: 'tw', type: 'other', name: 'TodoWrite', input: json({ todos: todoList }), output: 'ok' }] },
+    ];
+    const { result } = hook(todoOnly);
+    await flush();
+    expect(result.current.board.cards.map((c) => c.id)).toEqual(['current-work']);
+    expect(result.current.todos).toBeUndefined();
+
+    const withTasks: any[] = [
+      ...todoOnly,
+      { id: 'm1', role: 'assistant', content: '', timestamp: 2, toolCalls: [sai('c0', { action: 'create', tasks: [{ id: 'a', title: 'A' }] })] },
+    ];
+    const tasked = hook(withTasks);
+    await flush();
+    expect(tasked.result.current.todos).toEqual([{ id: 'a', content: 'A', status: 'pending' }]);
+  });
+
   it('an agent-backed card interleaves its transcript with its tagged chat items', async () => {
     const ts = (ms: number) => new Date(ms).toISOString();
     fetchFn.mockResolvedValue({
