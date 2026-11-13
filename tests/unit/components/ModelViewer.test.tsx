@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 
-const state = vi.hoisted(() => ({ throwOnCreate: false, renders: 0, disposed: 0 }));
+const state = vi.hoisted(() => ({ throwOnCreate: false, throwOnClear: false, renders: 0, disposed: 0, lost: 0, scene: null as any, camera: null as any, controls: null as any }));
 
 vi.mock('three', async () => {
   const actual = await vi.importActual<typeof import('three')>('three');
@@ -12,12 +12,20 @@ vi.mock('three', async () => {
     }
     setPixelRatio() {}
     setSize() {}
-    setClearColor() {}
-    render() { state.renders++; }
+    setClearColor() { if (state.throwOnClear) throw new Error('append fail'); }
+    render(scene: any, camera: any) { state.renders++; state.scene = scene; state.camera = camera; }
     dispose() { state.disposed++; }
-    forceContextLoss() {}
+    forceContextLoss() { state.lost++; }
   }
   return { ...actual, WebGLRenderer: FakeRenderer };
+});
+
+vi.mock('three/examples/jsm/controls/OrbitControls.js', async () => {
+  const actual = await vi.importActual<any>('three/examples/jsm/controls/OrbitControls.js');
+  class Rec extends actual.OrbitControls {
+    constructor(...a: any[]) { super(...a); state.controls = this; }
+  }
+  return { ...actual, OrbitControls: Rec };
 });
 
 import ModelViewer from '../../../src/model3d/ModelViewer';
@@ -43,8 +51,10 @@ function cubeStl(): ArrayBuffer {
 
 beforeEach(() => {
   state.throwOnCreate = false;
+  state.throwOnClear = false;
   state.renders = 0;
   state.disposed = 0;
+  state.lost = 0;
   (globalThis as any).ResizeObserver = class { observe() {} unobserve() {} disconnect() {} };
 });
 
@@ -100,5 +110,33 @@ describe('ModelViewer', () => {
     await waitFor(() => expect(onReady).toHaveBeenCalled());
     unmount();
     expect(state.disposed).toBeGreaterThanOrEqual(1);
+    expect(state.lost).toBeGreaterThanOrEqual(1);
+  });
+
+  it('keeps camera and target on reload and disposes the old geometry', async () => {
+    const onReady = vi.fn();
+    const good = async () => ({ buf: cubeStl(), ext: 'stl' as const });
+    const { rerender } = render(<ModelViewer load={good} reloadToken={0} onReady={onReady} />);
+    await waitFor(() => expect(onReady).toHaveBeenCalledTimes(1));
+    state.camera.position.set(1, 2, 3);
+    state.controls.target.set(4, 5, 6);
+    const oldMesh = state.scene.children.find((o: any) => o.isMesh);
+    const spy = vi.spyOn(oldMesh.geometry, 'dispose');
+    rerender(<ModelViewer load={good} reloadToken={1} onReady={onReady} />);
+    await waitFor(() => expect(onReady).toHaveBeenCalledTimes(2));
+    expect(state.camera.position.toArray()).toEqual([1, 2, 3]);
+    expect(state.controls.target.toArray()).toEqual([4, 5, 6]);
+    expect(spy).toHaveBeenCalled();
+    expect(state.scene.children.find((o: any) => o.isMesh)).not.toBe(oldMesh);
+  });
+
+  it('reports unavailable and onError when setup throws after the renderer is created', async () => {
+    const onError = vi.fn();
+    state.throwOnCreate = false;
+    state.throwOnClear = true;
+    render(<ModelViewer load={async () => ({ buf: cubeStl(), ext: 'stl' })} onError={onError} />);
+    await waitFor(() => expect(screen.getByText(/3D view unavailable/)).toBeTruthy());
+    expect(onError).toHaveBeenCalledWith('append fail');
+    expect(state.lost).toBeGreaterThanOrEqual(1);
   });
 });

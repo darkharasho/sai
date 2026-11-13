@@ -88,6 +88,8 @@ export default function ModelViewer({
   const [info, setInfo] = useState<{ triangles: number; size: { x: number; y: number; z: number } } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [wireframe, setWireframe] = useState(false);
+  const wireframeRef = useRef(false);
+  wireframeRef.current = wireframe;
 
   // Renderer / scene / controls setup.
   useEffect(() => {
@@ -95,20 +97,34 @@ export default function ModelViewer({
     let created: Ctx | null = null;
     let ro: ResizeObserver | null = null;
 
+    rootRef.current?.removeAttribute('data-render-ready');
+    const teardown = (c: Ctx) => {
+      c.dead = true;
+      c.controls?.removeEventListener('change', c.draw);
+      c.controls?.dispose();
+      if (c.mesh) disposeObject(c.mesh);
+      if (c.grid) disposeObject(c.grid);
+      c.renderer.dispose();
+      c.renderer.forceContextLoss();
+      c.renderer.domElement.remove();
+    };
+
     (async () => {
+     let renderer: THREE.WebGLRenderer | null = null;
+     try {
       const T = await import('three');
       const { OrbitControls: Controls } = interactive
         ? await import('three/examples/jsm/controls/OrbitControls.js')
         : { OrbitControls: null };
       if (disposed || !hostRef.current || !rootRef.current) return;
 
-      let renderer: THREE.WebGLRenderer;
       try {
         renderer = new T.WebGLRenderer({ antialias: true });
       } catch {
         if (!disposed) setUnavailable(true);
         return;
       }
+      const rd: THREE.WebGLRenderer = renderer;
       const host = hostRef.current;
       const bg = getComputedStyle(rootRef.current).getPropertyValue('--sai-surface').trim() || '#1e1e1e';
       renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
@@ -125,11 +141,11 @@ export default function ModelViewer({
       const c: Ctx = {
         T, renderer, scene, camera, light,
         controls: null, mesh: null, grid: null, box: null,
-        framed: false, wireframe: false, dead: false,
+        framed: false, wireframe: wireframeRef.current, dead: false,
         draw: () => {
           if (c.dead) return;
           light.position.copy(camera.position);
-          renderer.render(scene, camera);
+          rd.render(scene, camera);
         },
       };
       if (Controls) {
@@ -139,7 +155,7 @@ export default function ModelViewer({
       const resize = () => {
         const w = host.clientWidth || 1;
         const h = host.clientHeight || 1;
-        renderer.setSize(w, h);
+        rd.setSize(w, h);
         camera.aspect = w / h;
         camera.updateProjectionMatrix();
         c.draw();
@@ -149,20 +165,24 @@ export default function ModelViewer({
       ro.observe(host);
       created = c;
       setCtx(c);
+     } catch (e) {
+      const r = renderer as THREE.WebGLRenderer | null;
+      if (r) {
+        r.dispose();
+        r.forceContextLoss();
+        r.domElement.remove();
+      }
+      created = null;
+      if (disposed) return;
+      setUnavailable(true);
+      onErrorRef.current?.(e instanceof Error ? e.message : String(e));
+     }
     })();
 
     return () => {
       disposed = true;
       ro?.disconnect();
-      if (created) {
-        created.dead = true;
-        created.controls?.removeEventListener('change', created.draw);
-        created.controls?.dispose();
-        if (created.mesh) disposeObject(created.mesh);
-        if (created.grid) disposeObject(created.grid);
-        created.renderer.dispose();
-        created.renderer.domElement.remove();
-      }
+      if (created) teardown(created);
     };
   }, [interactive]);
 
