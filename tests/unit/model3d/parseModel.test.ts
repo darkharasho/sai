@@ -35,6 +35,16 @@ describe('parseModel', () => {
     }
   });
 
+  it('stl normals are non-zero even when facet normals are 0 0 0', async () => {
+    const m = await parseModel(toAB(readFileSync(fx('cube-ascii.stl'))), 'stl');
+    const geo = (m.object as import('three').Mesh).geometry;
+    const n = geo.getAttribute('normal');
+    expect(n.count).toBeGreaterThan(0);
+    for (let i = 0; i < n.count; i++) {
+      expect(Math.hypot(n.getX(i), n.getY(i), n.getZ(i))).toBeCloseTo(1);
+    }
+  });
+
   it('parses obj', async () => {
     const m = await parseModel(toAB(readFileSync(fx('cube.obj'))), 'obj');
     expect(m.triangles).toBe(12);

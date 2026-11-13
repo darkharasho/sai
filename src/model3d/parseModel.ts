@@ -20,7 +20,8 @@ export async function parseModel(buf: ArrayBuffer, ext: ModelExt): Promise<Parse
     if (ext === 'stl') {
       const { STLLoader } = await import('three/examples/jsm/loaders/STLLoader.js');
       const geometry = new STLLoader().parse(buf);
-      if (!geometry.getAttribute('normal')) geometry.computeVertexNormals();
+      // Always recompute: many exporters write 0 0 0 facet normals.
+      geometry.computeVertexNormals();
       const material = new T.MeshStandardMaterial({
         color: 0xb8c4d0,
         metalness: 0.1,
