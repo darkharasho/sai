@@ -139,7 +139,7 @@ describe('ChatPanel task feeds integration', () => {
       ] as any,
     });
     expect(document.querySelector('.task-tabs')).toBeNull();
-    expect(document.querySelector('.task-chip')).toBeNull();
+    expect(document.querySelector('.task-feed-chip')).toBeNull();
     expect(inputProps.todos).toBeUndefined();
     expect(msgTexts()).toEqual(['hello', 'hi there']);
   });
@@ -157,10 +157,10 @@ describe('ChatPanel task feeds integration', () => {
         { id: 'a6', role: 'assistant', content: 'Beta work', timestamp: 8 },
       ] as any,
     });
-    const chips = Array.from(document.querySelectorAll('.chat-messages .task-chip'));
+    const chips = Array.from(document.querySelectorAll('.chat-messages .task-feed-chip'));
     expect(chips.map((c) => c.textContent)).toEqual(['Alpha task', 'Beta task']);
     // Card index picks the color: alpha is card 0, beta card 1.
-    expect(chips.map((c) => c.className)).toEqual(['task-chip task-chip--c0', 'task-chip task-chip--c1']);
+    expect(chips.map((c) => c.className)).toEqual(['task-feed-chip task-feed-chip--c0', 'task-feed-chip task-feed-chip--c1']);
     // The chip sits right above the first message of each run.
     expect(chips[0].nextElementSibling?.textContent).toBe('Alpha work in progress');
     expect(chips[1].nextElementSibling?.textContent).toBe('Beta work');
@@ -181,7 +181,7 @@ describe('ChatPanel task feeds integration', () => {
     expect(messageList()).not.toBeVisible();
     expect(pinnedBar().style.display).toBe('none');
     // Chips belong to All only.
-    expect(feedEl().querySelector('.task-chip')).toBeNull();
+    expect(feedEl().querySelector('.task-feed-chip')).toBeNull();
 
     fireEvent.click(screen.getByText('← All'));
     expect(screen.queryByTestId('task-feed')).toBeNull();

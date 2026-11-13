@@ -96,15 +96,15 @@
 .task-tabs__collapse { align-self: center; margin-left: auto; }
 
 /* Task chip: marks where a task's run starts in All. Six colors by card index. */
-.task-chip {
-  align-self: flex-start; display: inline-block; max-width: 240px; margin: 0 16px 6px;
+.task-feed-chip {
+  align-self: flex-start; flex-shrink: 0; display: inline-block; max-width: 240px; margin: 0 16px 6px;
   padding: 1px 8px; border-radius: 9px; border: 1px solid currentColor;
   font-size: var(--text-xs); line-height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   background: color-mix(in srgb, currentColor 12%, transparent);
 }
-.task-chip--c0 { color: var(--blue); }
-.task-chip--c1 { color: var(--purple); }
-.task-chip--c2 { color: var(--turquoise); }
-.task-chip--c3 { color: var(--pink); }
-.task-chip--c4 { color: var(--yellow); }
-.task-chip--c5 { color: var(--green); }
+.task-feed-chip--c0 { color: var(--blue); }
+.task-feed-chip--c1 { color: var(--purple); }
+.task-feed-chip--c2 { color: var(--turquoise); }
+.task-feed-chip--c3 { color: var(--pink); }
+.task-feed-chip--c4 { color: var(--yellow); }
+.task-feed-chip--c5 { color: var(--green); }

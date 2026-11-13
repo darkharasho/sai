@@ -10,6 +10,6 @@ describe('TaskChip', () => {
     render(<TaskChip title="Alpha task" colorIndex={7} />);
     const chip = screen.getByText('Alpha task');
     expect(chip.tagName).toBe('SPAN');
-    expect(chip.className).toBe('task-chip task-chip--c1');
+    expect(chip.className).toBe('task-feed-chip task-feed-chip--c1');
   });
 });
