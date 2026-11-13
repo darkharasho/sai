@@ -42,7 +42,7 @@ vi.mock('node:fs', () => ({
   mkdirSync: vi.fn(),
 }));
 
-vi.mock('@electron/services/swarmMcpHost', () => ({
+vi.mock('@electron/services/saiMcpHost', () => ({
   start: vi.fn().mockReturnValue({ socketPath: '/tmp/default.sock', secret: 'default-secret' }),
   stop: vi.fn(),
 }));
@@ -65,9 +65,8 @@ vi.mock('node:child_process', async (importOriginal) => {
 import { buildArgs, CHAT_RENDER_NUDGE, CHAT_GITHUB_WATCH_NUDGE } from '../../../electron/services/claude';
 
 describe('buildArgs — chat session MCP config', () => {
-  it('includes --mcp-config when kind=chat and workspace is provided', () => {
+  it('includes --mcp-config when workspace is provided', () => {
     const args = buildArgs({
-      kind: 'chat',
       workspace: '/w',
       getMcpHandle: () => ({ socketPath: 's', secret: 'x' }),
       writeMcpConfig: () => '/tmp/cfg.json',
@@ -82,7 +81,6 @@ describe('buildArgs — chat session MCP config', () => {
 
   it('does NOT include --strict-mcp-config for chat sessions', () => {
     const args = buildArgs({
-      kind: 'chat',
       workspace: '/w',
       getMcpHandle: () => ({ socketPath: 's', secret: 'x' }),
       writeMcpConfig: () => '/tmp/cfg.json',
@@ -95,7 +93,6 @@ describe('buildArgs — chat session MCP config', () => {
 
   it('does NOT include --tools for chat sessions', () => {
     const args = buildArgs({
-      kind: 'chat',
       workspace: '/w',
       getMcpHandle: () => ({ socketPath: 's', secret: 'x' }),
       writeMcpConfig: () => '/tmp/cfg.json',
@@ -106,12 +103,11 @@ describe('buildArgs — chat session MCP config', () => {
     expect(args).not.toContain('--tools');
   });
 
-  it('does not add --mcp-config (SAI) when kind=chat and workspace is absent', () => {
+  it('does not add --mcp-config (SAI) when workspace is absent', () => {
     // When no workspace, chat falls through to the mcpConfigPath settings path
     // (and SAI's own MCP config is not added since there's no workspace to pass)
     const writeMock = vi.fn().mockReturnValue('/tmp/cfg.json');
     buildArgs({
-      kind: 'chat',
       workspace: undefined,
       getMcpHandle: () => ({ socketPath: 's', secret: 'x' }),
       writeMcpConfig: writeMock,
@@ -122,10 +118,9 @@ describe('buildArgs — chat session MCP config', () => {
     expect(writeMock).not.toHaveBeenCalled();
   });
 
-  it('passes toolset=chat to writeMcpConfig for chat sessions', () => {
+  it('passes the SAI host handle, workspace and script path to writeMcpConfig', () => {
     const writeMock = vi.fn().mockReturnValue('/tmp/cfg.json');
     buildArgs({
-      kind: 'chat',
       workspace: '/w',
       getMcpHandle: () => ({ socketPath: 's', secret: 'x' }),
       writeMcpConfig: writeMock,
@@ -133,14 +128,13 @@ describe('buildArgs — chat session MCP config', () => {
       resolveElectronExecPath: () => 'elec',
       readSetting: () => undefined,
     });
-    expect(writeMock).toHaveBeenCalledWith(
-      expect.objectContaining({ toolset: 'chat' }),
-    );
+    expect(writeMock).toHaveBeenCalledWith({
+      socketPath: 's', secret: 'x', workspace: '/w', mcpServerScriptPath: 'srv.js', electronExecPath: 'elec',
+    });
   });
 
   it('appends the render-tool nudge to the system prompt for chat sessions', () => {
     const args = buildArgs({
-      kind: 'chat',
       workspace: '/w',
       getMcpHandle: () => ({ socketPath: 's', secret: 'x' }),
       writeMcpConfig: () => '/tmp/cfg.json',
@@ -160,7 +154,6 @@ describe('buildArgs — chat session MCP config', () => {
 
   it('appends the GitHub watcher nudge to the system prompt for chat sessions', () => {
     const args = buildArgs({
-      kind: 'chat',
       workspace: '/w',
       getMcpHandle: () => ({ socketPath: 's', secret: 'x' }),
       writeMcpConfig: () => '/tmp/cfg.json',
@@ -184,7 +177,6 @@ describe('buildArgs — chat session MCP config', () => {
     // flags would silently clobber earlier sections (metaPreamble used to
     // wipe out the render nudge).
     const args = buildArgs({
-      kind: 'chat',
       workspace: '/w',
       metaPreamble: 'META PREAMBLE SECTION',
       getMcpHandle: () => ({ socketPath: 's', secret: 'x' }),
@@ -203,7 +195,6 @@ describe('buildArgs — chat session MCP config', () => {
 
   it('does NOT append the render nudge when chat has no workspace (tool not attached)', () => {
     const args = buildArgs({
-      kind: 'chat',
       workspace: undefined,
       getMcpHandle: () => ({ socketPath: 's', secret: 'x' }),
       writeMcpConfig: () => '/tmp/cfg.json',
@@ -214,17 +205,19 @@ describe('buildArgs — chat session MCP config', () => {
     expect(args).not.toContain('--append-system-prompt');
   });
 
-  it('orchestrator still gets --strict-mcp-config and --tools', () => {
-    const args = buildArgs({
-      kind: 'orchestrator',
-      workspace: '/w',
-      getMcpHandle: () => ({ socketPath: 's', secret: 'x' }),
-      writeMcpConfig: () => '/tmp/orch.json',
-      resolveMcpServerScriptPath: () => 'srv.js',
-      resolveElectronExecPath: () => 'elec',
-      readSetting: () => undefined,
-    });
-    expect(args).toContain('--strict-mcp-config');
-    expect(args).toContain('--tools');
+  it('does NOT include --system-prompt for chat sessions', () => {
+    const args = buildArgs({ readSetting: () => undefined });
+    expect(args).not.toContain('--system-prompt');
   });
+
+  it('passes the user mcpConfigPath setting through for chat sessions', () => {
+    const args = buildArgs({
+      readSetting: (k: string) => (k === 'mcpConfigPath' ? '/user/mcp.json' : undefined),
+    });
+    const idx = args.indexOf('--mcp-config');
+    expect(idx).toBeGreaterThan(-1);
+    expect(args[idx + 1]).toBe('/user/mcp.json');
+    expect(args).not.toContain('--strict-mcp-config');
+  });
+
 });

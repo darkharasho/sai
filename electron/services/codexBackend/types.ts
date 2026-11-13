@@ -1,12 +1,4 @@
-export type CodexSessionKind = 'chat' | 'task' | 'orchestrator';
 export type CodexBackendMode = 'sdk' | 'app-server';
-
-/** Fixed, main-process-owned definition for an App Server Dynamic Tool. */
-export interface CodexDynamicTool {
-  name: string;
-  description: string;
-  inputSchema: Record<string, unknown>;
-}
 
 /** The App Server preview is opt-in and may become unavailable at runtime. */
 export interface CodexAppServerPreviewStatus {
@@ -316,8 +308,6 @@ export function isCodexApprovalDecision(value: unknown): value is CodexApprovalD
 export interface CodexStartArgs {
   projectPath: string;
   scope?: string;
-  kind?: CodexSessionKind;
-  orchestratorContext?: Record<string, unknown> | null;
   scopeCwd?: string;
   metaPreamble?: string;
   additionalDirectories?: string[];
@@ -377,8 +367,6 @@ export interface CodexBackend {
   /** App Server-only global User MCP configuration bridge. */
   getMcpConfig?(): Promise<CodexMcpConfigResult>;
   replaceMcpConfig?(expectedVersion: string, servers: CodexMcpConfigServer[]): Promise<CodexMcpConfigResult>;
-  /** App Server exposes this only after its experimental Swarm bridge probes cleanly. */
-  getSwarmStatus?(): Promise<CodexAppServerPreviewStatus>;
   approve(projectPath: string, scope: string | undefined, requestHandle: string, decision: CodexApprovalDecision): CodexApprovalResult;
   /** SDK returns a typed unsupported result; App Server validates a pending request. */
   answerUserInput(projectPath: string, scope: string | undefined, requestHandle: string, response: CodexUserInputResponse): CodexApprovalResult;

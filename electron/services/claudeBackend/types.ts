@@ -4,8 +4,6 @@ import type { SlashCommandInfo } from '../slashCommands';
 export interface StartArgs {
   projectPath: string;
   scope?: string;
-  kind?: 'chat' | 'task' | 'orchestrator';
-  orchestratorContext?: Record<string, unknown> | null;
   scopeCwd?: string;
   metaPreamble?: string;
 }

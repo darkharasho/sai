@@ -2,6 +2,11 @@ import { describe, it, expect } from 'vitest';
 import { entryFromToolCall } from '../../../src/components/Chat/RenderToolCallCard';
 import type { ToolCall } from '../../../src/types';
 
+// Legacy-history fixture: CLI-backend chats saved before the swarm removal
+// recorded SAI tools as mcp__swarm__sai_* (the server is now registered as
+// 'sai'). Matching is by suffix, so that persisted history must keep working.
+const LEGACY_RENDER_HTML = 'mcp__swarm__sai_render_html';
+
 function tc(name: string, input: unknown): ToolCall {
   return { id: 't1', name, input: JSON.stringify(input) } as ToolCall;
 }
@@ -68,9 +73,18 @@ it('returns null for confirm with no message', () => {
   expect(entryFromToolCall(tc('sai_confirm', {}))).toBeNull();
 });
 
+it('current mcp__sai__ name builds the same file-mode entry', () => {
+  const built = entryFromToolCall(
+    { id: 't0', name: 'mcp__sai__sai_render_html', input: JSON.stringify({ path: 'site/index.html' }) } as any,
+    '/work',
+  );
+  expect(built?.entry.kind).toBe('html');
+  expect((built?.entry.payload as any).mode).toBe('file');
+});
+
 it('path → file-mode entry carrying cwd + path', () => {
   const built = entryFromToolCall(
-    { id: 't1', name: 'mcp__swarm__sai_render_html', input: JSON.stringify({ path: 'site/index.html' }) } as any,
+    { id: 't1', name: LEGACY_RENDER_HTML, input: JSON.stringify({ path: 'site/index.html' }) } as any,
     '/work',
   );
   expect(built?.entry.kind).toBe('html');
@@ -81,7 +95,7 @@ it('path → file-mode entry carrying cwd + path', () => {
 
 it('html + baseDir → file-mode entry', () => {
   const built = entryFromToolCall(
-    { id: 't2', name: 'mcp__swarm__sai_render_html', input: JSON.stringify({ html: '<p>x</p>', baseDir: 'assets' }) } as any,
+    { id: 't2', name: LEGACY_RENDER_HTML, input: JSON.stringify({ html: '<p>x</p>', baseDir: 'assets' }) } as any,
     '/work',
   );
   expect((built?.entry.payload as any).mode).toBe('file');
@@ -90,7 +104,7 @@ it('html + baseDir → file-mode entry', () => {
 
 it('html alone → inline (no mode field)', () => {
   const built = entryFromToolCall(
-    { id: 't3', name: 'mcp__swarm__sai_render_html', input: JSON.stringify({ html: '<p>x</p>' }) } as any,
+    { id: 't3', name: LEGACY_RENDER_HTML, input: JSON.stringify({ html: '<p>x</p>' }) } as any,
     '/work',
   );
   expect((built?.entry.payload as any).mode).toBeUndefined();
@@ -99,7 +113,7 @@ it('html alone → inline (no mode field)', () => {
 
 it('path wins over html', () => {
   const built = entryFromToolCall(
-    { id: 't4', name: 'mcp__swarm__sai_render_html', input: JSON.stringify({ path: 'a.html', html: '<p>x</p>' }) } as any,
+    { id: 't4', name: LEGACY_RENDER_HTML, input: JSON.stringify({ path: 'a.html', html: '<p>x</p>' }) } as any,
     '/work',
   );
   expect((built?.entry.payload as any).mode).toBe('file');

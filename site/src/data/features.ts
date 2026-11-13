@@ -10,14 +10,6 @@ export interface Feature {
 export const features: Feature[] = [
   {
     coord: 'A-01',
-    title: 'Swarm mode',
-    blurb: 'Spawn parallel Claude tasks from one orchestrator chat. Each writing task gets its own git worktree; review diffs and land individually, or "land all green" in one go. Slash-command escape hatch included.',
-    meta: 'mod · swarm · parallel',
-    icon: 'zap',
-    flagship: true,
-  },
-  {
-    coord: 'A-02',
     title: 'Meta workspaces',
     blurb: 'Group many projects into one workspace. One chat, one terminal, one editor, one Git panel — spanning every included repo. Per-project chips on tool calls; per-repo stage / commit / push controls.',
     meta: 'mod · meta · multi-repo',

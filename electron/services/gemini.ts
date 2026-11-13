@@ -211,14 +211,14 @@ export function registerGeminiHandlers(win: BrowserWindow) {
     const ws = getOrCreate(cwd);
     ws.gemini.cwd = cwd;
     // Two-argument calls are the old `start(cwd, metaPreamble)` bridge. The
-    // unified provider bridge supplies scope/kind/context/scopeCwd/preamble.
+    // unified provider bridge supplies scope/scopeCwd/preamble.
     const legacy = tail.length <= 1;
     const scope = legacy ? 'chat' : (typeof tail[0] === 'string' ? tail[0] : 'chat');
-    const scopeCwdValue = legacy ? undefined : tail[3];
+    const scopeCwdValue = legacy ? undefined : tail[1];
     if (scope !== 'chat' && typeof scopeCwdValue === 'string' && scopeCwdValue) {
       ws.gemini.terminalCwds.set(scope, scopeCwdValue);
     }
-    ws.gemini.metaPreamble = (legacy ? tail[0] : tail[4]) as string || '';
+    ws.gemini.metaPreamble = (legacy ? tail[0] : tail[2]) as string || '';
     ws.gemini.availability = 'available';
     safeSend(win, { type: 'ready', projectPath: cwd });
   });

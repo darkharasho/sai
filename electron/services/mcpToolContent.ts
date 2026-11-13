@@ -2,7 +2,7 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 
 /**
  * Shared MCP content wrapping for SAI chat tools. Both transports — the
- * subprocess socket server (electron/swarm-mcp-server.ts) and the in-process
+ * subprocess socket server (electron/sai-mcp-server.ts) and the in-process
  * SDK MCP server (electron/services/claudeBackend/saiMcpServer.ts) — turn a raw
  * renderer round-trip result into MCP content blocks here, so the `__mcpImage`
  * handling lives in exactly one place.

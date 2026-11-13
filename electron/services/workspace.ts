@@ -44,12 +44,6 @@ export interface WorkspaceClaude {
   // ExitPlanMode flow state — buffer CLI output until the user approves/rejects the plan
   awaitingPlanReview: boolean;
   pendingPlanReviewId: string | null;
-  /** What kind of session this scope is. Determines CLI args (e.g. orchestrator
-   *  gets --strict-mcp-config + --tools "" for swarm-only tooling). */
-  kind: 'chat' | 'task' | 'orchestrator';
-  /** For orchestrator-kind scopes: context used to build the --system-prompt.
-   *  Set by claude:start; consumed by ensureProcess at spawn time. */
-  orchestratorContext?: Record<string, unknown> | null;
   /** Meta-workspace preamble to inject via --append-system-prompt at spawn time. */
   metaPreamble?: string;
   /** Updated on every inbound stdout chunk. Used by the idle-scope sweep. */
@@ -156,8 +150,6 @@ function newClaudeScope(cwd: string): WorkspaceClaude {
     questionAnswerFallbackTimer: null,
     awaitingPlanReview: false,
     pendingPlanReviewId: null,
-    kind: 'chat',
-    orchestratorContext: null,
     lastActivityAt: Date.now(),
     streaming: false,
     sawSchedulingTool: false,
@@ -169,25 +161,12 @@ function newClaudeScope(cwd: string): WorkspaceClaude {
   };
 }
 
-/** Get (or create) the Claude instance for a given scope within a workspace.
- *  If `kind` is provided and differs from a previously stored kind, the new
- *  kind takes effect on the NEXT process spawn (the in-flight process is left
- *  alone — call sites should respawn explicitly if needed). */
-export function getClaude(
-  ws: Workspace,
-  scope: string = 'chat',
-  kind?: 'chat' | 'task' | 'orchestrator',
-): WorkspaceClaude {
+/** Get (or create) the Claude instance for a given scope within a workspace. */
+export function getClaude(ws: Workspace, scope: string = 'chat'): WorkspaceClaude {
   let c = ws.claudeScopes.get(scope);
   if (!c) {
     c = newClaudeScope(ws.projectPath);
     ws.claudeScopes.set(scope, c);
-  }
-  if (kind && c.kind !== kind) {
-    if (c.process) {
-      console.warn(`[sai] claude scope "${scope}" kind changed ${c.kind} -> ${kind} while process running; new kind applies on next spawn`);
-    }
-    c.kind = kind;
   }
   return c;
 }

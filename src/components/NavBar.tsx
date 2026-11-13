@@ -1,4 +1,4 @@
-import { FolderClosed, GitBranch, MessagesSquare, Puzzle, Server, Search, Zap } from 'lucide-react';
+import { FolderClosed, GitBranch, MessagesSquare, Puzzle, Server, Search } from 'lucide-react';
 import { WorkspaceSquircle } from './shared/WorkspaceSquircle';
 import type { IndicatorState } from '../lib/workspaceStatus';
 import { DOT_MASK_URL } from '../lib/assets';
@@ -9,20 +9,17 @@ interface NavBarProps {
   activeSidebar: string | null;
   onToggle: (id: string) => void;
   gitChangeCount?: number;
-  swarmApprovalCount?: number;
   /** Total unread + awaiting chat sessions in the current workspace. Surfaced
    *  as a badge on the Chats button so attention is drawn even while the
    *  sidebar is collapsed (mirrors the workspace dropdown badge pattern). */
   chatNotificationCount?: number;
   overallStatus?: OverallStatus;
-  hasOrchestrator?: boolean;
   hasMcp?: boolean;
   hasPlugins?: boolean;
 }
 
-export default function NavBar({ activeSidebar, onToggle, gitChangeCount = 0, swarmApprovalCount = 0, chatNotificationCount = 0, overallStatus = null, hasOrchestrator = true, hasMcp = true, hasPlugins = true }: NavBarProps) {
+export default function NavBar({ activeSidebar, onToggle, gitChangeCount = 0, chatNotificationCount = 0, overallStatus = null, hasMcp = true, hasPlugins = true }: NavBarProps) {
   const badgeLabel = gitChangeCount > 100 ? '99+' : `${gitChangeCount}`;
-  const swarmBadgeLabel = swarmApprovalCount > 100 ? '99+' : `${swarmApprovalCount}`;
   const chatBadgeLabel = chatNotificationCount > 100 ? '99+' : `${chatNotificationCount}`;
 
   return (
@@ -61,18 +58,6 @@ export default function NavBar({ activeSidebar, onToggle, gitChangeCount = 0, sw
         <span className="nav-label">Chats</span>
         {chatNotificationCount > 0 && <span className="nav-badge">{chatBadgeLabel}</span>}
       </button>
-      {hasOrchestrator && (
-        <button
-          className={`nav-btn ${activeSidebar === 'swarm' ? 'active' : ''}`}
-          onClick={() => onToggle('swarm')}
-          title="Swarm"
-          aria-label="Swarm"
-        >
-          <Zap size={18} />
-          <span className="nav-label">Swarm</span>
-          {swarmApprovalCount > 0 && <span className="nav-badge">{swarmBadgeLabel}</span>}
-        </button>
-      )}
       {(hasPlugins || hasMcp) && <div className="nav-divider" />}
       {hasPlugins && (
         <button

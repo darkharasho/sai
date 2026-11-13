@@ -9,7 +9,7 @@
  * into the browser. If no tab is attached the extension never connects, so
  * `call()` fails closed with an actionable message.
  *
- * Mirrors swarmMcpHost's framing (NDJSON + hello/welcome) but differs in two
+ * Mirrors saiMcpHost's framing (NDJSON + hello/welcome) but differs in two
  * ways forced by the relay being spawned by Chrome rather than by SAI:
  *  - the socket path is stable, not PID-suffixed, because the relay can only
  *    derive it from $HOME;

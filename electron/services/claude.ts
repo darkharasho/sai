@@ -12,13 +12,8 @@ import { devlog } from './devlog';
 import { extractCodexCommitMessage } from './commit-message-parser';
 import { promptAntigravityOneShot } from './gemini';
 import { ensureKimiTransport, ensureKimiCommitSession, promptKimiText } from './kimi';
-import * as swarmMcpHost from './swarmMcpHost';
-import { writeSwarmMcpConfig } from './swarmMcpConfig';
-import {
-  buildOrchestratorSystemPrompt,
-  resolveOrchestratorPromptContext,
-  type OrchestratorPromptContext,
-} from '../../src/lib/orchestratorSystemPrompt';
+import * as saiMcpHost from './saiMcpHost';
+import { writeSaiMcpConfig } from './saiMcpConfig';
 import type { SessionBus } from './remote/session-bus';
 import { clamp, type PermMode } from './remote/clamp';
 import { exitTerminalEvents } from './claudeExit';
@@ -190,48 +185,42 @@ export interface BuildArgsOptions {
   permMode?: string;
   effort?: string;
   model?: string;
-  kind?: 'chat' | 'task' | 'orchestrator';
-  /** Workspace path passed to the swarm MCP server as SAI_SWARM_WORKSPACE.
-   *  Required when kind === 'orchestrator'. */
+  /** Workspace path passed to the SAI chat-tools MCP server as SAI_MCP_WORKSPACE.
+   *  Without it the chat gets no SAI tools. */
   workspace?: string;
-  /** Optional orchestrator system-prompt context. Falls back to defaults. */
-  orchestratorContext?: Partial<OrchestratorPromptContext> | null;
   /** Meta-workspace preamble to append to the system prompt via --append-system-prompt. */
   metaPreamble?: string;
   /** Override hooks for tests. */
   getMcpHandle?: () => { socketPath: string; secret: string };
   resolveMcpServerScriptPath?: () => string;
   resolveElectronExecPath?: () => string;
-  writeMcpConfig?: typeof writeSwarmMcpConfig;
+  writeMcpConfig?: typeof writeSaiMcpConfig;
   readSetting?: (key: string) => any;
 }
 
 function defaultMcpServerScriptPath(): string {
-  // vite-electron emits both main and the swarm-mcp-server bundle into
+  // vite-electron emits both main and the sai-mcp-server bundle into
   // the same dist-electron directory, so __dirname resolution works in
   // dev and packaged builds alike.
-  return path.join(__dirname, 'swarm-mcp-server.js');
+  return path.join(__dirname, 'sai-mcp-server.js');
 }
 
 
 /**
  * Build CLI args for the persistent process based on current config.
- * Exported for unit tests and to support orchestrator-kind sessions which
- * need extra `--mcp-config` / `--strict-mcp-config` / `--tools` flags.
+ * Exported for unit tests.
  */
 export function buildArgs(options: BuildArgsOptions = {}): string[] {
   const {
     permMode,
     effort,
     model,
-    kind = 'chat',
     workspace,
-    orchestratorContext,
     metaPreamble,
-    getMcpHandle = () => swarmMcpHost.start(),
+    getMcpHandle = () => saiMcpHost.start(),
     resolveMcpServerScriptPath = defaultMcpServerScriptPath,
     resolveElectronExecPath = () => process.execPath,
-    writeMcpConfig = writeSwarmMcpConfig,
+    writeMcpConfig = writeSaiMcpConfig,
     readSetting = readSaiSetting,
   } = options;
 
@@ -248,11 +237,7 @@ export function buildArgs(options: BuildArgsOptions = {}): string[] {
   // emitted as a single flag at the end.
   const appendPrompts: string[] = [];
 
-  // Orchestrator runs in bypassPermissions because its only tools are
-  // mcp__swarm__* (built-ins blocked via --tools '' and --strict-mcp-config),
-  // so prompting for approval adds friction with no safety benefit. The
-  // swarm tools themselves don't touch files directly.
-  if (kind === 'orchestrator' || permMode === 'bypass') {
+  if (permMode === 'bypass') {
     args.push('--permission-mode', 'bypassPermissions');
   } else {
     args.push('--permission-mode', 'acceptEdits');
@@ -266,73 +251,41 @@ export function buildArgs(options: BuildArgsOptions = {}): string[] {
     args.push('--model', model);
   }
 
-  if (kind === 'orchestrator') {
-    // Orchestrator: SAI-managed MCP only, no built-in tools.
+  // Chat sessions get SAI-native tools (render_html / render_component) via an
+  // MCP config, but keep all built-in tools (no --strict-mcp-config).
+  // getMcpHandle() (= saiMcpHost.start()) is safe to call here regardless of
+  // session ordering: main.ts starts the host and registers its onToolCall
+  // handler unconditionally at app init, and start() is idempotent — this just
+  // returns the already-listening handle.
+  if (workspace) {
     const handle = getMcpHandle();
-    const configPath = writeMcpConfig({
+    const cfgPath = writeMcpConfig({
       socketPath: handle.socketPath,
       secret: handle.secret,
-      workspace: workspace || '',
+      workspace,
       mcpServerScriptPath: resolveMcpServerScriptPath(),
       electronExecPath: resolveElectronExecPath(),
     });
-    args.push('--mcp-config', configPath);
-    args.push('--strict-mcp-config');
-    // Disable all built-in tools — only mcp__swarm__* will be available.
-    args.push('--tools', '');
-    // Block plugin-provided tools that aren't part of --tools (Skill/Task/Agent
-    // load via plugin sync, not the built-in set, so --tools "" alone won't
-    // suppress them). Belt-and-suspenders with --disable-slash-commands.
-    args.push('--disallowedTools', 'Skill,Task,Agent,TodoWrite');
-    args.push('--disable-slash-commands');
-    // Replace Claude Code's default system prompt with the orchestrator one,
-    // which steers the model to dispatch tasks instead of writing code itself.
-    const ctx = resolveOrchestratorPromptContext({
-      ...(orchestratorContext || {}),
-      workspacePath: orchestratorContext?.workspacePath || workspace || '',
-      workspaceName:
-        orchestratorContext?.workspaceName ||
-        (workspace ? workspace.split(/[\\/]/).filter(Boolean).pop() || workspace : undefined),
-    });
-    args.push('--system-prompt', buildOrchestratorSystemPrompt(ctx));
-  } else {
-    // Chat sessions get SAI-native tools (render_html / render_component) via an
-    // MCP config, but keep all built-in tools (no --strict-mcp-config).
-    // getMcpHandle() (= swarmMcpHost.start()) is safe to call here regardless of
-    // session ordering: main.ts starts the host and registers its onToolCall
-    // handler unconditionally at app init, and start() is idempotent — this just
-    // returns the already-listening handle.
-    if (kind === 'chat' && workspace) {
-      const handle = getMcpHandle();
-      const cfgPath = writeMcpConfig({
-        socketPath: handle.socketPath,
-        secret: handle.secret,
-        workspace,
-        mcpServerScriptPath: resolveMcpServerScriptPath(),
-        electronExecPath: resolveElectronExecPath(),
-        toolset: 'chat',
-      });
-      args.push('--mcp-config', cfgPath);
-      // Steer the chat agent to actually use the in-app renderer: without this
-      // the model treats "make me a button" as a write-a-file task (and the
-      // frontend-design skill reinforces that), never reaching for the tool.
-      appendPrompts.push(CHAT_RENDER_NUDGE);
-      // Same story for the CI watcher card: the tool description carries the
-      // trigger, but deferred tools don't expose descriptions, so nudge here.
-      appendPrompts.push(CHAT_GITHUB_WATCH_NUDGE);
-      // And for the task-progress ring: newer models don't reach for
-      // TaskCreate/TodoWrite in headless sessions without an explicit trigger.
-      appendPrompts.push(CHAT_TASKS_NUDGE);
-    }
+    args.push('--mcp-config', cfgPath);
+    // Steer the chat agent to actually use the in-app renderer: without this
+    // the model treats "make me a button" as a write-a-file task (and the
+    // frontend-design skill reinforces that), never reaching for the tool.
+    appendPrompts.push(CHAT_RENDER_NUDGE);
+    // Same story for the CI watcher card: the tool description carries the
+    // trigger, but deferred tools don't expose descriptions, so nudge here.
+    appendPrompts.push(CHAT_GITHUB_WATCH_NUDGE);
+    // And for the task-progress ring: newer models don't reach for
+    // TaskCreate/TodoWrite in headless sessions without an explicit trigger.
+    appendPrompts.push(CHAT_TASKS_NUDGE);
+  }
 
-    // Chat/task: pass through user MCP config path(s) from SAI settings.
-    const mcpConfig = readSetting('mcpConfigPath');
-    if (mcpConfig) {
-      const paths = Array.isArray(mcpConfig) ? mcpConfig : [mcpConfig];
-      for (const p of paths) {
-        if (typeof p === 'string' && p.trim()) {
-          args.push('--mcp-config', p.trim());
-        }
+  // Pass through user MCP config path(s) from SAI settings.
+  const mcpConfig = readSetting('mcpConfigPath');
+  if (mcpConfig) {
+    const paths = Array.isArray(mcpConfig) ? mcpConfig : [mcpConfig];
+    for (const p of paths) {
+      if (typeof p === 'string' && p.trim()) {
+        args.push('--mcp-config', p.trim());
       }
     }
   }
@@ -384,9 +337,7 @@ function ensureProcess(
     permMode,
     effort,
     model,
-    kind: claude.kind,
     workspace: ws.projectPath,
-    orchestratorContext: (claude.orchestratorContext as Partial<OrchestratorPromptContext> | null) || null,
     metaPreamble: claude.metaPreamble,
   });
 
@@ -604,20 +555,16 @@ function ensureProcess(
             : null;
           emitChatMessage({ ...msg, projectPath: ws.projectPath, scope, turnSeq: responseTurnSeq, wait });
           emitChatMessage({ type: 'done', projectPath: ws.projectPath, scope, turnSeq: responseTurnSeq, wait });
-          // Only notify on a genuine completion — waits stay silent. Only
-          // chat-kind scopes are a "turn end" for the user: task/orchestrator
-          // scopes finishing must not fire the turn-end notification (swarm
-          // tasks have their own opt-in notification in the renderer).
+          // Only notify on a genuine completion — waits stay silent.
           devlog('claude-cli', 'turnEnd.decide', {
             projectPath: ws.projectPath,
             scope,
-            kind: claude.kind,
             wasBusy,
             waitKind: wait.kind,
             turnSeq: responseTurnSeq,
-            willNotify: Boolean(wasBusy && wait.kind === 'none' && claude.kind === 'chat'),
+            willNotify: Boolean(wasBusy && wait.kind === 'none'),
           });
-          if (wasBusy && wait.kind === 'none' && claude.kind === 'chat') setTimeout(() => notifyCompletion(win, ws.projectPath, {
+          if (wasBusy && wait.kind === 'none') setTimeout(() => notifyCompletion(win, ws.projectPath, {
             provider: 'Claude',
             duration: msg.duration_ms,
             turns: msg.num_turns,
@@ -1386,17 +1333,14 @@ export function getAvailableClaudeModels(): { models: ClaudeModelOption[]; detec
 }
 
 export function startImpl(args: StartArgs): { slashCommands: SlashCommandInfo[] } | undefined {
-  const { projectPath, scope, kind, orchestratorContext, scopeCwd, metaPreamble } = args;
+  const { projectPath, scope, scopeCwd, metaPreamble } = args;
   if (!projectPath) return;
   const ws = getOrCreate(projectPath);
-  const claude = getClaude(ws, scope || 'chat', kind);
-  // scopeCwd lets a swarm task pin its scope to its worktree dir while keeping
-  // the workspace key (and therefore msg.projectPath in emitted events) as the
-  // original project root — so ChatPanel + listeners match on projectPath.
+  const claude = getClaude(ws, scope || 'chat');
+  // scopeCwd lets a scope run in a different dir while keeping the workspace
+  // key (and therefore msg.projectPath in emitted events) as the original
+  // project root — so ChatPanel + listeners match on projectPath.
   claude.cwd = scopeCwd || projectPath;
-  if (kind === 'orchestrator' && orchestratorContext) {
-    claude.orchestratorContext = orchestratorContext as Record<string, unknown>;
-  }
   claude.metaPreamble = metaPreamble || '';
   emitChatMessage({ type: 'ready', projectPath: ws.projectPath, scope: scope || 'chat' });
   return { slashCommands: readCachedSlashCommands(ws.projectPath) };
@@ -1613,8 +1557,8 @@ export function registerClaudeHandlers(win: BrowserWindow) {
   ipcMain.handle('claude:models', () => getClaudeBackend().getModels());
   // claude:start — no longer spawns a probe. Just signals ready.
   // Sends cached slash commands immediately so they're available before the process init.
-  ipcMain.handle('claude:start', (_event, projectPath: string, scope?: string, kind?: 'chat' | 'task' | 'orchestrator', orchestratorContext?: Partial<OrchestratorPromptContext> | null, scopeCwd?: string, metaPreamble?: string) =>
-    getClaudeBackend().start({ projectPath, scope, kind, orchestratorContext: orchestratorContext as Record<string, unknown> | null, scopeCwd, metaPreamble })
+  ipcMain.handle('claude:start', (_event, projectPath: string, scope?: string, scopeCwd?: string, metaPreamble?: string) =>
+    getClaudeBackend().start({ projectPath, scope, scopeCwd, metaPreamble })
   );
 
   // claude:refreshSlashCommands — re-pull the live list (SDK supportedCommands()).

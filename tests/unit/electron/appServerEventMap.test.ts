@@ -97,25 +97,19 @@ describe('mapAppServerEvent', () => {
     }]);
   });
 
-  it('maps fixed Swarm Dynamic Tool activity once without synthetic cards', () => {
+  it('ignores Dynamic Tool items (SAI registers none)', () => {
     expect(mapAppServerEvent({
       method: 'item/started',
       params: { threadId: 'thread-1', turnId: 'turn-1', item: {
-        id: 'dynamic-1', type: 'dynamicToolCall', tool: 'sai_swarm_query_status', arguments: { filter: 'running' }, status: 'inProgress',
+        id: 'dynamic-1', type: 'dynamicToolCall', tool: 'some_tool', arguments: {}, status: 'inProgress',
       } },
-    }, ctx)).toEqual([{
-      type: 'assistant', ...metadata,
-      message: { content: [{ id: 'dynamic-1', type: 'tool_use', name: 'mcp__swarm__query_status', input: { filter: 'running' } }] },
-    }]);
+    }, ctx)).toEqual([]);
     expect(mapAppServerEvent({
       method: 'item/completed',
       params: { threadId: 'thread-1', turnId: 'turn-1', item: {
-        id: 'dynamic-1', type: 'dynamicToolCall', tool: 'sai_swarm_query_status', contentItems: [{ type: 'inputText', text: '{"ok":true}' }], success: true, status: 'completed',
+        id: 'dynamic-1', type: 'dynamicToolCall', tool: 'some_tool', contentItems: [], success: false, status: 'completed',
       } },
-    }, ctx)).toEqual([{
-      type: 'user', ...metadata,
-      message: { content: [{ type: 'tool_result', tool_use_id: 'dynamic-1', content: '[{"text":"{\\"ok\\":true}","type":"inputText"}]', is_error: false }] },
-    }]);
+    }, ctx)).toEqual([]);
   });
 
   it('maps known item completion to a matching tool result', () => {

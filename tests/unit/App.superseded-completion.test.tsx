@@ -55,15 +55,6 @@ vi.mock('../../src/components/Plugins/PluginsSidebar', () => ({
 vi.mock('../../src/components/MCP/McpSidebar', () => ({
   default: () => <div data-testid="mcp-sidebar" />,
 }));
-vi.mock('../../src/components/Swarm/SwarmSidebar', () => ({
-  default: () => <div data-testid="swarm-sidebar" />,
-}));
-vi.mock('../../src/components/Swarm/OrchestratorView', () => ({
-  default: () => <div data-testid="orchestrator-view" />,
-}));
-vi.mock('../../src/components/Swarm/SwarmLogoCluster', () => ({
-  default: () => <div data-testid="swarm-logo" />,
-}));
 vi.mock('../../src/hooks/useWhatsNew', () => ({
   useWhatsNew: () => ({
     isOpen: false, version: 'test', releases: [], fetchStatus: 'idle',
@@ -83,14 +74,6 @@ vi.mock('../../src/chatDb', () => ({
   dbDeleteSession: vi.fn().mockResolvedValue(undefined),
   migrateFromLocalStorage: vi.fn().mockResolvedValue(undefined),
 }));
-vi.mock('../../src/swarmDb', () => ({
-  swarmInit: vi.fn().mockResolvedValue(undefined),
-  swarmGetTasks: vi.fn().mockResolvedValue([]),
-  swarmUpdateTask: vi.fn().mockResolvedValue(undefined),
-  swarmGetApprovals: vi.fn().mockResolvedValue([]),
-  swarmResolveApproval: vi.fn().mockResolvedValue(undefined),
-  swarmCreateApproval: vi.fn().mockResolvedValue(undefined),
-}));
 
 const ACTIVE_PATH = '/test/project';
 const BG_PATH = '/test/background';
@@ -108,7 +91,6 @@ describe('App: superseded turn never flashes a completion', () => {
     mockSai.setBadgeCount = vi.fn();
     mockSai.metaWorkspaceList = vi.fn().mockResolvedValue([]);
     mockSai.fsWalkFiles = vi.fn().mockResolvedValue([]);
-    mockSai.swarmSetOrchestratorSession = vi.fn();
     mockSai.remoteEmitWorkspaceStatus = vi.fn();
     installMockSai(mockSai as ReturnType<typeof createMockSai>);
 

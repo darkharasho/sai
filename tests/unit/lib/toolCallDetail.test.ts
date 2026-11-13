@@ -44,6 +44,12 @@ describe('toolCallDetail', () => {
     expect(toolCallDetail(tc('Skill', { skill: 'commit', args: '' }))).toBe('commit');
   });
   it('mcp__ tools → first string-valued input property', () => {
+    expect(toolCallDetail(tc('mcp__sai__sai_render_html', { html: '<b>x</b>', width: 360 }))).toBe('<b>x</b>');
+  });
+  // Legacy-history fixture: CLI-backend chats saved before the swarm removal
+  // recorded SAI tools as mcp__swarm__sai_* (the server is now registered as
+  // 'sai'). Matching is by suffix, so that persisted history must keep working.
+  it('legacy mcp__swarm__sai_* history → same detail', () => {
     expect(toolCallDetail(tc('mcp__swarm__sai_render_html', { html: '<b>x</b>', width: 360 }))).toBe('<b>x</b>');
   });
   it('unknown tools → null', () => {

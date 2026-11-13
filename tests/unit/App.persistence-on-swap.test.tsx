@@ -83,15 +83,6 @@ vi.mock('../../src/components/Plugins/PluginsSidebar', () => ({
 vi.mock('../../src/components/MCP/McpSidebar', () => ({
   default: () => <div data-testid="mcp-sidebar" />,
 }));
-vi.mock('../../src/components/Swarm/SwarmSidebar', () => ({
-  default: () => <div data-testid="swarm-sidebar" />,
-}));
-vi.mock('../../src/components/Swarm/OrchestratorView', () => ({
-  default: () => <div data-testid="orchestrator-view" />,
-}));
-vi.mock('../../src/components/Swarm/SwarmLogoCluster', () => ({
-  default: () => <div data-testid="swarm-logo" />,
-}));
 vi.mock('../../src/hooks/useWhatsNew', () => ({
   useWhatsNew: () => ({
     isOpen: false,
@@ -161,15 +152,6 @@ vi.mock('../../src/chatDb', () => ({
   migrateFromLocalStorage: vi.fn().mockResolvedValue(undefined),
 }));
 
-// Also stub out swarmDb so it doesn't try to open its own IndexedDB
-vi.mock('../../src/swarmDb', () => ({
-  swarmInit: vi.fn().mockResolvedValue(undefined),
-  swarmGetTasks: vi.fn().mockResolvedValue([]),
-  swarmUpdateTask: vi.fn().mockResolvedValue(undefined),
-  swarmGetApprovals: vi.fn().mockResolvedValue([]),
-  swarmResolveApproval: vi.fn().mockResolvedValue(undefined),
-  swarmCreateApproval: vi.fn().mockResolvedValue(undefined),
-}));
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -223,7 +205,6 @@ describe('App: persistence on session swap', () => {
     mockSai.setBadgeCount = vi.fn();
     mockSai.metaWorkspaceList = vi.fn().mockResolvedValue([]);
     mockSai.fsWalkFiles = vi.fn().mockResolvedValue([]);
-    mockSai.swarmSetOrchestratorSession = vi.fn();
     mockSai.remoteEmitWorkspaceStatus = vi.fn();
     installMockSai(mockSai as ReturnType<typeof createMockSai>);
   });
@@ -551,14 +532,12 @@ describe('App: persistence on session swap', () => {
           PROJECT_PATH,
           'session-A',
           new Map([[PROJECT_PATH, workspace]]),
-          new Map(),
           mockSai,
         );
         reconcileOwnedStreamingScope(
           PROJECT_PATH,
           'session-B',
           new Map([[PROJECT_PATH, workspace]]),
-          new Map(),
           mockSai,
         );
       }, 20_000);
@@ -580,7 +559,6 @@ describe('App: persistence on session swap', () => {
       PROJECT_PATH,
       'session-A',
       new Map([[PROJECT_PATH, { sessions: [sessionA], activeSession: sessionA }]]),
-      new Map(),
       mockSai,
       'codex',
     );
@@ -595,7 +573,6 @@ describe('App: persistence on session swap', () => {
       PROJECT_PATH,
       'session-A',
       new Map([[PROJECT_PATH, { sessions: [sessionA], activeSession: sessionA }]]),
-      new Map(),
       mockSai,
     );
 

@@ -2,7 +2,6 @@ import { readSaiSetting } from '../claude';
 import { CliBackend } from './cliBackend';
 import { SdkBackend } from './sdkBackend';
 import { buildSaiChatMcpServer } from './saiMcpServer';
-import { buildSwarmMcpServer } from './swarmMcpServer';
 import { getSaiToolDispatch } from '../saiToolBridge';
 import { registerWorkspaceBackendHooks } from '../workspace';
 import type { ClaudeBackend } from './types';
@@ -25,11 +24,6 @@ export function getClaudeBackend(): ClaudeBackend {
         const dispatch = getSaiToolDispatch();
         if (!dispatch) return undefined; // main.ts hasn't registered the round-trip yet
         return buildSaiChatMcpServer({ workspace, dispatch });
-      },
-      buildSwarmMcpServer: (workspace: string) => {
-        const dispatch = getSaiToolDispatch();
-        if (!dispatch) return undefined;
-        return buildSwarmMcpServer({ workspace, dispatch });
       },
     });
     // SDK sessions live outside the workspace registry — wire suspend/quiescence

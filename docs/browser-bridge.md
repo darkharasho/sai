@@ -149,7 +149,7 @@ and only re-frames: Chrome's 4-byte-length-prefixed native messages become
 NDJSON lines on SAI's socket.
 
 Because Chrome spawns it, the relay can't be handed a socket path — it has to
-derive one from `$HOME`. So unlike `swarmMcpHost` (PID-suffixed socket, secret
+derive one from `$HOME`. So unlike the `sai` MCP host (`electron/services/saiMcpHost.ts`; PID-suffixed socket, secret
 in env), the bridge uses a **stable** socket path plus a `0600` token file at
 `~/.sai/browser-bridge/token`, rotated on every SAI start and deleted on quit.
 

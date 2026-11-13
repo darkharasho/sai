@@ -24,8 +24,9 @@ export interface McpRow {
   removable: boolean;
 }
 
-/** SAI's own in-process servers — not user-manageable. */
-export const HIDDEN_LIVE_NAMES: ReadonlySet<string> = new Set(['sai', 'swarm']);
+/** SAI's own chat-tools server (every backend registers it as 'sai') — not
+ *  user-manageable. */
+export const HIDDEN_LIVE_NAMES: ReadonlySet<string> = new Set(['sai']);
 const PLUGIN_RE = /^plugin:([^:]+):(.+)$/;
 
 /** Shared by the list, detail and nudge components. */

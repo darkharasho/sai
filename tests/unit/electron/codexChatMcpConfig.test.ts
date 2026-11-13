@@ -9,7 +9,7 @@ describe('buildCodexChatMcpConfig', () => {
       socketPath: '/tmp/sai.sock',
       secret: 'secret',
       workspace: '/repo',
-      mcpServerScriptPath: '/app/swarm-mcp-server.js',
+      mcpServerScriptPath: '/app/sai-mcp-server.js',
       electronExecPath: '/Applications/SAI.app/Contents/MacOS/SAI',
     });
 
@@ -17,17 +17,17 @@ describe('buildCodexChatMcpConfig', () => {
       mcp_servers: {
         [CODEX_SAI_MCP_SERVER_NAME]: {
           command: '/Applications/SAI.app/Contents/MacOS/SAI',
-          args: ['/app/swarm-mcp-server.js'],
+          args: ['/app/sai-mcp-server.js'],
           env: {
             ELECTRON_RUN_AS_NODE: '1',
-            SAI_SWARM_SOCKET_PATH: '/tmp/sai.sock',
-            SAI_SWARM_SECRET: 'secret',
-            SAI_SWARM_WORKSPACE: '/repo',
-            SAI_MCP_TOOLSET: 'chat',
+            SAI_MCP_SOCKET_PATH: '/tmp/sai.sock',
+            SAI_MCP_SECRET: 'secret',
+            SAI_MCP_WORKSPACE: '/repo',
           },
         },
       },
     });
+    expect(config.mcp_servers?.[CODEX_SAI_MCP_SERVER_NAME]?.env).not.toHaveProperty('SAI_MCP_TOOLSET');
     expect(config.developer_instructions).toContain(CHAT_RENDER_NUDGE);
     expect(config.developer_instructions).toContain(CHAT_GITHUB_WATCH_NUDGE);
     expect(config.developer_instructions).toContain(CHAT_TASKS_NUDGE);

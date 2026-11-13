@@ -1,4 +1,4 @@
-export type SaiToolset = 'chat' | 'orchestrator' | 'both';
+export type SaiToolset = 'chat' | 'both';
 
 export interface SaiToolDef {
   name: string;

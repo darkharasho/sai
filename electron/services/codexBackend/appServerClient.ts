@@ -82,8 +82,6 @@ export interface AppServerClientDeps {
   getEnv?: () => NodeJS.ProcessEnv;
   clientInfo?: { name: string; version: string };
   initializationTimeoutMs?: number;
-  /** Experimental APIs are reserved for the isolated Swarm orchestrator host. */
-  experimentalApi?: boolean;
 }
 
 interface PendingRequest {
@@ -396,7 +394,6 @@ export class AppServerClient implements AppServerClientTransport {
   private readonly getEnv: () => NodeJS.ProcessEnv;
   private readonly clientInfo: { name: string; version: string };
   private readonly initializationTimeoutMs: number;
-  private readonly experimentalApi: boolean;
   private readonly pending = new Map<number, PendingRequest>();
   private readonly listeners = new Set<(message: AppServerNotification) => void>();
   private readonly serverRequestListeners = new Set<(request: AppServerServerRequest) => void>();
@@ -422,7 +419,6 @@ export class AppServerClient implements AppServerClientTransport {
     this.initializationTimeoutMs = deps.initializationTimeoutMs && deps.initializationTimeoutMs > 0
       ? deps.initializationTimeoutMs
       : DEFAULT_INITIALIZATION_TIMEOUT_MS;
-    this.experimentalApi = deps.experimentalApi === true;
   }
 
   get failureReason(): string | undefined {
@@ -452,7 +448,6 @@ export class AppServerClient implements AppServerClientTransport {
       this.attach(this.child);
       const initialization = this.sendRequest('initialize', {
         clientInfo: this.clientInfo,
-        ...(this.experimentalApi ? { capabilities: { experimentalApi: true } } : {}),
       }, {
         allowBeforeInitialized: true,
         failOnResponseError: true,

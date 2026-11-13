@@ -4,7 +4,6 @@ import { buildSdkOptions, type SdkOptionInputs } from '@electron/services/claude
 import type { CanUseTool } from '@anthropic-ai/claude-agent-sdk';
 
 const BASE: SdkOptionInputs = {
-  kind: 'chat',
   cwd: '/some/project',
 };
 
@@ -22,9 +21,9 @@ describe('buildSdkOptions', () => {
     expect(opts.permissionMode).toBe('bypassPermissions');
   });
 
-  it('(c) kind orchestrator → bypassPermissions', () => {
-    const opts = buildSdkOptions({ ...BASE, kind: 'orchestrator' });
-    expect(opts.permissionMode).toBe('bypassPermissions');
+  it('bypass permMode still bypasses for chat', () => {
+    expect(buildSdkOptions({ ...BASE, permMode: 'bypass' }).permissionMode).toBe('bypassPermissions');
+    expect(buildSdkOptions({ ...BASE, permMode: 'default' }).permissionMode).not.toBe('bypassPermissions');
   });
 
   it('(d) sessionId set → resume equals it', () => {
@@ -98,12 +97,6 @@ describe('buildSdkOptions', () => {
     expect(opts).not.toHaveProperty('canUseTool');
   });
 
-  it('(k) canUseTool provided + kind orchestrator → options.canUseTool is NOT set (orchestrator = bypass)', () => {
-    const canUseTool: CanUseTool = vi.fn().mockResolvedValue({ behavior: 'allow' });
-    const opts = buildSdkOptions({ ...BASE, canUseTool, kind: 'orchestrator' }) as Record<string, unknown>;
-    expect(opts).not.toHaveProperty('canUseTool');
-  });
-
   it('(l) canUseTool NOT provided → options.canUseTool is not set', () => {
     const opts = buildSdkOptions(BASE) as Record<string, unknown>;
     expect(opts).not.toHaveProperty('canUseTool');
@@ -113,43 +106,27 @@ describe('buildSdkOptions', () => {
 
   it('sets mcpServers when provided', () => {
     const fakeServer = { type: 'sdk', name: 'sai', instance: {} } as any;
-    const opts = buildSdkOptions({
-      kind: 'chat', cwd: '/ws', mcpServers: { sai: fakeServer },
-    });
+    const opts = buildSdkOptions({ cwd: '/ws', mcpServers: { sai: fakeServer } });
     expect(opts.mcpServers).toEqual({ sai: fakeServer });
   });
 
   it('omits mcpServers when not provided', () => {
-    const opts = buildSdkOptions({ kind: 'chat', cwd: '/ws' });
+    const opts = buildSdkOptions({ cwd: '/ws' });
     expect(opts.mcpServers).toBeUndefined();
   });
 
   it('omits mcpServers when given an empty object', () => {
-    const opts = buildSdkOptions({ kind: 'chat', cwd: '/ws', mcpServers: {} });
+    const opts = buildSdkOptions({ cwd: '/ws', mcpServers: {} });
     expect(opts.mcpServers).toBeUndefined();
   });
 
   it('sets settingSources to [project, local] (excludes user-global bypass)', () => {
-    const opts = buildSdkOptions({ kind: 'chat', cwd: '/ws' });
+    const opts = buildSdkOptions({ cwd: '/ws' });
     expect(opts.settingSources).toEqual(['project', 'local']);
   });
 
-  // ── systemPromptOverride + orchestrator tests ────────────────────────────
-
-  it('systemPromptOverride replaces the preset systemPrompt with a plain string', () => {
-    const opts = buildSdkOptions({ kind: 'orchestrator', cwd: '/ws', systemPromptOverride: 'ORCH PROMPT' });
-    expect(opts.systemPrompt).toBe('ORCH PROMPT');
-  });
-
-  it('orchestrator disables built-in tools and blocks plugin tools', () => {
-    const opts = buildSdkOptions({ kind: 'orchestrator', cwd: '/ws', systemPromptOverride: 'x' });
-    expect(opts.tools).toEqual([]);
-    expect(opts.disallowedTools).toEqual(['Skill', 'Task', 'Agent', 'TodoWrite']);
-    expect(opts.permissionMode).toBe('bypassPermissions');
-  });
-
-  it('chat/task do NOT set tools:[] or disallowedTools, and keep the preset systemPrompt', () => {
-    const opts = buildSdkOptions({ kind: 'chat', cwd: '/ws', appendSystemPrompt: 'nudge' });
+  it('does NOT set tools:[] or disallowedTools, and keeps the preset systemPrompt', () => {
+    const opts = buildSdkOptions({ cwd: '/ws', appendSystemPrompt: 'nudge' });
     expect(opts.tools).toBeUndefined();
     expect(opts.disallowedTools).toBeUndefined();
     expect(opts.systemPrompt).toEqual({ type: 'preset', preset: 'claude_code', append: 'nudge' });
@@ -160,18 +137,18 @@ describe('buildSdkOptions', () => {
 describe('env and stderr wiring', () => {
   it('passes env through to the SDK options', () => {
     const env = { PATH: '/enriched', NODE_OPTIONS: '--max-old-space-size=2048' };
-    const opts = buildSdkOptions({ kind: 'chat', cwd: '/ws', env });
+    const opts = buildSdkOptions({ cwd: '/ws', env });
     expect(opts.env).toEqual(env);
   });
 
   it('passes the stderr callback through', () => {
     const stderr = (_: string) => {};
-    const opts = buildSdkOptions({ kind: 'chat', cwd: '/ws', stderr });
+    const opts = buildSdkOptions({ cwd: '/ws', stderr });
     expect(opts.stderr).toBe(stderr);
   });
 
   it('omits env/stderr when not provided', () => {
-    const opts = buildSdkOptions({ kind: 'chat', cwd: '/ws' });
+    const opts = buildSdkOptions({ cwd: '/ws' });
     expect(opts.env).toBeUndefined();
     expect(opts.stderr).toBeUndefined();
   });
@@ -180,39 +157,39 @@ describe('env and stderr wiring', () => {
 // --- SDK feature options (show reasoning, budget cap, 1M context, suggestions) ---
 describe('feature options', () => {
   it('thinkingSummarized maps to adaptive thinking with summarized display', () => {
-    const opts = buildSdkOptions({ kind: 'chat', cwd: '/ws', thinkingSummarized: true });
+    const opts = buildSdkOptions({ cwd: '/ws', thinkingSummarized: true });
     expect(opts.thinking).toEqual({ type: 'adaptive', display: 'summarized' });
   });
 
   it('maxBudgetUsd passes through when positive, omitted otherwise', () => {
-    expect(buildSdkOptions({ kind: 'chat', cwd: '/ws', maxBudgetUsd: 5 }).maxBudgetUsd).toBe(5);
-    expect(buildSdkOptions({ kind: 'chat', cwd: '/ws', maxBudgetUsd: 0 }).maxBudgetUsd).toBeUndefined();
-    expect(buildSdkOptions({ kind: 'chat', cwd: '/ws' }).maxBudgetUsd).toBeUndefined();
+    expect(buildSdkOptions({ cwd: '/ws', maxBudgetUsd: 5 }).maxBudgetUsd).toBe(5);
+    expect(buildSdkOptions({ cwd: '/ws', maxBudgetUsd: 0 }).maxBudgetUsd).toBeUndefined();
+    expect(buildSdkOptions({ cwd: '/ws' }).maxBudgetUsd).toBeUndefined();
   });
 
   it('oneMContext opts into the 1M context beta', () => {
-    expect(buildSdkOptions({ kind: 'chat', cwd: '/ws', oneMContext: true }).betas).toEqual(['context-1m-2025-08-07']);
-    expect(buildSdkOptions({ kind: 'chat', cwd: '/ws' }).betas).toBeUndefined();
+    expect(buildSdkOptions({ cwd: '/ws', oneMContext: true }).betas).toEqual(['context-1m-2025-08-07']);
+    expect(buildSdkOptions({ cwd: '/ws' }).betas).toBeUndefined();
   });
 
   it('promptSuggestions and agentProgressSummaries pass through when set', () => {
-    const opts = buildSdkOptions({ kind: 'chat', cwd: '/ws', promptSuggestions: true, agentProgressSummaries: true });
+    const opts = buildSdkOptions({ cwd: '/ws', promptSuggestions: true, agentProgressSummaries: true });
     expect(opts.promptSuggestions).toBe(true);
     expect(opts.agentProgressSummaries).toBe(true);
-    const off = buildSdkOptions({ kind: 'chat', cwd: '/ws' });
+    const off = buildSdkOptions({ cwd: '/ws' });
     expect(off.promptSuggestions).toBeUndefined();
     expect(off.agentProgressSummaries).toBeUndefined();
   });
 
   it('no thinking config when thinkingSummarized is off (runtime default display)', () => {
-    expect(buildSdkOptions({ kind: 'chat', cwd: '/ws' }).thinking).toBeUndefined();
+    expect(buildSdkOptions({ cwd: '/ws' }).thinking).toBeUndefined();
   });
 
   it('plugins pass through when non-empty, omitted otherwise', () => {
     const plugins = [{ type: 'local' as const, path: '/plugins/tools' }];
-    expect(buildSdkOptions({ kind: 'chat', cwd: '/ws', plugins }).plugins).toEqual(plugins);
-    expect(buildSdkOptions({ kind: 'chat', cwd: '/ws', plugins: [] }).plugins).toBeUndefined();
-    expect(buildSdkOptions({ kind: 'chat', cwd: '/ws' }).plugins).toBeUndefined();
+    expect(buildSdkOptions({ cwd: '/ws', plugins }).plugins).toEqual(plugins);
+    expect(buildSdkOptions({ cwd: '/ws', plugins: [] }).plugins).toBeUndefined();
+    expect(buildSdkOptions({ cwd: '/ws' }).plugins).toBeUndefined();
   });
   it('loadGuardHook → PreToolUse with no matcher next to the sudo Bash entry, plus UserPromptSubmit', () => {
     const sudo = vi.fn(async () => ({}));

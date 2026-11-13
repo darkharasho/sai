@@ -29,7 +29,7 @@ vi.mock('@electron/services/gemini', () => ({
   promptGeminiText: vi.fn(),
 }));
 
-vi.mock('@electron/services/swarmMcpHost', () => ({
+vi.mock('@electron/services/saiMcpHost', () => ({
   start: vi.fn(),
 }));
 
@@ -43,8 +43,8 @@ vi.mock('@electron/services/claudeBackend', () => ({
   getClaudeBackend: vi.fn(),
 }));
 
-vi.mock('@electron/services/swarmMcpConfig', () => ({
-  writeSwarmMcpConfig: vi.fn(),
+vi.mock('@electron/services/saiMcpConfig', () => ({
+  writeSaiMcpConfig: vi.fn(),
 }));
 
 import { CHAT_RENDER_NUDGE, CHAT_GITHUB_WATCH_NUDGE, CHAT_TASKS_NUDGE, CHAT_TASK_CARDS_NUDGE } from '../../../electron/services/chatNudges';

@@ -73,7 +73,6 @@ const {
     pendingToolUse: { toolName: string; toolUseId: string; input: Record<string, any> } | null;
     approvalBuffered: any[];
     awaitingApproval: boolean;
-    kind: 'chat' | 'task' | 'orchestrator';
   };
 
   type Workspace = {
@@ -98,7 +97,6 @@ const {
       pendingToolUse: null,
       approvalBuffered: [],
       awaitingApproval: false,
-      kind: 'chat',
     };
   }
 
@@ -866,7 +864,7 @@ describe('Approval flow', () => {
     claude.awaitingApproval = true;
     claude.busy = true;
     claude.pendingToolUse = {
-      toolName: 'mcp__swarm__sai_render_html',
+      toolName: 'mcp__sai__sai_render_html',
       toolUseId: 'tu-mcp',
       input: {},
     };
@@ -1596,21 +1594,19 @@ describe('reconcileScopeImpl', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Completion notification gating — only chat-kind scopes are a "turn end" for
-// the user; task/orchestrator scopes finishing must not fire notifyCompletion
-// (tasks have their own opt-in notification in the renderer).
+// Completion notification — every chat scope finishing a turn is a "turn end"
+// for the user and fires notifyCompletion.
 // ---------------------------------------------------------------------------
 
-describe('completion notification gating by scope kind', () => {
+describe('completion notification on turn end', () => {
   const PROJECT = '/test/notify-gating';
   const NOTIFY_DELAY = 600; // notifyCompletion is scheduled with a 500ms setTimeout
 
-  async function runTurn(scope: string, kind: 'chat' | 'task' | 'orchestrator') {
+  async function runTurn(scope: string) {
     const ws = workspaceState.getOrCreate(PROJECT);
     workspaceState.getClaude(ws, scope).cwd = PROJECT;
     mockIpcMain._emit('claude:send', PROJECT, 'do work', [], undefined, undefined, undefined, scope);
     await flushAsync();
-    ws.claudeScopes.get(scope)!.kind = kind;
     pushLines(getLatestProcess(), { type: 'result', duration_ms: 500, num_turns: 1, result: 'done' });
     await flushAsync();
     await new Promise((r) => setTimeout(r, NOTIFY_DELAY));
@@ -1622,19 +1618,14 @@ describe('completion notification gating by scope kind', () => {
     return vi.mocked(notifyCompletion).mock.calls.filter((c) => c[1] === PROJECT);
   }
 
-  it('fires notifyCompletion when a chat-kind scope finishes', async () => {
-    await runTurn('chat', 'chat');
+  it('fires notifyCompletion when the chat scope finishes', async () => {
+    await runTurn('chat');
     expect(callsForProject()).toHaveLength(1);
   });
 
-  it('does not fire notifyCompletion when a task-kind scope finishes', async () => {
-    await runTurn('swarm-task-1', 'task');
-    expect(callsForProject()).toHaveLength(0);
-  });
-
-  it('does not fire notifyCompletion when an orchestrator scope finishes', async () => {
-    await runTurn('orchestrator-1', 'orchestrator');
-    expect(callsForProject()).toHaveLength(0);
+  it('fires notifyCompletion for a session-scoped chat too', async () => {
+    await runTurn('session-abc');
+    expect(callsForProject()).toHaveLength(1);
   });
 });
 

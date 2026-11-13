@@ -180,13 +180,10 @@ interface ChatPanelProps {
   sessionId?: string;
   terminalTabs?: TerminalTab[];
   onSlashCommandsUpdate?: (commands: SlashCommandInfo[]) => void;
-  onInterceptSend?: (text: string) => Promise<boolean | { handled: boolean; reply?: string }>;
   /**
    * IPC scope to use for claude:start / send / stop / message routing.
-   * Defaults to 'chat' (the workspace's default chat scope). Pass the
-   * orchestrator's session id when this ChatPanel is mounted for an
-   * orchestrator session — otherwise its messages and tool args go to
-   * the wrong process.
+   * Defaults to 'chat' (the workspace's default chat scope); App passes the
+   * session id so each chat gets its own backend process.
    */
   claudeScope?: string;
   /** Opens the MCP sidebar (chat sign-in nudge "Review"). */
@@ -195,43 +192,20 @@ interface ChatPanelProps {
    *  an already-pending approval when the user swaps into a session that
    *  fired approval_needed while its ChatPanel was unmounted. */
   initialPendingApproval?: PendingApproval | null;
-  /** Optional: pass 'orchestrator' to start the Claude process in orchestrator mode. */
-  claudeKind?: 'chat' | 'task' | 'orchestrator';
-  /** Optional: orchestrator prompt context (only used when claudeKind === 'orchestrator'). */
-  claudeOrchestratorContext?: any;
   /**
    * Optional: override how individual tool calls in messages are rendered.
-   * Return `null` to fall back to the default `<ToolCallCard>`. Used by the
-   * orchestrator chat to swap in purpose-built swarm cards.
+   * Return `null` to fall back to the default `<ToolCallCard>`. App uses it to
+   * mount SAI render-tool cards.
    */
   /** See ChatMessage: `seedGrow` marks this call's card as born from the tail
    *  thinking row — mount it with the grow-in entry (seedGrow.ts). */
   renderToolCall?: (tc: ToolCall, defaultExpanded: boolean, seedGrow?: boolean) => React.ReactNode | null;
-  /**
-   * Optional: override how an entire message is rendered. Return `null` to
-   * fall back to the default render. Used by the orchestrator chat to render
-   * inline approval cards in place of synthetic system messages.
-   */
-  renderMessage?: (message: ChatMessageType) => React.ReactNode | null;
   /**
    * Optional: active meta-workspace runtime. When set (and its syntheticRoot
    * matches projectPath), the meta-workspace preamble is injected into the
    * AI system prompt on start.
    */
   activeMetaRuntime?: MetaWorkspaceRuntime | null;
-  /**
-   * Optional: replace the default SAI-logo empty state with custom content.
-   * Used by the orchestrator chat to render a swarm-of-logos cluster instead
-   * of the single solo logo.
-   */
-  emptyStateVisual?: React.ReactNode;
-  /**
-   * Optional: replace the default SAI-logo conversation header (rendered
-   * once the first message lands) with custom content. Pair with
-   * emptyStateVisual to keep brand continuity across the empty/active
-   * transition (e.g., a smaller version of the swarm cluster).
-   */
-  conversationHeaderVisual?: React.ReactNode;
   /**
    * Optional: ref that will be populated with a mention-insert callback by
    * ChatInput. Pass this from App.tsx so the accordion bar can trigger
@@ -484,7 +458,7 @@ const LOAD_MORE_CHUNK = 30; // messages to load when scrolling up
 const LOAD_GUARD_ERROR_QUIET_MS = 15_000;
 
 
-export default function ChatPanel({ projectPath, overlayControl, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, availableModels, claudeOverrideState, aiProvider, codexModel, onCodexModelChange, codexModels, onCodexModelsRefresh, codexPermission, onCodexPermissionChange, codexEffort, onCodexEffortChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, kimiModel, onKimiModelChange, kimiModels, kimiApprovalMode, onKimiApprovalModeChange, initialMessages, onMessagesChange, onTurnComplete, onClaudeSessionId, onGeminiSessionId, onKimiSessionId, onCodexSessionId, activeFilePath, onFileOpen, isActive, isStreaming = false, awaitingQuestion = false, initialDraft, onDraftChange, initialContextItems, onContextItemsChange, messageQueue = [], onQueueAdd, onQueueRemove, onQueueShift, onQueuePromote, sessionId, terminalTabs = [], onSlashCommandsUpdate, onInterceptSend, claudeScope = 'chat', onOpenMcpPanel, claudeKind = 'chat', claudeOrchestratorContext, initialPendingApproval = null, renderToolCall, renderMessage, activeMetaRuntime, emptyStateVisual, conversationHeaderVisual, mentionInsertRef: mentionInsertRefProp, waiting = null, liveBackgroundTaskCount, onToggleBackgroundTasks, backgroundTasksOpen, taskUiEnabled = false, taskView = 'rail', taskRailHidden = false, onTaskRailHiddenChange, backgroundTasks, onStopBackgroundTask, claudeSessionId }: ChatPanelProps) {
+export default function ChatPanel({ projectPath, overlayControl, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, availableModels, claudeOverrideState, aiProvider, codexModel, onCodexModelChange, codexModels, onCodexModelsRefresh, codexPermission, onCodexPermissionChange, codexEffort, onCodexEffortChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, kimiModel, onKimiModelChange, kimiModels, kimiApprovalMode, onKimiApprovalModeChange, initialMessages, onMessagesChange, onTurnComplete, onClaudeSessionId, onGeminiSessionId, onKimiSessionId, onCodexSessionId, activeFilePath, onFileOpen, isActive, isStreaming = false, awaitingQuestion = false, initialDraft, onDraftChange, initialContextItems, onContextItemsChange, messageQueue = [], onQueueAdd, onQueueRemove, onQueueShift, onQueuePromote, sessionId, terminalTabs = [], onSlashCommandsUpdate, claudeScope = 'chat', onOpenMcpPanel, initialPendingApproval = null, renderToolCall, activeMetaRuntime, mentionInsertRef: mentionInsertRefProp, waiting = null, liveBackgroundTaskCount, onToggleBackgroundTasks, backgroundTasksOpen, taskUiEnabled = false, taskView = 'rail', taskRailHidden = false, onTaskRailHiddenChange, backgroundTasks, onStopBackgroundTask, claudeSessionId }: ChatPanelProps) {
   const [messages, setMessagesRaw] = useState<ChatMessageType[]>(() => {
     const initial = initialMessages || [];
     // Anything present at mount is history, not a fresh arrival — a workspace/
@@ -897,8 +871,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
       projects: activeMetaRuntime.projects,
     } : null);
     const startArgs: any[] = aiProvider === 'claude' || aiProvider === 'codex'
-      ? [projectPath || '', claudeScope, claudeKind, claudeOrchestratorContext,
-        claudeKind === 'orchestrator' ? projectPath || '' : undefined /* scopeCwd */, metaPreamble, aiProvider === 'codex' && activeMetaRuntime
+      ? [projectPath || '', claudeScope, undefined /* scopeCwd */, metaPreamble, aiProvider === 'codex' && activeMetaRuntime
         ? [...new Set(activeMetaRuntime.projects.filter(project => project.status === 'ok' && project.path.trim()).map(project => project.path))]
         : undefined]
       : [projectPath || '', metaPreamble];
@@ -940,10 +913,9 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
     // Gap-closing gate (chatFrameGate.ts): register BEFORE subscribing so App
     // stops buffering for this scope, then drain what accumulated in the mount
     // gap right after subscribing. All synchronous — no frame can interleave
-    // between these statements. Regular Claude and Codex chats participate;
-    // task scopes keep the always-buffer behavior (orchestrator taskOutput
-    // reads the live buffer), while Gemini uses the fixed `chat` scope.
-    const gateScope = (aiProvider === 'claude' || aiProvider === 'codex') && claudeKind === 'chat' && claudeScope !== 'chat'
+    // between these statements. Claude and Codex chats participate, while
+    // Gemini uses the fixed `chat` scope.
+    const gateScope = (aiProvider === 'claude' || aiProvider === 'codex') && claudeScope !== 'chat'
       ? claudeScope : null;
     if (gateScope) registerChatListener(gateScope);
     const onMessage = (msg: any) => {
@@ -1766,7 +1738,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
       if (gateScope) unregisterChatListener(gateScope);
       cleanup();
     };
-  }, [projectPath, aiProvider, activeMetaRuntime, claudeScope, claudeKind, flushStreamingText, applyCodexLimits]);
+  }, [projectPath, aiProvider, activeMetaRuntime, claudeScope, flushStreamingText, applyCodexLimits]);
 
   // Real utilization percentages arrive on usage:update from two sources:
   // the main-process OAuth poller (60s) and the SDK backend's post-turn
@@ -2332,7 +2304,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
         {
           id: `fake-watcher-${ts}`, role: 'assistant', content: '', timestamp: ts + 1,
           toolCalls: [{
-            id: `fake-watch-${ts}`, type: 'mcp', name: 'mcp__swarm__sai_watch_github_run',
+            id: `fake-watch-${ts}`, type: 'mcp', name: 'mcp__sai__sai_watch_github_run',
             input: JSON.stringify({ url }),
             output: JSON.stringify({ owner: 'fake', repo: 'fake', runId, url, status: 'in_progress' }),
           }],
@@ -2340,31 +2312,6 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
       ]);
       flushMessagesToParent();
       return;
-    }
-    // Slash-command interception (orchestrator chat). When the parent provides
-    // onInterceptSend and reports the message as handled, we add the user msg
-    // and a synthetic assistant reply locally and skip provider dispatch.
-    if (onInterceptSend) {
-      try {
-        const outcome = await onInterceptSend(text);
-        const handled = outcome === true || (typeof outcome === 'object' && outcome !== null && (outcome as any).handled);
-        if (handled) {
-          const userId = `slash-user-${Date.now()}`;
-          const userTs = Date.now();
-          const reply = typeof outcome === 'object' && outcome !== null ? (outcome as any).reply : '';
-          setMessages(prev => [...prev, { id: userId, role: 'user', content: text, timestamp: userTs }]);
-          if (reply) {
-            const replyId = `slash-reply-${Date.now()}`;
-            setMessages(prev => [...prev, { id: replyId, role: 'assistant', content: String(reply), timestamp: userTs + 1 }]);
-          }
-          // Flush to parent so onTurnComplete-style persistence picks these up.
-          flushMessagesToParent();
-          onTurnComplete?.();
-          return;
-        }
-      } catch (err) {
-        console.error('onInterceptSend error', err);
-      }
     }
     // Type-to-answer: when a Claude AskUserQuestion card is awaiting an answer,
     // a normal typed message is the user's free-text ("Other") answer to the
@@ -2515,7 +2462,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
     bottomStripRef.current?.querySelector('textarea')?.focus();
   }, []);
   const renderTaskMessage = (m: ChatMessageType) => (
-    <ChatMessage message={m} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} renderToolCall={renderToolCall} renderMessage={renderMessage} metaRuntime={activeMetaRuntime} onAnswerQuestion={handleAnswerQuestion} onAnswerPlanReview={handleAnswerPlanReview} />
+    <ChatMessage message={m} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} renderToolCall={renderToolCall} metaRuntime={activeMetaRuntime} onAnswerQuestion={handleAnswerQuestion} onAnswerPlanReview={handleAnswerPlanReview} />
   );
 
   const handleQueue = (text: string, fullText: string, images?: string[], attachments?: { images: number; files: number; terminal: boolean }) => {
@@ -2711,13 +2658,9 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
         <LayoutGroup id="sai-brand">
           {messages.length === 0 ? (
             <div className="chat-empty">
-              {emptyStateVisual ? (
-                emptyStateVisual
-              ) : (
-                <motion.div layoutId="sai-brand-logo" layout="position" transition={{ duration: 0.35, ease: [0.4, 0, 0.2, 1] }}>
-                  <SaiLogo mode="idle" size={64} className="chat-empty-logo" ariaLabel="SAI" />
-                </motion.div>
-              )}
+              <motion.div layoutId="sai-brand-logo" layout="position" transition={{ duration: 0.35, ease: [0.4, 0, 0.2, 1] }}>
+                <SaiLogo mode="idle" size={64} className="chat-empty-logo" ariaLabel="SAI" />
+              </motion.div>
               <motion.div layoutId="sai-brand-title" layout="position" transition={{ duration: 0.35, ease: [0.4, 0, 0.2, 1] }} className="chat-empty-title">SAI</motion.div>
               <AnimatePresence>
                 <motion.div
@@ -2737,13 +2680,9 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
             </div>
           ) : (
             <div className="chat-conversation-header">
-              {conversationHeaderVisual ? (
-                conversationHeaderVisual
-              ) : (
-                <motion.div layoutId="sai-brand-logo" layout="position" transition={{ duration: 0.35, ease: [0.4, 0, 0.2, 1] }}>
-                  <SaiLogo mode="idle" size={64} className="chat-empty-logo" ariaLabel="SAI" />
-                </motion.div>
-              )}
+              <motion.div layoutId="sai-brand-logo" layout="position" transition={{ duration: 0.35, ease: [0.4, 0, 0.2, 1] }}>
+                <SaiLogo mode="idle" size={64} className="chat-empty-logo" ariaLabel="SAI" />
+              </motion.div>
               <motion.div layoutId="sai-brand-title" layout="position" transition={{ duration: 0.35, ease: [0.4, 0, 0.2, 1] }} className="chat-empty-title">SAI</motion.div>
             </div>
           )}
@@ -2773,14 +2712,13 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
                       pinnedLayoutId={`pinned-${msg.id}`}
                       isFirstAssistantOfTurn={msg.id === firstAssistantOfTurnId}
                       renderToolCall={renderToolCall}
-                      renderMessage={renderMessage}
                       metaRuntime={activeMetaRuntime}
                       onAnswerQuestion={handleAnswerQuestion}
                       onAnswerPlanReview={handleAnswerPlanReview}
                     />
                   </div>
                 )
-                : <ChatMessage key={msg.id} message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} onRetry={msg.error ? () => handleRetry(msg.id) : undefined} onClearContext={msg.error ? handleClearContext : undefined} isFirstAssistantOfTurn={msg.id === firstAssistantOfTurnId} isStreaming={isStreaming && msg.id === lastAssistantId && !streamSettled} seedGrow={msg.id === seedGrowMsgId} renderToolCall={renderToolCall} renderMessage={renderMessage} metaRuntime={activeMetaRuntime} onAnswerQuestion={handleAnswerQuestion} onAnswerPlanReview={handleAnswerPlanReview} watcherUrlAllowlist={watcherUrlsByMessageId.get(msg.id) ?? EMPTY_URL_SET} />
+                : <ChatMessage key={msg.id} message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} onRetry={msg.error ? () => handleRetry(msg.id) : undefined} onClearContext={msg.error ? handleClearContext : undefined} isFirstAssistantOfTurn={msg.id === firstAssistantOfTurnId} isStreaming={isStreaming && msg.id === lastAssistantId && !streamSettled} seedGrow={msg.id === seedGrowMsgId} renderToolCall={renderToolCall} metaRuntime={activeMetaRuntime} onAnswerQuestion={handleAnswerQuestion} onAnswerPlanReview={handleAnswerPlanReview} watcherUrlAllowlist={watcherUrlsByMessageId.get(msg.id) ?? EMPTY_URL_SET} />
               )}
             </TaskRegistryContext.Provider>
             {isWaiting && waiting && (

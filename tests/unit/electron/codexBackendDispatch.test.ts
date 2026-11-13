@@ -90,7 +90,6 @@ import {
   __setCodexBackendFactoriesForTests,
   destroyCodexBackendIfActive,
   getCodexAppServerPreviewStatus,
-  getCodexSwarmStatus,
   getCodexBackend,
   getCodexBackendMode,
   setCodexBackendMode,
@@ -132,26 +131,6 @@ afterEach(() => {
 });
 
 describe('Codex backend selection', () => {
-  it('keeps Swarm disabled on the SDK and probes only the selected App Server bridge', async () => {
-    const sdk = backendStub();
-    const appServer = {
-      ...backendStub(),
-      previewStatus: { available: true },
-      getSwarmStatus: vi.fn().mockResolvedValue({ available: true }),
-    };
-    __setCodexBackendFactoriesForTests({ sdk: () => sdk, appServer: () => appServer });
-
-    await expect(getCodexSwarmStatus()).resolves.toEqual(expect.objectContaining({
-      available: false,
-      reason: expect.stringMatching(/SDK backend is selected/i),
-    }));
-    expect(appServer.getSwarmStatus).not.toHaveBeenCalled();
-
-    setCodexBackendMode('app-server');
-    await expect(getCodexSwarmStatus()).resolves.toEqual({ available: true });
-    expect(appServer.getSwarmStatus).toHaveBeenCalledOnce();
-  });
-
   it('constructs and caches one SDK backend', () => {
     const first = getCodexBackend();
     const second = getCodexBackend();
@@ -427,8 +406,6 @@ describe('Codex IPC dispatch', () => {
     expect(backend.start).toHaveBeenCalledWith({
       projectPath: '/legacy',
       scope: undefined,
-      kind: undefined,
-      orchestratorContext: undefined,
       scopeCwd: undefined,
       metaPreamble: 'legacy preamble',
       additionalDirectories: undefined,
@@ -455,8 +432,6 @@ describe('Codex IPC dispatch', () => {
       'codex:start',
       '/project',
       'task:7',
-      'orchestrator',
-      { taskId: '7' },
       '/project/.worktrees/7',
       'coordinate carefully',
       ['/repos/a', '', '/repos/a', '/repos/b'],
@@ -480,8 +455,6 @@ describe('Codex IPC dispatch', () => {
     expect(backend.start).toHaveBeenCalledWith({
       projectPath: '/project',
       scope: 'task:7',
-      kind: 'orchestrator',
-      orchestratorContext: { taskId: '7' },
       scopeCwd: '/project/.worktrees/7',
       metaPreamble: 'coordinate carefully',
       additionalDirectories: ['/repos/a', '/repos/b'],

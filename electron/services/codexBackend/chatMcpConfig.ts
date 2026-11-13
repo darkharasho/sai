@@ -27,10 +27,9 @@ export function buildCodexChatMcpConfig(
         args: [input.mcpServerScriptPath],
         env: {
           ELECTRON_RUN_AS_NODE: '1',
-          SAI_SWARM_SOCKET_PATH: input.socketPath,
-          SAI_SWARM_SECRET: input.secret,
-          SAI_SWARM_WORKSPACE: input.workspace,
-          SAI_MCP_TOOLSET: 'chat',
+          SAI_MCP_SOCKET_PATH: input.socketPath,
+          SAI_MCP_SECRET: input.secret,
+          SAI_MCP_WORKSPACE: input.workspace,
         },
       },
     },

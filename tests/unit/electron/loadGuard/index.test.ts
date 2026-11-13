@@ -144,8 +144,8 @@ describe('LoadGuard', () => {
     const chat = deps.emitChat.mock.calls.find(c => c[3].kind === 'killed')!;
     expect(chat.slice(0, 3)).toEqual(['/p', '*', 'claude']);
     expect(chat[3].unitKind).toBe('agent');
-    // I6: the killed event precedes the synthetic done suspendScope emits, so the swarm
-    // mirror (and the panel's quiet window) see the kill first
+    // I6: the killed event precedes the synthetic done suspendScope emits, so the
+    // panel's quiet window sees the kill first
     const killedIdx = deps.emitChat.mock.calls.findIndex(c => c[3].kind === 'killed');
     expect(deps.emitChat.mock.invocationCallOrder[killedIdx]).toBeLessThan(deps.onAgentKilled.mock.invocationCallOrder[0]);
   });
