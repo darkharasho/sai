@@ -1,4 +1,5 @@
 import type { ChatSession, ChatMessage } from './types';
+import { extractModelResult } from './model3d/modelResult';
 import { externalizeMessageImages, type StoreImageFn } from './lib/externalizeImages';
 
 const DB_NAME = 'sai-chat';
@@ -366,6 +367,31 @@ export async function dbCollectReferencedImagePaths(): Promise<string[]> {
     }
   }
   return [...paths];
+}
+
+/**
+ * Version keys of every render_model result still referenced by a stored chat.
+ * Callers must NOT prune the model cache if this throws (an empty list would
+ * wipe it). Run AFTER dbPurgeExpired.
+ */
+export async function dbCollectReferencedModelKeys(): Promise<string[]> {
+  const db = await openDb();
+  const records = await new Promise<Array<{ messages?: ChatMessage[] }>>((resolve, reject) => {
+    const req = db.transaction('messages', 'readonly').objectStore('messages').getAll();
+    req.onsuccess = () => resolve(req.result as Array<{ messages?: ChatMessage[] }>);
+    req.onerror = () => reject(req.error);
+  });
+  const keys = new Set<string>();
+  for (const rec of records) {
+    for (const msg of rec.messages ?? []) {
+      for (const tc of msg.toolCalls ?? []) {
+        if (!(tc.name || '').endsWith('sai_render_model')) continue;
+        const r = extractModelResult(tc.output);
+        if (r) keys.add(r.versionKey);
+      }
+    }
+  }
+  return [...keys];
 }
 
 export async function clearDb(): Promise<void> {

@@ -129,3 +129,26 @@ it('entry.height is undefined when the input has none', () => {
   const r = entryFromToolCall({ id: 't-h2', name: 'sai_render_html', input: JSON.stringify({ html: '<p>x</p>' }) } as any);
   expect(r?.entry.height).toBeUndefined();
 });
+
+describe('entryFromToolCall — render_model', () => {
+  const KEY = 'a1b2c3d4e5f60718293a4b5c6d7e8f90';
+  it('builds a model entry with versionKey and thumbnail path', () => {
+    const t = {
+      ...tc('mcp__sai__sai_render_model', { path: 'a.stl' }),
+      output: JSON.stringify({ ok: true, model: { versionKey: KEY, path: '/p/a.stl', triangles: 1, size: { x: 1, y: 1, z: 1 } } }),
+      resultImages: [{ filePath: '/x/y.png' }],
+    } as ToolCall;
+    const built = entryFromToolCall(t, '/p');
+    expect(built?.entry.kind).toBe('model');
+    expect(built?.entry.payload).toMatchObject({ path: '/p/a.stl', versionKey: KEY, ext: 'stl', thumbnailPath: '/x/y.png' });
+    expect(built?.entry.width).toBe(480);
+  });
+  it('has versionKey null while running and null without a path', () => {
+    expect(entryFromToolCall(tc('sai_render_model', { path: 'a.3mf' }), '/p')?.entry.payload.versionKey).toBeNull();
+    expect(entryFromToolCall(tc('sai_render_model', {}), '/p')).toBeNull();
+  });
+  it('falls back to regex on malformed output', () => {
+    const t = { ...tc('sai_render_model', { path: 'a.obj' }), output: `junk "versionKey": "${KEY}" trunc` } as ToolCall;
+    expect(entryFromToolCall(t, '/p')?.entry.payload.versionKey).toBe(KEY);
+  });
+});

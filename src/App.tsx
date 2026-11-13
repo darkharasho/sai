@@ -32,7 +32,7 @@ import { buildOverlayPayload, truncateSnippet, updateRecentDone, type OverlayRow
 import { toolCallDetail } from './lib/toolCallDetail';
 import { findLatestTodos } from './components/Chat/TodoProgress';
 import { dropLegacySwarmData } from './lib/dropLegacySwarmData';
-import { dbGetSessions, dbGetAllSessions, dbGetMessages, dbGetMessagesTail, dbPatchSessionMeta, dbPurgeExpired, dbExternalizeStoredImages, dbCollectReferencedImagePaths, migrateFromLocalStorage } from './chatDb';
+import { dbGetSessions, dbGetAllSessions, dbGetMessages, dbGetMessagesTail, dbPatchSessionMeta, dbPurgeExpired, dbExternalizeStoredImages, dbCollectReferencedImagePaths, dbCollectReferencedModelKeys, migrateFromLocalStorage } from './chatDb';
 import { queueSaveSession } from './lib/sessionSaveQueue';
 import type { ChatSession, ChatMessage, GitFile, OpenFile, WorkspaceContext, QueuedMessage, TerminalTab, PendingApproval, EffortLevel, CodexEffort, CodexModelOption, ModelChoice, ClaudeModelOption, AIProvider } from './types';
 import type { MetaWorkspaceListItem, MetaWorkspaceRuntime } from './types';
@@ -125,6 +125,25 @@ function pruneOrphanToolImagesOnce(): Promise<void> {
     pruneImagesPromise = null;
   });
   return pruneImagesPromise;
+}
+
+// Same once-per-launch GC for the 3D model version cache. If collecting
+// references fails we must skip: pruning against an empty list wipes the cache.
+let pruneModelsPromise: Promise<void> | null = null;
+function pruneModelCacheOnce(): Promise<void> {
+  pruneModelsPromise ??= (async () => {
+    let keys: string[];
+    try {
+      keys = await dbCollectReferencedModelKeys();
+    } catch (err) {
+      console.warn('[persist] model cache GC skipped (could not read references):', err);
+      return;
+    }
+    await (window.sai as any).pruneModelCache?.(keys);
+  })().catch(err => {
+    console.warn('[persist] model cache GC failed:', err);
+  });
+  return pruneModelsPromise;
 }
 
 function resolveScopedProvider(
@@ -1617,6 +1636,7 @@ export default function App() {
       await dbPurgeExpired(retentionDays);
       await externalizeStoredImagesOnce();
       void pruneOrphanToolImagesOnce();
+      void pruneModelCacheOnce();
       const sessions = await dbGetSessions(activeProjectPath);
       // Normalize lastViewedAt on load. Two cases:
       //   1. Legacy rows with no lastViewedAt field at all.
@@ -3305,7 +3325,7 @@ export default function App() {
                     globalEffort: effortLevel,
                   }}
                   availableModels={claudeModels}
-                  renderToolCall={(tc, _defaultExpanded, seedGrow) => {
+                  renderToolCall={(tc, _defaultExpanded, seedGrow, ctx) => {
                     const n = tc.name || '';
                     if (
                       n.endsWith('sai_render_html') ||
@@ -3313,12 +3333,13 @@ export default function App() {
                       n.endsWith('sai_render_chart') ||
                       n.endsWith('sai_render_diff') ||
                       n.endsWith('sai_render_mermaid') ||
+                      n.endsWith('sai_render_model') ||
                       n.endsWith('sai_render_theme') ||
                       n.endsWith('sai_render_form') ||
                       n.endsWith('sai_confirm') ||
                       n.endsWith('sai_choose')
                     ) {
-                      return <RenderToolCallCard tc={tc} cwd={projectPath} seedGrow={seedGrow} />;
+                      return <RenderToolCallCard tc={tc} cwd={projectPath} seedGrow={seedGrow} isNewestModel={ctx?.isNewestModel ?? true} onOpenFile={(p) => { void handleFileOpenRef.current?.(p); }} />;
                     }
                     return null;
                   }}

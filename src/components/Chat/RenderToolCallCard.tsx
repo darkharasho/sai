@@ -10,6 +10,8 @@ import { getShikiHighlighter, getActiveHighlightTheme } from '../../themes';
 import { AppWindow } from 'lucide-react';
 import { buildChartHtml, buildDiffHtml, type ChartInput, type DiffInput } from '../../render/builtinRenderers';
 import { buildChoiceHtml } from '../../render/buildChoiceHtml';
+import { extractModelResult } from '../../model3d/modelResult';
+import { modelExt } from '../../model3d/modelFiles';
 import { registeredComponentKeys } from '../../render/componentRegistry';
 
 function parseInput(raw: string): Record<string, unknown> {
@@ -89,6 +91,29 @@ export function entryFromToolCall(tc: ToolCall, cwd = ''): { entry: RenderEntry;
     return {
       entry: { renderId, kind: 'mermaid', payload: { diagram }, title: title || 'Diagram', width, height, background, status: 'ready' },
       code: diagram,
+    };
+  }
+
+  if (name.endsWith('sai_render_model')) {
+    const inPath = typeof input.path === 'string' ? input.path : '';
+    if (!inPath) return null;
+    const res = extractModelResult(tc.output);
+    const abs = res?.path || (inPath.startsWith('/') || !cwd ? inPath : `${cwd.replace(/\/$/, '')}/${inPath}`);
+    const ext = modelExt(inPath);
+    if (!ext) return null;
+    const img = tc.resultImages?.[0];
+    const base = inPath.split(/[\\/]/).filter(Boolean).pop() ?? inPath;
+    return {
+      entry: {
+        renderId,
+        kind: 'model',
+        payload: { path: abs, versionKey: res?.versionKey ?? null, ext, thumbnailPath: img?.filePath, thumbnailDataUrl: img?.dataUrl },
+        title: title || base,
+        width: 480,
+        height: height ?? 360,
+        status: 'ready',
+      },
+      code: abs,
     };
   }
 
@@ -208,14 +233,14 @@ function RenderCode({ code, lang }: { code: string; lang: string }) {
   return <div className="sai-rc__codehl" dangerouslySetInnerHTML={{ __html: html }} />;
 }
 
-export function RenderToolCallCard({ tc, cwd = '', seedGrow }: { tc: ToolCall; cwd?: string; /** Card is born from the tail thinking row: mount with the grow-in entry. */ seedGrow?: boolean }) {
+export function RenderToolCallCard({ tc, cwd = '', seedGrow, onOpenFile, isNewestModel = true }: { tc: ToolCall; cwd?: string; onOpenFile?: (path: string) => void; isNewestModel?: boolean; /** Card is born from the tail thinking row: mount with the grow-in entry. */ seedGrow?: boolean }) {
   const [showCode, setShowCode] = useState(false);
   const grow = useSeedGrow(seedGrow);
   const growTransition = useReducedMotionTransition(SPRING.pop);
   const built = entryFromToolCall(tc, cwd);
   if (!built) return null;
   const { entry, code } = built;
-  const lang = entry.kind === 'component' || entry.kind === 'theme' ? 'json' : entry.kind === 'mermaid' ? 'text' : 'html';
+  const lang = entry.kind === 'component' || entry.kind === 'theme' ? 'json' : entry.kind === 'mermaid' || entry.kind === 'model' ? 'text' : 'html';
   // Narrow mocks open the code pane to the right; wide mocks (where side-by-side
   // would overflow the thread) drop the code block below the render instead.
   const layout = entry.width > 460 ? 'stack' : 'side';
@@ -273,7 +298,7 @@ export function RenderToolCallCard({ tc, cwd = '', seedGrow }: { tc: ToolCall; c
           </button>
         </div>
         <div className="sai-rc__panes">
-          <div className="sai-rc__render"><RenderRegion entry={entry} /></div>
+          <div className="sai-rc__render"><RenderRegion entry={entry} onOpenFile={onOpenFile} isNewestModel={isNewestModel} /></div>
           <div className="sai-rc__code" data-testid="render-code"><RenderCode code={code} lang={lang} /></div>
         </div>
       </motion.div>

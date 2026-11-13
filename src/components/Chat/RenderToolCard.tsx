@@ -6,6 +6,8 @@ import { getRegisteredComponent } from '../../render/componentRegistry';
 import { renderMermaidToSvg } from '../../render/renderMermaid';
 import { ThemedComponents } from '../../render/ThemedComponents';
 import { submitForm } from '../../render/formBridge';
+import { ModelCard } from './ModelCard';
+import type { ModelExt } from '../../model3d/modelFiles';
 import { nextRenderWidth, sanitizeCssColor, resolveThemedSurface, createHeightSizer, nextRenderHeight } from '../../render/renderSizing';
 
 // Policy enforced inside the html-mock iframe (via a <meta> in srcDoc).
@@ -55,7 +57,7 @@ export function RenderToolCard({
   );
 }
 
-export function RenderRegion({ entry }: { entry: RenderEntry }) {
+export function RenderRegion({ entry, onOpenFile, isNewestModel = true }: { entry: RenderEntry; onOpenFile?: (path: string) => void; /** model kind: claim the live viewer on mount. */ isNewestModel?: boolean }) {
   // Grow-only natural width: starts at the requested width, widens when the
   // sandboxed mock reports a larger scrollWidth, and is capped to the message
   // column by maxWidth. Never shrinks (see renderSizing.nextRenderWidth).
@@ -80,6 +82,8 @@ export function RenderRegion({ entry }: { entry: RenderEntry }) {
         <RenderedHtml entry={entry} onNaturalWidth={onNaturalWidth} />
       ) : entry.kind === 'mermaid' ? (
         <MermaidRender diagram={String((entry.payload as { diagram: string }).diagram)} />
+      ) : entry.kind === 'model' ? (
+        <ModelRegion entry={entry} onOpenFile={onOpenFile} isNewest={isNewestModel} />
       ) : entry.kind === 'theme' ? (
         <ThemedComponents
           components={(entry.payload as { components: string[] }).components}
@@ -94,6 +98,24 @@ export function RenderRegion({ entry }: { entry: RenderEntry }) {
         />
       )}
     </div>
+  );
+}
+
+function ModelRegion({ entry, onOpenFile, isNewest }: { entry: RenderEntry; onOpenFile?: (path: string) => void; isNewest: boolean }) {
+  const p = entry.payload as { path: string; versionKey: string | null; ext: ModelExt; thumbnailPath?: string; thumbnailDataUrl?: string };
+  return (
+    <ModelCard
+      renderId={entry.renderId}
+      path={p.path}
+      versionKey={p.versionKey ?? null}
+      ext={p.ext}
+      thumbnailPath={p.thumbnailPath}
+      thumbnailDataUrl={p.thumbnailDataUrl}
+      height={entry.height ?? 360}
+      isNewest={isNewest}
+      onOpenFile={onOpenFile}
+      error={entry.status === 'error' ? entry.error : undefined}
+    />
   );
 }
 

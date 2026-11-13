@@ -201,7 +201,7 @@ interface ChatPanelProps {
    */
   /** See ChatMessage: `seedGrow` marks this call's card as born from the tail
    *  thinking row — mount it with the grow-in entry (seedGrow.ts). */
-  renderToolCall?: (tc: ToolCall, defaultExpanded: boolean, seedGrow?: boolean) => React.ReactNode | null;
+  renderToolCall?: (tc: ToolCall, defaultExpanded: boolean, seedGrow?: boolean, ctx?: { isNewestModel: boolean }) => React.ReactNode | null;
   /**
    * Optional: active meta-workspace runtime. When set (and its syntheticRoot
    * matches projectPath), the meta-workspace preamble is injected into the
@@ -470,6 +470,28 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
   });
   const taskRegistry = useMemo(() => buildTaskRegistry(messages), [messages]);
   const messagesRef = useRef<ChatMessageType[]>(initialMessages || []);
+  // "Newest" model card = the last sai_render_model call in this chat. Read from
+  // the eager ref at card-render time (only matters at card mount: it decides
+  // who claims the single live WebGL viewer), so the wrapper stays stable and
+  // doesn't invalidate memoized ChatMessages.
+  const renderToolCallRef = useRef(renderToolCall);
+  renderToolCallRef.current = renderToolCall;
+  const renderToolCallWrapped = useMemo<ChatPanelProps['renderToolCall']>(() => (renderToolCall ? (tc, expanded, seedGrow) => {
+    let isNewestModel = false;
+    if ((tc.name || '').endsWith('sai_render_model')) {
+      outer: for (let i = messagesRef.current.length - 1; i >= 0; i--) {
+        const tcs = messagesRef.current[i].toolCalls;
+        if (!tcs) continue;
+        for (let j = tcs.length - 1; j >= 0; j--) {
+          if ((tcs[j].name || '').endsWith('sai_render_model')) {
+            isNewestModel = tcs[j] === tc || (!!tc.id && tcs[j].id === tc.id);
+            break outer;
+          }
+        }
+      }
+    }
+    return renderToolCallRef.current?.(tc, expanded, seedGrow, { isNewestModel }) ?? null;
+  } : undefined), [!!renderToolCall]);
   // Apply updates to the ref EAGERLY, then hand React the result. Computing
   // inside a React updater made the ref lag every queued-but-unrendered
   // update, so the done-time flushMessagesToParent persisted a stale list —
@@ -2461,7 +2483,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
     if (taskId) void onStopBackgroundTask?.(taskId);
   }, [onStopBackgroundTask]);
   const renderTaskMessage = (m: ChatMessageType) => (
-    <ChatMessage message={m} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} renderToolCall={renderToolCall} metaRuntime={activeMetaRuntime} onAnswerQuestion={handleAnswerQuestion} onAnswerPlanReview={handleAnswerPlanReview} />
+    <ChatMessage message={m} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} renderToolCall={renderToolCallWrapped} metaRuntime={activeMetaRuntime} onAnswerQuestion={handleAnswerQuestion} onAnswerPlanReview={handleAnswerPlanReview} />
   );
 
   const handleQueue = (text: string, fullText: string, images?: string[], attachments?: { images: number; files: number; terminal: boolean }) => {
@@ -2711,14 +2733,14 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
                           toolCallsExpanded={toolCallsExpanded}
                           pinnedLayoutId={`pinned-${msg.id}`}
                           isFirstAssistantOfTurn={msg.id === firstAssistantOfTurnId}
-                          renderToolCall={renderToolCall}
+                          renderToolCall={renderToolCallWrapped}
                           metaRuntime={activeMetaRuntime}
                           onAnswerQuestion={handleAnswerQuestion}
                           onAnswerPlanReview={handleAnswerPlanReview}
                         />
                       </div>
                     )
-                    : <ChatMessage message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} onRetry={msg.error ? () => handleRetry(msg.id) : undefined} onClearContext={msg.error ? handleClearContext : undefined} isFirstAssistantOfTurn={msg.id === firstAssistantOfTurnId} isStreaming={isStreaming && msg.id === lastAssistantId && !streamSettled} seedGrow={msg.id === seedGrowMsgId} renderToolCall={renderToolCall} metaRuntime={activeMetaRuntime} onAnswerQuestion={handleAnswerQuestion} onAnswerPlanReview={handleAnswerPlanReview} watcherUrlAllowlist={watcherUrlsByMessageId.get(msg.id) ?? EMPTY_URL_SET} />}
+                    : <ChatMessage message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} onRetry={msg.error ? () => handleRetry(msg.id) : undefined} onClearContext={msg.error ? handleClearContext : undefined} isFirstAssistantOfTurn={msg.id === firstAssistantOfTurnId} isStreaming={isStreaming && msg.id === lastAssistantId && !streamSettled} seedGrow={msg.id === seedGrowMsgId} renderToolCall={renderToolCallWrapped} metaRuntime={activeMetaRuntime} onAnswerQuestion={handleAnswerQuestion} onAnswerPlanReview={handleAnswerPlanReview} watcherUrlAllowlist={watcherUrlsByMessageId.get(msg.id) ?? EMPTY_URL_SET} />}
                 </Fragment>
               );
             })}

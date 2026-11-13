@@ -343,7 +343,7 @@ function ChatMessage({
    *  default `ToolCallCard`. When `seedGrow` is true this call's card is born
    *  from the tail thinking row — mount it with the grow-in entry (see
    *  seedGrow.ts) so the row visibly becomes the card. */
-  renderToolCall?: (tc: import('../../types').ToolCall, defaultExpanded: boolean, seedGrow?: boolean) => React.ReactNode | null;
+  renderToolCall?: (tc: import('../../types').ToolCall, defaultExpanded: boolean, seedGrow?: boolean, ctx?: { isNewestModel: boolean }) => React.ReactNode | null;
   /** Active meta-workspace runtime; when set, tool-call cards show a project chip. */
   metaRuntime?: MetaWorkspaceRuntime | null;
   /** Submit answers for an AskUserQuestion tool call. */

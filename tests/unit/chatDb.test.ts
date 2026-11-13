@@ -574,3 +574,21 @@ describe('dbExternalizeStoredImages', () => {
     expect((await dbGetMessages(s.id))[0].toolCalls![0].resultImages![0].dataUrl).toBe('data:image/png;base64,BB');
   });
 });
+
+describe('dbCollectReferencedModelKeys', () => {
+  it('returns keys from render_model calls only', async () => {
+    const { dbCollectReferencedModelKeys } = await import('@/chatDb');
+    await clearDb();
+    const K1 = '0123456789abcdef0123456789abcdef';
+    const K2 = 'fedcba9876543210fedcba9876543210';
+    const msg = makeMessage({
+      role: 'assistant',
+      toolCalls: [
+        { id: '1', name: 'mcp__sai__sai_render_model', input: '{}', output: JSON.stringify({ ok: true, model: { versionKey: K1, path: '/a.stl' } }) },
+        { id: '2', name: 'sai_render_html', input: '{}', output: `"versionKey": "${K2}"` },
+      ] as any,
+    });
+    await dbSaveSession('/proj', makeSession({ messages: [msg] }));
+    expect(await dbCollectReferencedModelKeys()).toEqual([K1]);
+  });
+});
