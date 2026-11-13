@@ -151,7 +151,7 @@ function containedRealPath(roots: string[], target: string): string | null {
 // Same containment check, but says WHY it failed so callers can tell a real
 // traversal block ("escapes workspace") apart from a path that simply isn't on
 // disk yet — those used to report the same misleading escape error.
-function resolveContained(
+export function resolveContained(
   roots: string[],
   target: string,
 ): { path: string | null; reason: 'ok' | 'missing' | 'escapes' } {

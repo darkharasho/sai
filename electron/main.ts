@@ -34,6 +34,7 @@ import {
   mintRenderToken,
   evictRenderToken,
 } from './services/renderProtocol';
+import { snapshotModel, readCachedModel, pruneModelCache, isVersionKey } from './services/modelCache';
 import { execFile as _execFile, execFileSync } from 'node:child_process';
 import { promisify as _promisify } from 'node:util';
 const _execFileP = _promisify(_execFile);
@@ -1299,6 +1300,24 @@ function createWindow() {
     ...osTempRoots(),
     ...metaLinkRoots(cwd),
   ];
+
+  // Content-addressed model version cache (3D viewer): snapshot at tool-call
+  // time, read back by versionKey. Containment applies here, not to the code panel.
+  const modelCacheDir = () => path.join(app.getPath('userData'), 'model-cache');
+  ipcMain.handle('model:snapshot', (_e, args: { cwd: string; path: string }) => {
+    if (!args || typeof args.cwd !== 'string' || typeof args.path !== 'string') {
+      return { ok: false, error: 'invalid arguments' };
+    }
+    return snapshotModel({ cwd: args.cwd, path: args.path, allowedRoots: renderAllowedRoots(args.cwd), dir: modelCacheDir() });
+  });
+  ipcMain.handle('model:readCached', (_e, versionKey: string) => {
+    if (!isVersionKey(versionKey)) return null;
+    const buf = readCachedModel(versionKey, modelCacheDir());
+    return buf ? buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) : null;
+  });
+  ipcMain.handle('model:prune', (_e, keys: string[]) => {
+    return pruneModelCache(Array.isArray(keys) ? keys.filter(isVersionKey) : [], modelCacheDir());
+  });
 
   // Render a FILE-backed site (workspace path or inline html + baseDir) in a
   // hidden off-screen window via the sai-render:// protocol and screenshot it,

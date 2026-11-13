@@ -494,6 +494,9 @@ declare global {
     loadGuardTopUsers?: () => Promise<import('../electron/services/loadGuard/types').TopUser[]>;
     loadGuardResume?: () => Promise<void>;
     loadGuardOnState?: (cb: (s: import('../electron/services/loadGuard').LoadGuardPublicState) => void) => () => void;
+    modelSnapshot?: (args: { cwd: string; path: string }) => Promise<{ ok: true; versionKey: string; ext: import('./model3d/modelFiles').ModelExt; absPath: string; bytes: number } | { ok: false; error: string }>;
+    modelReadCached?: (versionKey: string) => Promise<ArrayBuffer | null>;
+    pruneModelCache?: (keys: string[]) => Promise<{ deleted: number; freedBytes: number }>;
     fsReadFileBuffer?: (path: string) => Promise<ArrayBuffer>;
     fsWatchFile?: (path: string) => Promise<void>;
     fsUnwatchFile?: (path: string) => Promise<void>;
