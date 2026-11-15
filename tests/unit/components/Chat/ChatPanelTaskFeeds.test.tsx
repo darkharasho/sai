@@ -264,7 +264,7 @@ describe('ChatPanel task feeds integration', () => {
     await mount({ ...baseProps(), awaitingQuestion: true, initialMessages: [...taskHistory(), askCall([pickQuestion])] as any });
     const isAsk = (el: Element) => el.getAttribute('data-tools') === 'AskUserQuestion';
     expect(screen.getAllByTestId('msg').filter(isAsk)).toHaveLength(1);
-    expect(tabFor('Alpha task').className).toContain('task-status--waiting');
+    expect(tabFor('Alpha task').closest('.task-tabs__item')!.className).toContain('task-status--waiting');
 
     fireEvent.click(tabFor('Alpha task'));
     expect(within(feedEl()).getAllByTestId('msg').filter(isAsk)).toHaveLength(1);
@@ -290,7 +290,7 @@ describe('ChatPanel task feeds integration', () => {
       ] as any,
       initialPendingApproval: { toolName: 'Bash', toolUseId: 'toolu_bash', command: 'rm -rf build', description: '', input: { command: 'rm -rf build' } },
     });
-    expect(tabFor('Alpha task').className).toContain('task-status--waiting');
+    expect(tabFor('Alpha task').closest('.task-tabs__item')!.className).toContain('task-status--waiting');
     fireEvent.click(tabFor('Alpha task'));
     expect(feedEl()).toBeTruthy();
     expect(screen.getByTestId('chat-input')).toBeVisible();
