@@ -108,4 +108,38 @@ describe('TaskFeedView', () => {
     rerender(<TaskFeedView card={card} feed={msgs} onBack={() => {}} renderMessage={() => null} onStop={onStop} />);
     expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull();
   });
+
+  it('shows no summary while the task runs', () => {
+    render(<TaskFeedView card={card} feed={msgs} onBack={() => {}} renderMessage={() => null} />);
+    expect(screen.queryByTestId('task-summary')).toBeNull();
+  });
+  it('a finished task ends its feed with a summary of what was done', () => {
+    const done: TaskCard = { ...card, status: 'done', startedAt: 0, endedAt: 90_000, result: 'Wired the close button and added tests.' };
+    const feed: any[] = [
+      { id: 'm1', role: 'assistant', content: '', timestamp: 1, toolCalls: [
+        { type: 'file_edit', name: 'Edit', input: JSON.stringify({ file_path: '/r/src/a.ts' }) },
+        { type: 'file_edit', name: 'Write', input: JSON.stringify({ file_path: '/r/src/b.css' }) },
+        { type: 'file_edit', name: 'Edit', input: JSON.stringify({ file_path: '/r/src/a.ts' }) },
+        { type: 'terminal_command', name: 'Bash', input: '{"command":"npx vitest"}' },
+        { type: 'task', name: 'mcp__sai__sai_task', input: '{}' },
+      ] },
+    ];
+    render(<TaskFeedView card={done} feed={feed} onBack={() => {}} renderMessage={() => null} />);
+    const s = screen.getByTestId('task-summary');
+    expect(s.textContent).toContain('Done');
+    expect(s.textContent).toContain('Wired the close button and added tests.');
+    expect(s.textContent).toContain('4 tool calls');
+    expect(s.textContent).toContain('1 command');
+    expect(s.textContent).toContain('2 files changed');
+    expect(screen.getByText('a.ts').getAttribute('title')).toBe('/r/src/a.ts');
+    expect(screen.getByText('b.css')).toBeTruthy();
+  });
+  it('a failed task shows a failed summary with its reason', () => {
+    const failed: TaskCard = { ...card, status: 'failed', endedAt: 5, result: 'Build broke' };
+    render(<TaskFeedView card={failed} feed={[]} onBack={() => {}} renderMessage={() => null} />);
+    const s = screen.getByTestId('task-summary');
+    expect(s.className).toContain('task-summary--failed');
+    expect(s.textContent).toContain('Failed');
+    expect(s.textContent).toContain('Build broke');
+  });
 });

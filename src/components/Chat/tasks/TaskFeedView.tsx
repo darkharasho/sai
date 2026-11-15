@@ -4,6 +4,7 @@ import type { ChatMessage } from '../../../types';
 import type { TaskCard } from './types';
 import type { StreamFallback } from './useTaskBoard';
 import { formatElapsed } from './formatElapsed';
+import { baseName, taskSummary, type TaskSummary } from './taskSummary';
 import './tasks.css';
 
 export interface TaskFeedViewProps {
@@ -57,6 +58,34 @@ function StreamFallbackView({ card, fallback }: { card: TaskCard; fallback: Stre
   );
 }
 
+const MAX_FILES = 8;
+
+/** End-of-feed recap once a task finishes: its note plus what the feed shows it did. */
+function TaskSummaryView({ summary }: { summary: TaskSummary }) {
+  const facts: string[] = [];
+  if (summary.elapsed) facts.push(summary.elapsed);
+  if (summary.toolCalls > 0) facts.push(`${summary.toolCalls} tool call${summary.toolCalls === 1 ? '' : 's'}`);
+  if (summary.commands > 0) facts.push(`${summary.commands} command${summary.commands === 1 ? '' : 's'}`);
+  if (summary.files.length > 0) facts.push(`${summary.files.length} file${summary.files.length === 1 ? '' : 's'} changed`);
+  const shown = summary.files.slice(0, MAX_FILES);
+  const more = summary.files.length - shown.length;
+  return (
+    <section className={`task-summary task-summary--${summary.status}`} data-testid="task-summary" aria-label="Task summary">
+      <div className="task-summary__head">
+        <span className="task-summary__label">{summary.status === 'failed' ? 'Failed' : 'Done'}</span>
+        {facts.length > 0 && <span className="task-summary__facts">{facts.join(' · ')}</span>}
+      </div>
+      {summary.note && <p className="task-summary__note">{summary.note}</p>}
+      {shown.length > 0 && (
+        <ul className="task-summary__files">
+          {shown.map((p) => <li key={p} title={p}>{baseName(p)}</li>)}
+          {more > 0 && <li className="task-summary__more">+{more} more</li>}
+        </ul>
+      )}
+    </section>
+  );
+}
+
 /** One task's feed: its filed chat items (plus subagent transcript), rendered like All. */
 export function TaskFeedView({ card, feed, fallback, onBack, renderMessage, onStop }: TaskFeedViewProps) {
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -65,6 +94,7 @@ export function TaskFeedView({ card, feed, fallback, onBack, renderMessage, onSt
   const last = feed && feed.length > 0 ? feed[feed.length - 1] : null;
   const lastLen = last && typeof last.content === 'string' ? last.content.length : 0;
   const lastCardId = useRef(card.id);
+  const summary = taskSummary(card, feed);
 
   useEffect(() => {
     const el = bodyRef.current;
@@ -83,7 +113,7 @@ export function TaskFeedView({ card, feed, fallback, onBack, renderMessage, onSt
       stickRef.current = true;
     }
     if (el && stickRef.current) el.scrollTop = el.scrollHeight;
-  }, [card.id, count, lastLen]);
+  }, [card.id, count, lastLen, !!summary]);
 
   return (
     <div className={`task-stream task-status--${card.status}`} data-testid="task-feed">
@@ -105,6 +135,7 @@ export function TaskFeedView({ card, feed, fallback, onBack, renderMessage, onSt
         ) : (
           feed.map((m) => <div key={m.id} className="task-stream__message">{renderMessage(m)}</div>)
         )}
+        {summary && <TaskSummaryView summary={summary} />}
       </div>
     </div>
   );

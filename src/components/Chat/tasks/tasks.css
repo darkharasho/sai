@@ -50,6 +50,25 @@
 }
 .task-stream__fallback-note--error { color: var(--red); }
 
+/* End-of-feed recap for a finished task. */
+.task-summary {
+  margin: 12px 0 4px; padding: 10px 12px; border-radius: 6px;
+  border: 1px solid var(--border-subtle); border-left: 3px solid var(--green); background: var(--surface-1);
+  display: flex; flex-direction: column; gap: 6px;
+}
+.task-summary--failed { border-left-color: var(--red); }
+.task-summary__head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.task-summary__label { font-weight: 600; color: var(--green); font-size: var(--text-sm); }
+.task-summary--failed .task-summary__label { color: var(--red); }
+.task-summary__facts { color: var(--text-muted); font-size: var(--text-xs); }
+.task-summary__note { margin: 0; color: var(--text); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.task-summary__files { display: flex; flex-wrap: wrap; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.task-summary__files li {
+  padding: 1px 6px; border-radius: 4px; background: var(--surface-2);
+  color: var(--text-secondary); font-size: var(--text-xs); font-family: var(--font-mono, monospace);
+}
+.task-summary__files .task-summary__more { font-family: inherit; color: var(--text-muted); }
+
 /* Tabs layout — a row inside the host's Chat bar, so it inherits that bar's
    uppercase/letter-spaced label styling and has to reset it. */
 .task-tabs {
@@ -77,6 +96,22 @@
   max-width: 180px; overflow: hidden; text-overflow: ellipsis;
   color: var(--text-muted);
 }
+/* Tab + its close button share one hover/selected pill. */
+.task-tabs__item { display: flex; align-items: stretch; margin: 4px 0; border-radius: 4px; }
+.task-tabs__item .task-tabs__tab { margin: 0; padding-right: 2px; border-radius: 4px 0 0 4px; }
+.task-tabs__item:hover { background: var(--surface-3); }
+.task-tabs__item:hover .task-tabs__tab { background: transparent; }
+.task-tabs__item--active, .task-tabs__item--active:hover { background: var(--surface-4); }
+.task-tabs__item--active .task-tabs__tab { background: transparent; }
+.task-tabs__close {
+  all: unset; box-sizing: border-box; cursor: pointer; flex: none;
+  display: flex; align-items: center; padding: 0 6px; border-radius: 0 4px 4px 0;
+  line-height: 1; color: var(--text-muted); opacity: 0;
+}
+.task-tabs__item:hover .task-tabs__close, .task-tabs__item--active .task-tabs__close,
+.task-tabs__close:focus-visible { opacity: 1; }
+.task-tabs__close:hover { color: var(--text); background: var(--surface-4); }
+.task-tabs__close:focus-visible { outline: 1px solid var(--border-strong); outline-offset: -1px; }
 /* Collapsed: a finished batch keeps one line in the bar until dismissed. */
 .task-tabs--collapsed { align-items: center; gap: 4px; }
 .task-tabs__summary {

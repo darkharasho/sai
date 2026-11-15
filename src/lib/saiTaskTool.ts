@@ -9,7 +9,7 @@ export const SAI_TASK_TOOL: SaiToolDef = {
   name: 'task',
   toolset: 'chat',
   description:
-    'Track multi-step work as tasks the user can open as feeds. When the user asks for several things at once, or for multi-step work, call this FIRST with action "create": one task per distinct request, title only (steps are optional and not displayed). Mark a task running (action "update", status "running") right before you start it and whenever you switch to a different task: everything you say and every tool you run is filed under the task you last marked running. Set status "done" with a one-line `note` when finished, or "failed" with the reason. When you hand a task to the Agent tool, pass `agent` = the exact `description` you gave the Agent call. While a chat has tasks, write one short sentence before each batch of tool calls. Use this instead of TaskCreate/TodoWrite. Skip it for single-step or conversational requests.',
+    'Track multi-step work as tasks the user can open as feeds. When the user asks for several things at once, or for multi-step work, call this FIRST with action "create": one task per distinct request, title only (steps are optional and not displayed). Mark a task running (action "update", status "running") right before you start it and whenever you switch to a different task: everything you say and every tool you run is filed under the task you last marked running. Set status "done" when finished with a `note` summarizing what was done (1-3 sentences; shown as the task summary in its tab), or "failed" with the reason. When you hand a task to the Agent tool, pass `agent` = the exact `description` you gave the Agent call. While a chat has tasks, write one short sentence before each batch of tool calls. Use this instead of TaskCreate/TodoWrite. Skip it for single-step or conversational requests.',
   input_schema: {
     type: 'object',
     properties: {
@@ -31,7 +31,7 @@ export const SAI_TASK_TOOL: SaiToolDef = {
       id: { type: 'string', description: 'For update: the task id. Also tags the work that follows onto this task\'s card.' },
       status: { type: 'string', enum: ['running', 'done', 'failed'] },
       step: { type: 'number', description: 'Optional, not displayed.' },
-      note: { type: 'string', description: 'One-line result or failure reason.' },
+      note: { type: 'string', description: 'On done: 1-3 sentence summary of what was done and the outcome. On failed: the reason.' },
       agent: { type: 'string', description: 'The exact `description` passed to the Agent tool.' },
       add_steps: { type: 'array', items: { type: 'string' }, description: 'Optional, not displayed.' },
     },

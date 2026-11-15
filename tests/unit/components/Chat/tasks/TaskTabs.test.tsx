@@ -97,4 +97,32 @@ describe('TaskTabs', () => {
     expect(screen.getAllByRole('tab')).toHaveLength(3);
     expect(screen.queryByRole('button', { name: 'Collapse finished tasks' })).toBeNull();
   });
+
+  it('each task tab has a close button that hides it', () => {
+    const onSelect = vi.fn();
+    render(<TaskTabs board={two} activeId={null} onSelect={onSelect} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Close Alpha' }));
+    expect(screen.getAllByRole('tab').map((t) => t.textContent)).toEqual(['All', 'Beta']);
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+  it('closing the open tab returns to All', () => {
+    const onSelect = vi.fn();
+    render(<TaskTabs board={two} activeId="b" onSelect={onSelect} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Close Beta' }));
+    expect(onSelect).toHaveBeenLastCalledWith(null);
+  });
+  it('closing every tab removes the strip; a new batch brings tabs back', () => {
+    const { container, rerender } = render(<TaskTabs board={two} activeId={null} onSelect={() => {}} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Close Alpha' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Close Beta' }));
+    expect(container.firstChild).toBeNull();
+    rerender(<TaskTabs board={{ ...two, batchStartedAt: 5 }} activeId={null} onSelect={() => {}} />);
+    expect(screen.getAllByRole('tab')).toHaveLength(3);
+  });
+  it('a finished tab shows its result note in place of the now label', () => {
+    const b = board([card({ id: 'a', status: 'done', now: 'Edit x.ts', result: 'Added the close button' }), card({ id: 'b' })]);
+    render(<TaskTabs board={b} activeId={null} onSelect={() => {}} />);
+    expect(screen.getByText('Added the close button')).toBeTruthy();
+    expect(screen.queryByText('Edit x.ts')).toBeNull();
+  });
 });

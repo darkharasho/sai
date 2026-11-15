@@ -52,7 +52,9 @@ export const CHAT_TASK_CARDS_NUDGE =
   '"create" BEFORE starting, one task per distinct request, title only. Mark a task with update status ' +
   '"running" right before you start it and whenever you switch to a different task — SAI files ' +
   'everything you say and every tool you run under the task you last marked, and each task gets its ' +
-  'own feed the user can open. Set "done" with a one-line note when a task finishes, "failed" with the ' +
+  'own feed the user can open. Set "done" when a task finishes, with a note summarizing what was done ' +
+  '(1-3 plain sentences: what changed and the outcome, e.g. tests passing) — it is shown as the task\'s ' +
+  'summary when the user opens its tab. Set "failed" with the ' +
   'reason if it can\'t be finished. Don\'t maintain step lists. Only while a chat has tasks: before ' +
   'each batch of tool calls, write one short sentence saying what you\'re about to do and why. When ' +
   'you hand a task to a background agent, pass agent = the exact description you gave the Agent call. ' +
