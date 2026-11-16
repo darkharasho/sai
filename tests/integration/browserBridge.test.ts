@@ -261,4 +261,25 @@ describe('browserBridge', () => {
     await new Promise((r) => setTimeout(r, 50));
     expect(devlog).toHaveBeenCalledWith('browserBridge', 'relay-dropped', expect.objectContaining({ reason: 'browser disconnected' }));
   });
+
+  it('waits briefly for a dropped relay to come back', async () => {
+    const first = await FakeRelay.connect();
+    await first.next();
+    first.close();
+    await new Promise((r) => setTimeout(r, 50));
+
+    const pending = bridge.call('tabs.list');
+    setTimeout(async () => {
+      const second = await FakeRelay.connect();
+      await second.next(); // welcome
+      await second.autoRespond({ tabs: [] });
+    }, 1000);
+    await expect(pending).resolves.toEqual({ tabs: [] });
+  });
+
+  it('still fails at once when no browser ever connected', async () => {
+    const t0 = Date.now();
+    await expect(bridge.call('snapshot')).rejects.toThrow(/No browser is connected/);
+    expect(Date.now() - t0).toBeLessThan(500);
+  });
 });

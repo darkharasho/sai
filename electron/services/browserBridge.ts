@@ -44,7 +44,18 @@ interface Instance {
   pending: Map<string, PendingCall>;
   attachedTabIds: Set<number>;
   listening: Promise<void>;
+  /** When a relay was last connected (0 = never). */
+  lastRelayAt: number;
 }
+
+/**
+ * The extension reconnects within a second or two of its relay dying (SAI
+ * restart, a newer relay winning). A call that lands in that gap waits this
+ * long for the link instead of failing outright.
+ */
+const RELAY_RECONNECT_WAIT_MS = 4000;
+/** Only wait if a relay was connected this recently; otherwise fail fast. */
+const RELAY_RECENT_MS = 60_000;
 
 let instance: Instance | null = null;
 
@@ -76,7 +87,10 @@ function rejectAllPending(inst: Instance, message: string): void {
 }
 
 function dropRelay(inst: Instance, message: string): void {
-  if (inst.relay) devlog('browserBridge', 'relay-dropped', { reason: message });
+  if (inst.relay) {
+    devlog('browserBridge', 'relay-dropped', { reason: message });
+    inst.lastRelayAt = Date.now();
+  }
   if (inst.relay) {
     try { inst.relay.destroy(); } catch { /* noop */ }
   }
@@ -178,6 +192,7 @@ function attachRelay(inst: Instance, socket: net.Socket): void {
         // reconnecting service worker isn't locked out by a stale socket.
         if (inst.relay && inst.relay !== socket) dropRelay(inst, 'replaced by a newer browser connection');
         inst.relay = socket;
+        inst.lastRelayAt = Date.now();
         devlog('browserBridge', 'relay-connected', {});
         try { socket.write(JSON.stringify({ type: 'welcome' }) + '\n'); } catch { /* noop */ }
         continue;
@@ -238,6 +253,7 @@ function startInternal(opts: StartOptions = {}): BridgeHandle {
     pending: new Map(),
     attachedTabIds: new Set(),
     listening,
+    lastRelayAt: 0,
   };
   return instance.handle;
 }
@@ -278,13 +294,32 @@ const NOT_CONNECTED =
   'No browser is connected. Install the SAI Browser Bridge extension (see docs/browser-bridge.md), '
   + 'then click its toolbar button on the tab you want to share.';
 
-export function call(method: string, params: unknown = {}): Promise<unknown> {
+/** Resolves with the relay once one is connected, or null after `ms`. */
+async function waitForRelay(inst: Instance, ms: number): Promise<net.Socket | null> {
+  const deadline = Date.now() + ms;
+  while (Date.now() < deadline) {
+    if (inst.relay) return inst.relay;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  return inst.relay;
+}
+
+export async function call(method: string, params: unknown = {}): Promise<unknown> {
   const inst = instance;
-  if (!inst) return Promise.reject(new Error('browser bridge is not running'));
-  if (!inst.relay) return Promise.reject(new Error(NOT_CONNECTED));
+  if (!inst) throw new Error('browser bridge is not running');
+  let relay = inst.relay;
+  if (!relay) {
+    if (!inst.lastRelayAt || Date.now() - inst.lastRelayAt > RELAY_RECENT_MS) throw new Error(NOT_CONNECTED);
+    relay = await waitForRelay(inst, RELAY_RECONNECT_WAIT_MS);
+    if (!relay) {
+      throw new Error(
+        `the link to the browser dropped and did not come back within ${RELAY_RECONNECT_WAIT_MS / 1000}s — `
+        + 'click the SAI toolbar button on the tab to reconnect',
+      );
+    }
+  }
 
   const id = crypto.randomUUID();
-  const relay = inst.relay;
 
   return new Promise<unknown>((resolve, reject) => {
     const timer = setTimeout(() => {

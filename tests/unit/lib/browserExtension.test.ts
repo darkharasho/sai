@@ -285,3 +285,102 @@ describe('attachment truth', () => {
     expect(mod.attached.has(5)).toBe(false);
   });
 });
+
+describe('auto re-attach after a foreign-extension frame', () => {
+  const NOT_ALLOWED = 'Cannot access a chrome-extension:// URL of different extension';
+
+  beforeEach(() => {
+    share(1);
+    mod.ensureConnected();
+    vi.useFakeTimers();
+  });
+
+  it('keeps the tab and re-attaches once Chrome allows it', async () => {
+    stub.chrome.debugger.attach.mockRejectedValueOnce(new Error(NOT_ALLOWED));
+    await stub.fire('debugger.onDetach', { tabId: 1 }, 'target_closed');
+
+    expect(mod.attached.get(1)?.state).toBe('reattaching');
+    expect(stub.posted).toContainEqual(expect.objectContaining({ event: 'reattaching', tabId: 1 }));
+
+    await vi.advanceTimersByTimeAsync(250 + 500);
+    expect(stub.chrome.debugger.attach).toHaveBeenCalledTimes(2);
+    expect(mod.attached.get(1)?.state).toBe('attached');
+    expect(stub.cdp.calls.some((c) => c.method === 'Page.enable' && c.tabId === 1)).toBe(true);
+    expect(stub.posted).toContainEqual(expect.objectContaining({ event: 'reattached', tabId: 1 }));
+  });
+
+  it('a call during re-attach waits, then succeeds', async () => {
+    stub.chrome.debugger.attach.mockRejectedValueOnce(new Error(NOT_ALLOWED));
+    evaluateReturns({ url: 'u', title: 't', text: 'back', truncated: false });
+    await stub.fire('debugger.onDetach', { tabId: 1 }, 'target_closed');
+
+    const read = mod.handleRequest({ method: 'read', params: {} });
+    await vi.advanceTimersByTimeAsync(750);
+    await expect(read).resolves.toMatchObject({ tabId: 1, text: 'back' });
+  });
+
+  it('a call during a long re-attach fails with the password-manager message', async () => {
+    stub.chrome.debugger.attach.mockRejectedValue(new Error(NOT_ALLOWED));
+    await stub.fire('debugger.onDetach', { tabId: 1 }, 'target_closed');
+
+    const read = mod.handleRequest({ method: 'read', params: {} });
+    const settled = expect(read).rejects.toThrow(/likely a password manager's autofill menu/);
+    await vi.advanceTimersByTimeAsync(3000);
+    await settled;
+  });
+
+  it('gives up after 2 minutes', async () => {
+    stub.chrome.debugger.attach.mockRejectedValue(new Error(NOT_ALLOWED));
+    await stub.fire('debugger.onDetach', { tabId: 1 }, 'target_closed');
+    await vi.advanceTimersByTimeAsync(125_000);
+    expect(mod.attached.has(1)).toBe(false);
+    expect(stub.posted).toContainEqual(expect.objectContaining({ event: 'detached', tabId: 1, reason: 'reattach-timeout' }));
+  });
+
+  it('canceled_by_user drops the tab immediately', async () => {
+    await stub.fire('debugger.onDetach', { tabId: 1 }, 'canceled_by_user');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(mod.attached.has(1)).toBe(false);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(stub.chrome.debugger.attach).not.toHaveBeenCalled();
+  });
+
+  it('a closed tab is dropped, not re-attached', async () => {
+    await stub.fire('debugger.onDetach', { tabId: 1 }, 'target_closed');
+    await stub.fire('tabs.onRemoved', 1, {});
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(mod.attached.has(1)).toBe(false);
+    expect(stub.chrome.debugger.attach).not.toHaveBeenCalled();
+  });
+
+  it('a second detach during re-attach does not stack timers', async () => {
+    await stub.fire('debugger.onDetach', { tabId: 1 }, 'target_closed');
+    await vi.advanceTimersByTimeAsync(250);
+    expect(mod.attached.get(1)?.state).toBe('attached');
+
+    stub.chrome.debugger.attach.mockRejectedValue(new Error(NOT_ALLOWED));
+    await stub.fire('debugger.onDetach', { tabId: 1 }, 'target_closed');
+    await stub.fire('debugger.onDetach', { tabId: 1 }, 'target_closed');
+    expect(vi.getTimerCount()).toBe(1);
+    const before = stub.chrome.debugger.attach.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(250);
+    expect(stub.chrome.debugger.attach.mock.calls.length).toBe(before + 1);
+  });
+
+  it('toolbar click on a reattaching tab cancels and detaches', async () => {
+    stub.chrome.debugger.attach.mockRejectedValue(new Error(NOT_ALLOWED));
+    await stub.fire('debugger.onDetach', { tabId: 1 }, 'target_closed');
+    await stub.fire('action.onClicked', { id: 1, url: 'https://a.test' });
+    expect(mod.attached.has(1)).toBe(false);
+    const calls = stub.chrome.debugger.attach.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(stub.chrome.debugger.attach.mock.calls.length).toBe(calls);
+  });
+
+  it('port drop reconnects without waiting for the alarm', async () => {
+    expect(stub.chrome.runtime.connectNative).toHaveBeenCalledTimes(1);
+    await stub.fire('port.onDisconnect');
+    await vi.advanceTimersByTimeAsync(500);
+    expect(stub.chrome.runtime.connectNative).toHaveBeenCalledTimes(2);
+  });
+});

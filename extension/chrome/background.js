@@ -62,11 +62,31 @@ const PROBE_TIMEOUT_MS = 1500;
 /** How long an attach failure stays on the badge. */
 const ATTACH_ERROR_BADGE_MS = 4000;
 
+/**
+ * Re-attach schedule after Chrome drops our debugger for a reason the user
+ * didn't choose — most often a password manager's autofill menu, which is
+ * another extension's iframe; Chrome won't keep one extension debugging a page
+ * that contains another's frame. It allows us back once the menu closes.
+ */
+const REATTACH_DELAYS_MS = [250, 500, 1000, 2000];
+const REATTACH_STEADY_MS = 5000;
+const REATTACH_GIVE_UP_MS = 120_000;
+/** How long a call on a re-attaching tab waits before failing. */
+const REATTACH_CALL_WAIT_MS = 3000;
+
+/** Native-port reconnect schedule while any tab is shared. */
+const RECONNECT_DELAYS_MS = [500, 1000, 2000, 5000];
+/** A port that stayed up this long resets the backoff. */
+const RECONNECT_STABLE_MS = 10_000;
+
 /** tabId -> { url, title, state: 'attached' | 'reattaching' }. */
 const attached = new Map();
 
 let port = null;
 let connecting = false;
+let reconnectAttempt = 0;
+let reconnectTimer = null;
+let portOpenedAt = 0;
 /** Why the native port last closed; sent to SAI on the next hello. */
 let lastPortError = null;
 
@@ -234,6 +254,7 @@ async function attachTab(tab) {
 }
 
 async function detachTab(tabId, { notify = true, reason = null } = {}) {
+  cancelReattach(tabId, new Error(`tab ${tabId} is no longer shared with SAI`));
   try {
     await chrome.debugger.detach({ tabId });
   } catch {
@@ -257,8 +278,115 @@ chrome.action.onClicked.addListener((tab) => {
 chrome.debugger.onDetach.addListener((source, reason) => {
   if (typeof source.tabId !== 'number') return;
   diag('detach', { tabId: source.tabId, reason, known: attached.has(source.tabId) });
-  if (attached.has(source.tabId)) void detachTab(source.tabId, { reason });
+  if (!attached.has(source.tabId)) return;
+  // The user dismissing the "debugging this tab" infobar is a decision to stop
+  // sharing. Anything else (a foreign extension frame, a renderer swap) is
+  // Chrome's doing, so keep the tab and win it back.
+  if (reason === 'canceled_by_user') void detachTab(source.tabId, { reason });
+  else scheduleReattach(source.tabId, reason);
 });
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  if (attached.has(tabId)) void detachTab(tabId, { reason: 'tab-closed' });
+});
+
+// ---------------------------------------------------------------------------
+// re-attach
+// ---------------------------------------------------------------------------
+
+/** tabId -> { startedAt, attempt, timer, waiters: Set<{resolve, reject}> } */
+const reattaching = new Map();
+
+function scheduleReattach(tabId, reason) {
+  const meta = attached.get(tabId);
+  if (!meta) return;
+  let job = reattaching.get(tabId);
+  if (job) {
+    // Already trying: restart the clock on the existing job, never a second one.
+    clearTimeout(job.timer);
+    job.attempt = 0;
+  } else {
+    job = { startedAt: Date.now(), attempt: 0, timer: null, waiters: new Set() };
+    reattaching.set(tabId, job);
+  }
+  meta.state = 'reattaching';
+  abortInflight(tabId, new Error(reattachingMessage(tabId)));
+  send({ type: 'event', event: 'reattaching', tabId, reason });
+  queueReattachAttempt(tabId, job);
+}
+
+function queueReattachAttempt(tabId, job) {
+  const delay = job.attempt < REATTACH_DELAYS_MS.length ? REATTACH_DELAYS_MS[job.attempt] : REATTACH_STEADY_MS;
+  job.timer = setTimeout(() => void reattachAttempt(tabId, job), delay);
+}
+
+async function reattachAttempt(tabId, job) {
+  if (reattaching.get(tabId) !== job) return;
+  job.attempt += 1;
+  let ok = false;
+  let error = null;
+  try {
+    await chrome.debugger.attach({ tabId }, CDP_VERSION);
+    ok = true;
+  } catch (err) {
+    error = String(err?.message || err);
+    // Chrome may have handed the session back on its own.
+    if (/already attached/i.test(error) && (await probeAttached(tabId))) ok = true;
+  }
+  if (reattaching.get(tabId) !== job) return; // cancelled while we awaited
+
+  if (ok) {
+    reattaching.delete(tabId);
+    const meta = attached.get(tabId);
+    if (meta) meta.state = 'attached';
+    try { await cdp(tabId, 'Page.enable', {}); } catch { /* non-fatal */ }
+    send({ type: 'event', event: 'reattached', tabId });
+    diag('reattached', { tabId, attempts: job.attempt, waitedMs: Date.now() - job.startedAt });
+    for (const w of job.waiters) w.resolve();
+    return;
+  }
+
+  if (/No tab with given id/i.test(error)) {
+    await detachTab(tabId, { reason: 'tab-closed' });
+    return;
+  }
+  if (Date.now() - job.startedAt >= REATTACH_GIVE_UP_MS) {
+    diag('reattach-gave-up', { tabId, attempts: job.attempt, error });
+    await detachTab(tabId, { reason: 'reattach-timeout' });
+    return;
+  }
+  queueReattachAttempt(tabId, job);
+}
+
+function cancelReattach(tabId, err) {
+  const job = reattaching.get(tabId);
+  if (!job) return;
+  reattaching.delete(tabId);
+  clearTimeout(job.timer);
+  for (const w of job.waiters) w.reject(err);
+}
+
+function reattachingMessage(tabId) {
+  return (
+    `Chrome detached the debugger on tab ${tabId} because another extension (likely a password ` +
+    "manager's autofill menu) put a frame in the page — reattaching automatically; press Escape or " +
+    'dismiss the menu, then retry'
+  );
+}
+
+/** Resolves once the tab is attached again; rejects after `ms`. */
+function awaitAttached(tabId, ms = REATTACH_CALL_WAIT_MS) {
+  const job = reattaching.get(tabId);
+  if (!job) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const waiter = {
+      resolve: () => { clearTimeout(timer); job.waiters.delete(waiter); resolve(); },
+      reject: (err) => { clearTimeout(timer); job.waiters.delete(waiter); reject(err); },
+    };
+    const timer = setTimeout(() => waiter.reject(new Error(reattachingMessage(tabId))), ms);
+    job.waiters.add(waiter);
+  });
+}
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   // Waking for the alarm is the point: it keeps the worker (and the native
@@ -295,8 +423,11 @@ function ensureConnected() {
     return;
   }
   connecting = false;
+  portOpenedAt = Date.now();
+  const thisPort = port;
 
   port.onMessage.addListener((frame) => {
+    reconnectAttempt = 0; // SAI answered: the link works
     if (frame?.type !== 'request') return;
     handleRequest(frame).then(
       (result) => send({ type: 'response', id: frame.id, ok: true, result }),
@@ -307,9 +438,11 @@ function ensureConnected() {
   port.onDisconnect.addListener(() => {
     const why = chrome.runtime.lastError?.message;
     if (why) console.warn('[sai-bridge] native port closed:', why);
-    port = null;
+    if (port === thisPort) port = null;
     // Recorded locally only: with the port gone there is no one to tell.
-    lastPortError = why || null;
+    lastPortError = why || 'disconnected';
+    if (Date.now() - portOpenedAt >= RECONNECT_STABLE_MS) reconnectAttempt = 0;
+    scheduleReconnect();
   });
 
   send({
@@ -322,6 +455,21 @@ function ensureConnected() {
     diag('port-reconnected', { previousError: lastPortError });
     lastPortError = null;
   }
+}
+
+/**
+ * The relay exits whenever SAI's socket closes (SAI restarting, or a newer
+ * relay winning), which drops our port while tabs stay attached. Reconnect
+ * promptly instead of leaving SAI blind until the 30 s keepalive alarm.
+ */
+function scheduleReconnect() {
+  if (reconnectTimer || !attached.size) return;
+  const delay = RECONNECT_DELAYS_MS[Math.min(reconnectAttempt, RECONNECT_DELAYS_MS.length - 1)];
+  reconnectAttempt += 1;
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    if (attached.size) ensureConnected();
+  }, delay);
 }
 
 /** A diagnostic frame for SAI's devlog. Fire-and-forget, never throws. */
@@ -378,19 +526,26 @@ function cdp(tabId, method, params = {}, { timeoutMs = CDP_TIMEOUT_MS } = {}) {
   });
 }
 
-/** Resolves which attached tab a request targets. */
-function resolveTabId(params) {
+/**
+ * Resolves which attached tab a request targets. A tab Chrome briefly took
+ * away (see scheduleReattach) is waited for rather than refused outright.
+ */
+async function resolveTabId(params) {
+  let tabId;
   if (typeof params?.tabId === 'number') {
     if (!attached.has(params.tabId)) {
       throw new Error(`tab ${params.tabId} is not attached — click the SAI toolbar button on it first`);
     }
-    return params.tabId;
-  }
-  if (attached.size === 1) return [...attached.keys()][0];
-  if (attached.size === 0) {
+    tabId = params.tabId;
+  } else if (attached.size === 1) {
+    tabId = [...attached.keys()][0];
+  } else if (attached.size === 0) {
     throw new Error('no tab is attached — click the SAI toolbar button on the tab you want to share');
+  } else {
+    throw new Error(`${attached.size} tabs attached — pass tabId (see sai_browser_tabs)`);
   }
-  throw new Error(`${attached.size} tabs attached — pass tabId (see sai_browser_tabs)`);
+  if (attached.get(tabId)?.state === 'reattaching') await awaitAttached(tabId);
+  return tabId;
 }
 
 /** Evaluates one of the pageScripts sources and unwraps the CDP envelope. */
@@ -570,13 +725,14 @@ const HANDLERS = {
         url: live?.url ?? meta.url ?? null,
         title: live?.title ?? meta.title ?? null,
         attached: true,
+        state: meta.state ?? 'attached',
       };
     });
     return { tabs, note: 'Only tabs the user attached via the SAI toolbar button are visible.' };
   },
 
   async snapshot(params) {
-    const tabId = resolveTabId(params);
+    const tabId = await resolveTabId(params);
     const snap = await evaluateFn(tabId, SNAPSHOT_FN_SOURCE, {
       maxElements: params?.maxElements,
       offset: params?.offset,
@@ -595,7 +751,7 @@ const HANDLERS = {
   },
 
   async read(params) {
-    const tabId = resolveTabId(params);
+    const tabId = await resolveTabId(params);
     const res = await evaluateFn(tabId, READ_FN_SOURCE, {
       selector: params?.selector,
       maxChars: params?.maxChars,
@@ -606,7 +762,7 @@ const HANDLERS = {
   },
 
   async click(params) {
-    const tabId = resolveTabId(params);
+    const tabId = await resolveTabId(params);
     const target = await evaluateOrThrow(tabId, RESOLVE_FN_SOURCE, {
       ref: params?.ref,
       refGen: params?.refGen,
@@ -617,7 +773,7 @@ const HANDLERS = {
   },
 
   async type(params) {
-    const tabId = resolveTabId(params);
+    const tabId = await resolveTabId(params);
     const text = String(params?.text ?? '');
     const target = await evaluateOrThrow(tabId, RESOLVE_FN_SOURCE, {
       ref: params?.ref,
@@ -651,7 +807,7 @@ const HANDLERS = {
   },
 
   async press(params) {
-    const tabId = resolveTabId(params);
+    const tabId = await resolveTabId(params);
     // Focus before and after, so a key that was swallowed (or that activated
     // something behind a modal) shows up in the result instead of reading as
     // a success. Best-effort: a page that won't evaluate still gets the key.
@@ -675,7 +831,7 @@ const HANDLERS = {
   },
 
   async scroll(params) {
-    const tabId = resolveTabId(params);
+    const tabId = await resolveTabId(params);
     const res = await evaluateOrThrow(tabId, SCROLL_FN_SOURCE, {
       dy: typeof params?.dy === 'number' ? params.dy : (params?.to ? 0 : 600),
       dx: params?.dx,
@@ -685,7 +841,7 @@ const HANDLERS = {
   },
 
   async navigate(params) {
-    const tabId = resolveTabId(params);
+    const tabId = await resolveTabId(params);
     const url = await resolveSameOriginUrl(tabId, params?.url);
     await cdp(tabId, 'Page.navigate', { url });
     const after = await settle(tabId);
