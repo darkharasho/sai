@@ -518,6 +518,34 @@ export const SAI_TOOL_SCHEMA: SaiToolDef[] = [
     },
   },
   {
+    name: 'browser_open_tab',
+    description:
+      'Open a new background tab at an http(s) `url`, next to a shared tab, and share it with SAI. ' +
+      'Returns its `tabId` — pass that to the other browser tools. Tabs that open by themselves when ' +
+      'you click a link or button are shared automatically and listed as `openedTabs` in that result.',
+    toolset: 'chat',
+    input_schema: {
+      type: 'object',
+      properties: {
+        url: { type: 'string', description: 'Absolute http(s) URL to open.' },
+        tabId: { type: 'number', description: 'Shared tab to open it next to. Omit when only one is attached.' },
+      },
+      required: ['url'],
+    },
+  },
+  {
+    name: 'browser_close_tab',
+    description: 'Close a shared tab, e.g. one opened with browser_open_tab or a popup that finished. Needs its tabId.',
+    toolset: 'chat',
+    input_schema: {
+      type: 'object',
+      properties: {
+        tabId: { type: 'number', description: 'Which shared tab to close (from browser_tabs).' },
+      },
+      required: ['tabId'],
+    },
+  },
+  {
     name: 'browser_navigate',
     description:
       'Navigate a shared tab: to any http(s) `url` (absolute, or relative to the current page), or ' +

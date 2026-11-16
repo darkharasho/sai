@@ -573,3 +573,110 @@ describe('key combos', () => {
     expect(keys[1].params).toMatchObject({ type: 'keyUp', key: 'a', modifiers: 2 });
   });
 });
+
+describe('child tabs and tab management', () => {
+  const button = { x: 5, y: 5, editable: false, tag: 'A', url: 'https://a.test/', title: 'A', readyState: 'complete' };
+
+  beforeEach(() => share(1));
+
+  /** Makes the click's mouse release open a new tab, like a target=_blank link. */
+  function clickOpensTab(id: number) {
+    stub.cdp.script['Input.dispatchMouseEvent'] = {
+      reply: (params: any) => {
+        if (params.type === 'mouseReleased') void stub.fire('tabs.onCreated', { id, openerTabId: 1 });
+        return {};
+      },
+    };
+  }
+
+  it('a tab opened during a click is shared and reported', async () => {
+    evaluateReturns(button);
+    clickOpensTab(9);
+    const res = await mod.handleRequest({ method: 'click', params: { ref: 'e1' } });
+    expect(res.openedTabs).toEqual([9]);
+    await vi.waitFor(() => expect(mod.attached.has(9)).toBe(true));
+  });
+
+  it('announces the child with openedBy', async () => {
+    mod.ensureConnected();
+    evaluateReturns(button);
+    clickOpensTab(9);
+    await mod.handleRequest({ method: 'click', params: { ref: 'e1' } });
+    await vi.waitFor(() =>
+      expect(stub.posted).toContainEqual(expect.objectContaining({ event: 'attached', tabId: 9, openedBy: 1 })));
+  });
+
+  it('a tab opened within 3s after an action is shared', async () => {
+    evaluateReturns(button);
+    vi.useFakeTimers();
+    const click = mod.handleRequest({ method: 'click', params: { ref: 'e1' } });
+    await vi.advanceTimersByTimeAsync(10);
+    await click;
+    await vi.advanceTimersByTimeAsync(2000);
+    await stub.fire('tabs.onCreated', { id: 10, openerTabId: 1 });
+    await vi.advanceTimersByTimeAsync(10);
+    expect(mod.attached.has(10)).toBe(true);
+  });
+
+  it('a tab the user opens while SAI is idle stays unshared', async () => {
+    evaluateReturns(button);
+    vi.useFakeTimers();
+    const click = mod.handleRequest({ method: 'click', params: { ref: 'e1' } });
+    await vi.advanceTimersByTimeAsync(10);
+    await click;
+    await vi.advanceTimersByTimeAsync(3001);
+    await stub.fire('tabs.onCreated', { id: 11, openerTabId: 1 });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(mod.attached.has(11)).toBe(false);
+    expect(stub.chrome.debugger.attach).not.toHaveBeenCalled();
+  });
+
+  it('a child of an unshared tab is ignored', async () => {
+    await stub.fire('tabs.onCreated', { id: 12, openerTabId: 77 });
+    expect(stub.chrome.debugger.attach).not.toHaveBeenCalled();
+  });
+
+  it('open_tab creates a background tab in the opener window and shares it', async () => {
+    stub.chrome.tabs.get.mockResolvedValueOnce({ id: 1, windowId: 4 });
+    const res = await mod.handleRequest({ method: 'tabs.open', params: { url: 'https://b.test/' } });
+    expect(stub.chrome.tabs.create).toHaveBeenCalledWith({
+      url: 'https://b.test/', openerTabId: 1, windowId: 4, active: false,
+    });
+    expect(res).toMatchObject({ tabId: 100, url: 'https://b.test/', openedBy: 1 });
+    expect(mod.attached.has(100)).toBe(true);
+    // The onCreated that follows must not attach it a second time.
+    await stub.fire('tabs.onCreated', { id: 100, openerTabId: 1 });
+    expect(stub.chrome.debugger.attach).toHaveBeenCalledTimes(1);
+  });
+
+  it('open_tab right after an action attaches the new tab exactly once', async () => {
+    // Real Chrome fires onCreated before tabs.create resolves.
+    evaluateReturns(button);
+    await mod.handleRequest({ method: 'click', params: { ref: 'e1' } });
+    stub.chrome.tabs.create.mockImplementationOnce(async (props: any) => {
+      await stub.fire('tabs.onCreated', { id: 101, openerTabId: 1 });
+      return { id: 101, ...props };
+    });
+    const res = await mod.handleRequest({ method: 'tabs.open', params: { url: 'https://b.test/' } });
+    expect(res.tabId).toBe(101);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(stub.chrome.debugger.attach).toHaveBeenCalledTimes(1);
+  });
+
+  it('open_tab refuses non-http URLs', async () => {
+    await expect(mod.handleRequest({ method: 'tabs.open', params: { url: 'file:///etc/passwd' } }))
+      .rejects.toThrow(/only http\(s\) is allowed/);
+    expect(stub.chrome.tabs.create).not.toHaveBeenCalled();
+  });
+
+  it('close_tab needs an explicit tabId and only closes shared tabs', async () => {
+    await expect(mod.handleRequest({ method: 'tabs.close', params: {} }))
+      .rejects.toThrow('tabs.close needs an explicit tabId');
+    await expect(mod.handleRequest({ method: 'tabs.close', params: { tabId: 50 } }))
+      .rejects.toThrow(/not attached/);
+    const res = await mod.handleRequest({ method: 'tabs.close', params: { tabId: 1 } });
+    expect(stub.chrome.tabs.remove).toHaveBeenCalledWith(1);
+    expect(res).toEqual({ closed: 1 });
+    expect(mod.attached.has(1)).toBe(false);
+  });
+});

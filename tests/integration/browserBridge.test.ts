@@ -239,7 +239,7 @@ describe('browserBridge', () => {
   it('allows exactly the bridge method list, and nothing else', () => {
     expect([...bridge.BRIDGE_METHODS].sort()).toEqual([
       'click', 'dialog', 'hover', 'navigate', 'press', 'read', 'scroll', 'select', 'snapshot',
-      'tabs.list', 'type', 'wait',
+      'tabs.close', 'tabs.list', 'tabs.open', 'type', 'wait',
     ]);
   });
 

@@ -64,6 +64,16 @@ const WAIT_DEFAULT_MS = 5000;
 const WAIT_MAX_MS = 15_000;
 const WAIT_POLL_MS = 200;
 
+/**
+ * A tab opened by a shared tab is shared automatically only if SAI was acting
+ * in the opener at the time, or within this long after (OAuth popups open a
+ * beat late). Tabs the user opens themselves stay private.
+ */
+const ACTION_GRACE_MS = 3000;
+/** Attempts to attach a freshly opened child tab, which may still be starting. */
+const CHILD_ATTACH_TRIES = 3;
+const CHILD_ATTACH_GAP_MS = 200;
+
 /** How long the toolbar probe waits before treating a silent tab as ours. */
 const PROBE_TIMEOUT_MS = 1500;
 
@@ -246,7 +256,7 @@ async function refreshBadge() {
   }
 }
 
-async function attachTab(tab) {
+async function attachTab(tab, { openedBy } = {}) {
   await chrome.debugger.attach({ tabId: tab.id }, CDP_VERSION);
   // Page must be enabled before captureScreenshot is reliable on some targets.
   try {
@@ -258,7 +268,10 @@ async function attachTab(tab) {
   await persistAttached();
   await refreshBadge();
   ensureConnected();
-  send({ type: 'event', event: 'attached', tabId: tab.id, url: tab.url, title: tab.title });
+  send({
+    type: 'event', event: 'attached', tabId: tab.id, url: tab.url, title: tab.title,
+    ...(openedBy !== undefined ? { openedBy } : {}),
+  });
 }
 
 async function detachTab(tabId, { notify = true, reason = null } = {}) {
@@ -354,15 +367,81 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
  * failure: the action happened, and SAI needs to know what is now in the way.
  */
 async function runAction(tabId, fn) {
+  const win = beginAction(tabId);
   let result;
   try {
     result = await fn();
   } catch (err) {
     if (!(err instanceof DialogOpenError) || !dialogs.has(tabId)) throw err;
     result = { tabId };
+  } finally {
+    endAction(tabId);
   }
   const d = dialogs.get(tabId);
-  return d ? { ...result, dialog: d } : result;
+  const opened = win.opened.splice(0);
+  return {
+    ...result,
+    ...(d ? { dialog: d } : {}),
+    ...(opened.length ? { openedTabs: opened } : {}),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// action windows and child tabs
+// ---------------------------------------------------------------------------
+
+/** tabId -> { depth, until, opened: number[] } while SAI acts in that tab. */
+const actionWindows = new Map();
+
+function beginAction(tabId) {
+  let win = actionWindows.get(tabId);
+  if (!win) actionWindows.set(tabId, (win = { depth: 0, until: 0, opened: [] }));
+  win.depth += 1;
+  return win;
+}
+
+function endAction(tabId) {
+  const win = actionWindows.get(tabId);
+  if (!win) return;
+  win.depth = Math.max(0, win.depth - 1);
+  win.until = Date.now() + ACTION_GRACE_MS;
+}
+
+function isInActionWindow(tabId) {
+  const win = actionWindows.get(tabId);
+  return !!win && (win.depth > 0 || Date.now() < win.until);
+}
+
+/**
+ * Tabs we created ourselves (tabs.open) and attach directly, plus openers with
+ * a tabs.open in flight: Chrome fires onCreated before tabs.create resolves,
+ * so the id isn't known yet when the event arrives.
+ */
+const selfOpened = new Set();
+const openingFrom = new Map();
+
+chrome.tabs.onCreated.addListener((tab) => {
+  const opener = tab?.openerTabId;
+  if (typeof tab?.id !== 'number' || typeof opener !== 'number') return;
+  if (selfOpened.has(tab.id) || attached.has(tab.id) || openingFrom.get(opener)) return;
+  if (!attached.has(opener) || !isInActionWindow(opener)) return;
+  actionWindows.get(opener)?.opened.push(tab.id);
+  void attachChild(tab, opener);
+});
+
+async function attachChild(tab, openedBy) {
+  for (let i = 0; i < CHILD_ATTACH_TRIES; i++) {
+    try {
+      await attachTab(tab, { openedBy });
+      return;
+    } catch (err) {
+      if (i === CHILD_ATTACH_TRIES - 1) {
+        diag('child-attach-failed', { tabId: tab.id, openedBy, error: String(err?.message || err) });
+        return;
+      }
+      await sleep(CHILD_ATTACH_GAP_MS);
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -996,6 +1075,39 @@ const HANDLERS = {
       }
       await sleep(WAIT_POLL_MS);
     }
+  },
+
+  /** Opens a new background tab next to a shared one, and shares it. */
+  async 'tabs.open'(params) {
+    const opener = await resolveTabId(params, { allowDialog: true });
+    const url = checkHttpUrl(params?.url);
+    const openerTab = await chrome.tabs.get(opener);
+    openingFrom.set(opener, (openingFrom.get(opener) || 0) + 1);
+    let created;
+    try {
+      created = await chrome.tabs.create({ url, openerTabId: opener, windowId: openerTab?.windowId, active: false });
+      selfOpened.add(created.id);
+    } finally {
+      const left = (openingFrom.get(opener) || 1) - 1;
+      if (left) openingFrom.set(opener, left);
+      else openingFrom.delete(opener);
+    }
+    try {
+      await attachTab({ id: created.id, url, title: created.title }, { openedBy: opener });
+    } finally {
+      // onCreated has fired by now; the guard is only needed until then.
+      setTimeout(() => selfOpened.delete(created.id), ACTION_GRACE_MS);
+    }
+    return { tabId: created.id, url, openedBy: opener };
+  },
+
+  /** Closes a shared tab. Needs the id spelled out: closing is not undoable. */
+  async 'tabs.close'(params) {
+    if (typeof params?.tabId !== 'number') throw new Error('tabs.close needs an explicit tabId');
+    const tabId = await resolveTabId(params, { allowDialog: true });
+    await detachTab(tabId, { reason: 'closed-by-sai' });
+    await chrome.tabs.remove(tabId);
+    return { closed: tabId };
   },
 
   /** Accepts or dismisses the native dialog blocking a tab. */

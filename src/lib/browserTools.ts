@@ -24,6 +24,8 @@ export const BROWSER_TOOL_METHODS: Record<string, string> = {
   browser_hover: 'hover',
   browser_select: 'select',
   browser_wait: 'wait',
+  browser_open_tab: 'tabs.open',
+  browser_close_tab: 'tabs.close',
 };
 
 export function isBrowserTool(tool: string): boolean {
