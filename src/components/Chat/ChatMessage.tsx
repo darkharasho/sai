@@ -21,8 +21,11 @@ import { matchLinkPreview } from './linkPreview';
 import LinkPreviewChip from './LinkPreviewChip';
 import { useLinkContextMenu } from './LinkContextMenu';
 import StreamingAssistantHead from './StreamingAssistantHead';
+import { TaskChip } from './tasks/TaskChip';
+import type { MessageTaskLabels } from './tasks/taskFeed';
 import { hasRevealed, markRevealed } from './revealRegistry';
 import { useSaiAnimationPref } from './useSaiAnimationPref';
+import { useMessageStampPref, formatStampTime } from './useMessageStampPref';
 import { rehypeEmojiIcons } from './rehypeEmojiIcons';
 import { rehypeStreamWords } from './rehypeStreamWords';
 import ReasoningBlock from './ReasoningBlock';
@@ -326,6 +329,7 @@ function ChatMessage({
   onAnswerQuestion,
   onAnswerPlanReview,
   watcherUrlAllowlist,
+  taskLabels,
 }: {
   message: ChatMessageType;
   projectPath?: string;
@@ -345,6 +349,8 @@ function ChatMessage({
    *  from the tail thinking row — mount it with the grow-in entry (see
    *  seedGrow.ts) so the row visibly becomes the card. */
   renderToolCall?: (tc: import('../../types').ToolCall, defaultExpanded: boolean, seedGrow?: boolean, ctx?: { isNewestModel: boolean }) => React.ReactNode | null;
+  /** "Tag messages with their task" setting: the task tab of the text and of each tool call. */
+  taskLabels?: MessageTaskLabels;
   /** Active meta-workspace runtime; when set, tool-call cards show a project chip. */
   metaRuntime?: MetaWorkspaceRuntime | null;
   /** Submit answers for an AskUserQuestion tool call. */
@@ -470,6 +476,7 @@ function ChatMessage({
     : entryProps;
 
   const saiAnimationEnabled = useSaiAnimationPref();
+  const stampMode = useMessageStampPref();
 
   if (message.error) {
     const { title, status, message: errMsg, requestId, details, errorType } = message.error;
@@ -871,6 +878,11 @@ function ChatMessage({
       {...effectiveEntryProps}
     >
       {linkMenu.element}
+      {taskLabels?.own && (
+        <div className="chat-msg-task-tag" data-testid="msg-task-tag">
+          <TaskChip title={taskLabels.own.title} colorIndex={taskLabels.own.colorIndex} />
+        </div>
+      )}
       {message.role === 'assistant' && message.reasoning && (
         <ReasoningBlock
           text={message.reasoning}
@@ -890,6 +902,7 @@ function ChatMessage({
           streaming={!!isAssistantStreaming}
           content={typeof message.content === 'string' ? message.content : String(message.content ?? '')}
           durationMs={message.durationMs}
+          completedAt={message.completedAt ?? message.timestamp}
           messageId={message.id}
         >
           <ReactMarkdown
@@ -917,7 +930,9 @@ function ChatMessage({
             )}
             {message.role === 'assistant' && typeof message.durationMs === 'number' && (
               <div className="chat-msg-duration" data-testid="msg-duration">
-                [{formatMs(message.durationMs)}]
+                [{stampMode === 'time'
+                  ? formatStampTime(message.completedAt ?? message.timestamp)
+                  : formatMs(message.durationMs)}]
               </div>
             )}
             {
@@ -956,11 +971,18 @@ function ChatMessage({
               ? visibleToolCalls.reduce((acc, tc, idx) => (tc.output == null ? idx : acc), -1)
               : -1;
             return visibleToolCalls.map((tc, i) => {
+              const label = taskLabels?.calls[message.toolCalls!.indexOf(tc)] ?? null;
+              const tag = label && (
+                <div className="chat-msg-task-tag chat-msg-task-tag--tool" data-testid="tool-task-tag">
+                  <TaskChip title={label.title} colorIndex={label.colorIndex} />
+                </div>
+              );
               if (renderToolCall) {
                 const custom = renderToolCall(tc, toolCallsExpanded, i === seedToolIdx);
-                if (custom != null) return <React.Fragment key={i}>{custom}</React.Fragment>;
+                if (custom != null) return <React.Fragment key={i}>{tag}{custom}</React.Fragment>;
               }
-              return <ToolCallCard key={i} toolCall={tc} defaultExpanded={toolCallsExpanded} metaRuntime={metaRuntime} onAnswerQuestion={onAnswerQuestion} onAnswerPlanReview={onAnswerPlanReview} seedGrow={i === seedToolIdx} />;
+              const card = <ToolCallCard toolCall={tc} defaultExpanded={toolCallsExpanded} metaRuntime={metaRuntime} onAnswerQuestion={onAnswerQuestion} onAnswerPlanReview={onAnswerPlanReview} seedGrow={i === seedToolIdx} />;
+              return tag ? <React.Fragment key={i}>{tag}{card}</React.Fragment> : <React.Fragment key={i}>{card}</React.Fragment>;
             });
           })()}
         </Stagger>
@@ -984,6 +1006,19 @@ function ChatMessage({
         }
         .chat-msg-assistant {
           padding: 4px 14px;
+        }
+        .chat-msg-task-tag {
+          display: flex;
+          margin-bottom: 4px;
+        }
+        .chat-msg-task-tag .task-feed-chip {
+          margin: 0;
+          font-size: 10px;
+          line-height: 14px;
+          padding: 0 6px;
+        }
+        .chat-msg-task-tag--tool {
+          margin: 6px 0 2px;
         }
         .chat-msg-content {
           display: flex;
@@ -1281,5 +1316,6 @@ export default memo(ChatMessage, (prev, next) =>
   prev.onClearContext === next.onClearContext &&
   prev.renderToolCall === next.renderToolCall &&
   prev.metaRuntime === next.metaRuntime &&
-  prev.watcherUrlAllowlist === next.watcherUrlAllowlist
+  prev.watcherUrlAllowlist === next.watcherUrlAllowlist &&
+  prev.taskLabels?.sig === next.taskLabels?.sig
 );

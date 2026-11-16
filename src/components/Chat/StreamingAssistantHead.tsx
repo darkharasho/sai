@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { motion } from 'motion/react';
 import SaiLogo from '../SaiLogo';
 import { useThinkingDriver } from './useThinkingDriver';
+import { useMessageStampPref, formatStampTime } from './useMessageStampPref';
 import { revealWords } from './wordReveal';
 import { hasRevealed, markRevealed } from './revealRegistry';
 import { prefersReducedMotion, EASING } from './motion';
@@ -25,6 +26,8 @@ interface Props {
   streaming: boolean;
   content: string;
   durationMs?: number;
+  /** When the reply finished — shown instead of the duration in `time` stamp mode. */
+  completedAt?: number;
   /** Message id for the once-per-session reveal registry. When set and the id
    *  has already revealed in a previous mount, remounts (workspace/chat swaps)
    *  render the content statically instead of replaying the animation. */
@@ -32,7 +35,8 @@ interface Props {
   children: React.ReactNode;
 }
 
-export default function StreamingAssistantHead({ streaming, content, durationMs, messageId, children }: Props) {
+export default function StreamingAssistantHead({ streaming, content, durationMs, completedAt, messageId, children }: Props) {
+  const stampMode = useMessageStampPref();
   const [phase, setPhase] = useState<Phase>(streaming ? 'thinking' : 'revealed');
   const driver = useThinkingDriver(phase === 'thinking');
   const mdRef = useRef<HTMLDivElement | null>(null);
@@ -157,7 +161,11 @@ export default function StreamingAssistantHead({ streaming, content, durationMs,
   }, [phase, messageId]);
 
   const isStatic = phase !== 'thinking';
-  const clock = isStatic ? formatMs(durationMs ?? frozenMsRef.current) : driver.clockText;
+  const clock = !isStatic
+    ? driver.clockText
+    : stampMode === 'time' && typeof completedAt === 'number'
+    ? formatStampTime(completedAt)
+    : formatMs(durationMs ?? frozenMsRef.current);
   // While thinking, always show the live running clock. Once static, only show the
   // duration stamp when there's a real per-segment duration (mirrors the legacy head,
   // which hid the stamp for replies without a durationMs — e.g. complete arrivals).

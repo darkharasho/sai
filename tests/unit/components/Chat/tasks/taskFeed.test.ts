@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  effectiveTag, filterMessagesForTask, mergeFeed, nowLabel, taskChips,
+  effectiveTag, filterMessagesForTask, mergeFeed, nowLabel, taskChips, taskLabels,
 } from '../../../../../src/components/Chat/tasks/taskFeed';
 import { itemKey } from '../../../../../src/components/Chat/tasks/declaredCards';
 import type { ChatMessage, ToolCall } from '../../../../../src/types';
@@ -141,5 +141,34 @@ describe('taskChips', () => {
     ];
     expect([...taskChips(msgs, cards, new Map()).keys()]).toEqual(['b']);
     expect(taskChips(msgs, [], new Map()).size).toBe(0);
+  });
+});
+
+describe('taskLabels', () => {
+  const card = (id: string, tag: string, title: string): any => ({ id, tag, title });
+  const cards = [card('t1', T1, 'One'), card('t2', T2, 'Two')];
+
+  it('labels every tagged text and tool call, not just run starts', () => {
+    const msgs = [
+      asst('a', 1, { content: 'x', taskId: T1, toolCalls: [tool('c1', 'Bash', { taskId: T1 }), tool('s', 'mcp__sai__sai_task', { taskId: T1 })] }),
+      asst('b', 2, { content: 'y', taskId: T1, toolCalls: [tool('c2', 'Read', { taskId: T2 })] }),
+    ];
+    const labels = taskLabels(msgs, cards, new Map());
+    expect(labels.get('a')).toMatchObject({ own: { title: 'One', colorIndex: 0 }, calls: [{ title: 'One', colorIndex: 0 }, null] });
+    expect(labels.get('b')).toMatchObject({ own: { title: 'One' }, calls: [{ title: 'Two', colorIndex: 1 }] });
+    expect(labels.get('a')!.sig).not.toBe(labels.get('b')!.sig);
+  });
+
+  it('skips untagged, empty-text, user and out-of-batch items; uses computed tags for legacy ones', () => {
+    const msgs: ChatMessage[] = [
+      { id: 'u', role: 'user', content: 'hi', timestamp: 0, taskId: T1 },
+      asst('a', 1, { content: '', taskId: T1 }),
+      asst('b', 2, { content: 'x', taskId: null }),
+      asst('c', 3, { content: 'x', taskId: '50:old' }),
+      asst('d', 4, { content: 'x' }),
+    ];
+    const labels = taskLabels(msgs, cards, new Map([[itemKey('d'), T2]]));
+    expect([...labels.keys()]).toEqual(['d']);
+    expect(taskLabels(msgs, [], new Map()).size).toBe(0);
   });
 });

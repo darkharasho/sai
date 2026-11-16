@@ -9,6 +9,8 @@ import IntegrationsPage from './Settings/IntegrationsPage';
 import { THEMES, applyTheme, setAccent, getActiveAccentId, type ThemeId, HIGHLIGHT_THEMES, getActiveHighlightTheme, setActiveHighlightTheme, getShikiHighlighter, type HighlightThemeId } from '../themes';
 import { ACCENTS, isAccentId, type AccentId } from '../accents';
 import { ALL_CODEX_EFFORTS, effortsForCodexModel, normalizeCodexEffort } from '../lib/codexEffort';
+import { setMessageStampMode } from './Chat/useMessageStampPref';
+import { setTaskTagsPref } from './Chat/useTaskTagsPref';
 
 const EFFORT_OPTIONS: { id: EffortLevel; label: string }[] = [
   { id: 'low',    label: 'Low'    },
@@ -144,6 +146,8 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
   const [geminiAvailableModels, setGeminiAvailableModels] = useState<{ id: string; name: string }[]>([]);
   const [systemNotifications, setSystemNotifications] = useState(false);
   const [toolCallsExpanded, setToolCallsExpanded] = useState(true);
+  const [messageStampTime, setMessageStampTime] = useState(false);
+  const [tagMessagesWithTask, setTagMessagesWithTask] = useState(false);
   const [saiAnimationEnabled, setSaiAnimationEnabled] = useState(true);
   const [focusedChat, setFocusedChat] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(300);
@@ -266,6 +270,8 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
     }).catch(() => {});
     window.sai.settingsGet('systemNotifications', false).then((v: boolean) => setSystemNotifications(v));
     window.sai.settingsGet('toolCallsExpanded', true).then((v: boolean) => setToolCallsExpanded(v));
+    window.sai.settingsGet('messageStampMode', 'duration').then((v: string) => setMessageStampTime(v === 'time'));
+    window.sai.settingsGet('tagMessagesWithTask', false).then((v: boolean) => setTagMessagesWithTask(v === true));
     window.sai.settingsGet('saiAnimationEnabled', true).then((v: boolean) => setSaiAnimationEnabled(v !== false));
     window.sai.settingsGet('focusedChat', false).then((v: boolean) => setFocusedChat(v));
     window.sai.settingsGet('sidebarWidth', 300).then((v: number) => setSidebarWidth(v));
@@ -355,6 +361,8 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
       if ('lockCommitProvider' in remote) setLockCommitProvider(remote.lockCommitProvider);
       if ('systemNotifications' in remote) setSystemNotifications(remote.systemNotifications);
       if ('toolCallsExpanded' in remote) setToolCallsExpanded(remote.toolCallsExpanded);
+      if ('tagMessagesWithTask' in remote) { setTagMessagesWithTask(remote.tagMessagesWithTask === true); setTaskTagsPref(remote.tagMessagesWithTask === true); }
+      if ('messageStampMode' in remote) { setMessageStampTime(remote.messageStampMode === 'time'); setMessageStampMode(remote.messageStampMode === 'time' ? 'time' : 'duration'); }
       if ('saiAnimationEnabled' in remote) setSaiAnimationEnabled(remote.saiAnimationEnabled !== false);
       if ('focusedChat' in remote) setFocusedChat(remote.focusedChat);
       if ('sidebarWidth' in remote) setSidebarWidth(remote.sidebarWidth);
@@ -796,6 +804,21 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
     onSettingChange?.('toolCallsExpanded', value);
   };
 
+  const handleMessageStampTimeChange = (value: boolean) => {
+    const mode = value ? 'time' : 'duration';
+    setMessageStampTime(value);
+    window.sai.settingsSet('messageStampMode', mode);
+    setMessageStampMode(mode);
+    onSettingChange?.('messageStampMode', mode);
+  };
+
+  const handleTagMessagesWithTaskChange = (value: boolean) => {
+    setTagMessagesWithTask(value);
+    window.sai.settingsSet('tagMessagesWithTask', value);
+    setTaskTagsPref(value);
+    onSettingChange?.('tagMessagesWithTask', value);
+  };
+
   const handleSaiAnimationEnabledChange = (value: boolean) => {
     setSaiAnimationEnabled(value);
     window.sai.settingsSet('saiAnimationEnabled', value);
@@ -1048,6 +1071,36 @@ export default function SettingsModal({ onClose, onSettingChange, onOpenWhatsNew
             onClick={() => handleToolCallsExpandedChange(!toolCallsExpanded)}
             role="switch"
             aria-checked={toolCallsExpanded}
+          >
+            <span className="settings-toggle-thumb" />
+          </button>
+        </div>
+
+        <div className="settings-row">
+          <div className="settings-row-info">
+            <div className="settings-row-name">Show reply time</div>
+            <div className="settings-row-desc">Stamp each reply with the time it finished instead of how long the turn took</div>
+          </div>
+          <button
+            className={`settings-toggle${messageStampTime ? ' on' : ''}`}
+            onClick={() => handleMessageStampTimeChange(!messageStampTime)}
+            role="switch"
+            aria-checked={messageStampTime}
+          >
+            <span className="settings-toggle-thumb" />
+          </button>
+        </div>
+
+        <div className="settings-row">
+          <div className="settings-row-info">
+            <div className="settings-row-name">Tag messages with their task</div>
+            <div className="settings-row-desc">Label every reply and tool call with the task tab it belongs to</div>
+          </div>
+          <button
+            className={`settings-toggle${tagMessagesWithTask ? ' on' : ''}`}
+            onClick={() => handleTagMessagesWithTaskChange(!tagMessagesWithTask)}
+            role="switch"
+            aria-checked={tagMessagesWithTask}
           >
             <span className="settings-toggle-thumb" />
           </button>

@@ -26,6 +26,7 @@ import ChatMessage from '../../../../src/components/Chat/ChatMessage';
 import type { ChatMessage as ChatMessageType } from '../../../../src/types';
 import { setFlipRect, _resetFlipRegistry } from '../../../../src/components/Chat/flipRegistry';
 import { SPRING, DISTANCE, FADE_IN } from '../../../../src/components/Chat/motion';
+import { setMessageStampMode, formatStampTime } from '../../../../src/components/Chat/useMessageStampPref';
 
 function makeMessage(overrides: Partial<ChatMessageType> = {}): ChatMessageType {
   return {
@@ -480,6 +481,32 @@ describe('ChatMessage', () => {
     expect(btn.textContent).toContain('Clear context');
   });
 
+  describe('task tags', () => {
+    it('labels the reply and each tool call with its task when labels are passed', () => {
+      const msg = makeMessage({
+        role: 'assistant', content: 'hi',
+        toolCalls: [
+          { id: 'a', type: 'other', name: 'Bash', input: '{}', output: 'ok' },
+          { id: 'b', type: 'other', name: 'Read', input: '{}', output: 'ok' },
+        ],
+      } as any);
+      const labels = {
+        own: { title: 'Build it', colorIndex: 0 },
+        calls: [{ title: 'Build it', colorIndex: 0 }, { title: 'Ship it', colorIndex: 1 }],
+        sig: 'x',
+      };
+      render(<ChatMessage message={msg} taskLabels={labels} />);
+      expect(screen.getByTestId('msg-task-tag').textContent).toBe('Build it');
+      expect(screen.getAllByTestId('tool-task-tag').map(e => e.textContent)).toEqual(['Build it', 'Ship it']);
+    });
+
+    it('shows no tags without labels', () => {
+      const msg = makeMessage({ role: 'assistant', content: 'hi' });
+      render(<ChatMessage message={msg} />);
+      expect(screen.queryByTestId('msg-task-tag')).toBeNull();
+    });
+  });
+
   describe('durationMs display', () => {
     it('renders frozen clock when assistant message has durationMs', () => {
       // Fresh SAI assistant routes through the morph head, which renders the clock
@@ -515,6 +542,28 @@ describe('ChatMessage', () => {
       // Morph head renders the clock (.sah-clock / .chat-msg-duration) inside .chat-msg-body.
       const { container } = render(<ChatMessage message={makeMessage({ durationMs: 3750 })} />);
       expect(container.querySelector('.chat-msg-body .chat-msg-duration')).toBeTruthy();
+    });
+
+    it('shows the time the reply finished when the stamp setting is "time", and switches live', () => {
+      const completedAt = new Date(2026, 10, 16, 14, 41).getTime();
+      const msg = makeMessage({ role: 'assistant', durationMs: 75300, completedAt });
+      const { container } = render(<ChatMessage message={msg} />);
+      expect(container.querySelector('.sah-clock')?.textContent?.trim()).toBe('[01:15.3]');
+      act(() => setMessageStampMode('time'));
+      try {
+        expect(container.querySelector('.sah-clock')?.textContent?.trim()).toBe(`[${formatStampTime(completedAt)}]`);
+      } finally {
+        act(() => setMessageStampMode('duration'));
+      }
+      expect(container.querySelector('.sah-clock')?.textContent?.trim()).toBe('[01:15.3]');
+    });
+
+    it('formatStampTime adds the date for other days', () => {
+      const now = new Date(2026, 10, 16, 9, 0).getTime();
+      const today = new Date(2026, 10, 16, 8, 5).getTime();
+      const older = new Date(2026, 10, 14, 8, 5).getTime();
+      expect(formatStampTime(today, now)).not.toMatch(/Nov/);
+      expect(formatStampTime(older, now)).toMatch(/Nov 14/);
     });
   });
 

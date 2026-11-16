@@ -27,6 +27,8 @@ export interface ChatMessage {
    */
   githubWatchers?: GitHubWatcherSnapshot[];
   durationMs?: number;
+  /** Wall-clock time the bubble finished (stamped with durationMs). */
+  completedAt?: number;
   error?: {
     title: string;
     status?: number;

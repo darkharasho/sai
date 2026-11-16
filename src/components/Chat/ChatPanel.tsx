@@ -84,6 +84,7 @@ import { watchTargetsFromMessage } from './githubRunResolver';
 
 const EMPTY_URL_SET: Set<string> = new Set();
 const NO_CHIPS: Map<string, TaskChipInfo> = new Map();
+const NO_LABELS: Map<string, MessageTaskLabels> = new Map();
 const HIDDEN_STYLE = { display: 'none' } as const;
 import ChatInput, { type ContextItem } from './ChatInput';
 import type { ChatMessage as ChatMessageType, ToolCall, PendingApproval, PendingSudoPrompt, PendingCodexUserInput, PendingCodexMcpElicitation, QueuedMessage, TerminalTab } from '../../types';
@@ -98,7 +99,8 @@ import { useTaskBoard } from './tasks/useTaskBoard';
 import { TaskTabs, TASK_TABS_SLOT_ID } from './tasks/TaskTabs';
 import { TaskFeedView } from './tasks/TaskFeedView';
 import { TaskChip } from './tasks/TaskChip';
-import { taskChips, directAtTask, type TaskChipInfo } from './tasks/taskFeed';
+import { taskChips, taskLabels, directAtTask, type TaskChipInfo, type MessageTaskLabels } from './tasks/taskFeed';
+import { useTaskTagsPref } from './useTaskTagsPref';
 import type { TaskCard } from './tasks/types';
 import './tasks/tasks.css';
 import type { BackgroundTaskDetail } from '../../../electron/services/claudeBackend/backgroundTasks';
@@ -774,9 +776,16 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
   const tabBoard = useMemo(() => ({ ...taskBoard.board, cards: taskCards, allDone: taskCards.every(c => c.status === 'done' || c.status === 'failed') }), [taskBoard.board, taskCards]);
   const showTaskUi = taskUiEnabled && taskCards.length > 0;
   // Task chips in All (display-only): above the first message of each task run.
+  // "Tag messages with their task" setting: every reply and tool call gets its
+  // own chip, which replaces the run-boundary chips above.
+  const tagEveryItem = useTaskTagsPref();
   const chipBefore = useMemo(
-    () => (showTaskUi ? taskChips(messages, taskCards, taskBoard.tags) : NO_CHIPS),
-    [showTaskUi, messages, taskCards, taskBoard.tags],
+    () => (showTaskUi && !tagEveryItem ? taskChips(messages, taskCards, taskBoard.tags) : NO_CHIPS),
+    [showTaskUi, tagEveryItem, messages, taskCards, taskBoard.tags],
+  );
+  const labelsByMessage = useMemo(
+    () => (showTaskUi && tagEveryItem ? taskLabels(messages, taskCards, taskBoard.tags) : NO_LABELS),
+    [showTaskUi, tagEveryItem, messages, taskCards, taskBoard.tags],
   );
   const openTaskCard = openTaskId ? taskCards.find(c => c.id === openTaskId) ?? null : null;
   // The tabs live in the host's Chat accordion bar rather than a bar of their
@@ -1633,7 +1642,8 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
               for (let i = stamped.length - 1; i >= 0; i--) {
                 const m = stamped[i];
                 if (m.role === 'assistant' && m.content && m.content.length > 0 && typeof m.durationMs !== 'number') {
-                  stamped[i] = { ...m, durationMs: Date.now() - turnStart };
+                  const now = Date.now();
+                  stamped[i] = { ...m, durationMs: now - turnStart, completedAt: now };
                   break;
                 }
               }
@@ -2576,7 +2586,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
             typeof m.durationMs !== 'number'
           ) {
             changed = true;
-            return { ...m, durationMs: now - (turnStart ?? m.startedAt ?? m.timestamp) };
+            return { ...m, durationMs: now - (turnStart ?? m.startedAt ?? m.timestamp), completedAt: now };
           }
           return m;
         });
@@ -2754,7 +2764,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
                         />
                       </div>
                     )
-                    : <ChatMessage message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} onRetry={msg.error ? () => handleRetry(msg.id) : undefined} onClearContext={msg.error ? handleClearContext : undefined} isFirstAssistantOfTurn={msg.id === firstAssistantOfTurnId} isStreaming={isStreaming && msg.id === lastAssistantId && !streamSettled} seedGrow={msg.id === seedGrowMsgId} renderToolCall={renderToolCallWrapped} metaRuntime={activeMetaRuntime} onAnswerQuestion={handleAnswerQuestion} onAnswerPlanReview={handleAnswerPlanReview} watcherUrlAllowlist={watcherUrlsByMessageId.get(msg.id) ?? EMPTY_URL_SET} />}
+                    : <ChatMessage message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} onRetry={msg.error ? () => handleRetry(msg.id) : undefined} onClearContext={msg.error ? handleClearContext : undefined} isFirstAssistantOfTurn={msg.id === firstAssistantOfTurnId} isStreaming={isStreaming && msg.id === lastAssistantId && !streamSettled} seedGrow={msg.id === seedGrowMsgId} renderToolCall={renderToolCallWrapped} metaRuntime={activeMetaRuntime} onAnswerQuestion={handleAnswerQuestion} onAnswerPlanReview={handleAnswerPlanReview} watcherUrlAllowlist={watcherUrlsByMessageId.get(msg.id) ?? EMPTY_URL_SET} taskLabels={labelsByMessage.get(msg.id)} />}
                 </Fragment>
               );
             })}

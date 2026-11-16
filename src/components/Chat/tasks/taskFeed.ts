@@ -126,3 +126,44 @@ export function taskChips(
 export function directAtTask(prompt: string, title: string): string {
   return `About task "${title}": ${prompt}`;
 }
+
+/** Per-message task labels for the "tag every item" setting. */
+export interface MessageTaskLabels {
+  /** Label for the message's own text/reasoning (only when it has any). */
+  own: TaskChipInfo | null;
+  /** Labels per tool call, by index in message.toolCalls. */
+  calls: Array<TaskChipInfo | null>;
+  /** Stable signature, so memoized messages only re-render when a label changes. */
+  sig: string;
+}
+
+/**
+ * Task label for every tagged item, keyed by message id. Only items filed
+ * under a current-batch card get one; untagged items get null. Messages with
+ * no labelled item are left out.
+ */
+export function taskLabels(
+  messages: ChatMessage[],
+  cards: TaskCard[],
+  computed: Map<string, string | null>,
+): Map<string, MessageTaskLabels> {
+  const out = new Map<string, MessageTaskLabels>();
+  if (cards.length === 0) return out;
+  const byTag = new Map<string, TaskChipInfo>();
+  cards.forEach((c, i) => byTag.set(c.tag, { title: c.title, colorIndex: i }));
+  const lookup = (t: string | null) => (t === null ? null : byTag.get(t) ?? null);
+  const sigOf = (c: TaskChipInfo | null) => (c ? `${c.colorIndex}:${c.title}` : '-');
+  for (const m of messages ?? []) {
+    if (!m || typeof m.id !== 'string' || m.role !== 'assistant') continue;
+    const own = hasText(m.content) || hasText(m.reasoning)
+      ? lookup(effectiveTag(m.taskId, computed.get(itemKey(m.id))))
+      : null;
+    const calls = (Array.isArray(m.toolCalls) ? m.toolCalls : []).map((c, i) =>
+      !c || isSaiTaskToolName(String(c.name ?? ''))
+        ? null
+        : lookup(effectiveTag(c.taskId, computed.get(itemKey(m.id, c.id, i)))));
+    if (!own && !calls.some(Boolean)) continue;
+    out.set(m.id, { own, calls, sig: [sigOf(own), ...calls.map(sigOf)].join('|') });
+  }
+  return out;
+}
