@@ -459,6 +459,62 @@ export const SAI_TOOL_SCHEMA: SaiToolDef[] = [
     },
   },
   {
+    name: 'browser_hover',
+    description:
+      'Move the mouse over an element in a shared tab, by the `ref` from browser_snapshot. USE THIS ' +
+      'for menus and tooltips that only appear on hover, then browser_snapshot again to see them.',
+    toolset: 'chat',
+    input_schema: {
+      type: 'object',
+      properties: {
+        ref: { type: 'string', description: 'Element ref from browser_snapshot, e.g. "e17".' },
+        refGen: { type: 'number', description: 'The `refGen` from that same snapshot.' },
+        tabId: { type: 'number', description: 'Which shared tab. Omit when only one is attached.' },
+      },
+      required: ['ref'],
+    },
+  },
+  {
+    name: 'browser_select',
+    description:
+      'Choose an option in a native <select> dropdown in a shared tab, by `value` or visible `label` ' +
+      '(or `values` for a multi-select). Fires the change events a real pick would. If the element is ' +
+      'a custom (non-<select>) dropdown, open it with browser_click and click the option instead.',
+    toolset: 'chat',
+    input_schema: {
+      type: 'object',
+      properties: {
+        ref: { type: 'string', description: 'Ref of the <select> from browser_snapshot.' },
+        refGen: { type: 'number', description: 'The `refGen` from that same snapshot.' },
+        value: { type: 'string', description: 'Option value or visible label to pick.' },
+        label: { type: 'string', description: 'Visible label to pick (alternative to value).' },
+        values: { type: 'array', items: { type: 'string' }, description: 'Several values/labels, for a multiple select.' },
+        tabId: { type: 'number', description: 'Which shared tab. Omit when only one is attached.' },
+      },
+      required: ['ref'],
+    },
+  },
+  {
+    name: 'browser_wait',
+    description:
+      'Wait until something is true in a shared tab: `text` appears on the page, `selector` matches a ' +
+      'visible element, and/or the URL contains `urlIncludes`. `gone: true` waits for it to disappear ' +
+      'instead (a spinner going away). USE THIS after an action that loads content, instead of ' +
+      'snapshotting repeatedly. Returns `met` true/false — a timeout is not an error.',
+    toolset: 'chat',
+    input_schema: {
+      type: 'object',
+      properties: {
+        text: { type: 'string', description: 'Text to look for on the page.' },
+        selector: { type: 'string', description: 'CSS selector that must match a visible element.' },
+        urlIncludes: { type: 'string', description: 'Substring the page URL must contain.' },
+        gone: { type: 'boolean', description: 'Wait for the condition to stop being true instead.' },
+        timeoutMs: { type: 'number', description: 'Default 5000, max 15000.' },
+        tabId: { type: 'number', description: 'Which shared tab. Omit when only one is attached.' },
+      },
+    },
+  },
+  {
     name: 'browser_navigate',
     description:
       'Navigate a shared tab: to any http(s) `url` (absolute, or relative to the current page), or ' +

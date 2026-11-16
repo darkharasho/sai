@@ -495,3 +495,69 @@ describe('dialogs', () => {
     expect(res.tabs[0]).toMatchObject({ tabId: 1, dialog: { type: 'alert' } });
   });
 });
+
+describe('hover, select, wait', () => {
+  beforeEach(() => share(1));
+
+  it('hover sends exactly one mouseMoved at the ref centre', async () => {
+    evaluateReturns({ x: 40, y: 50, tag: 'A', url: 'u', title: 't', readyState: 'complete' });
+    const res = await mod.handleRequest({ method: 'hover', params: { ref: 'e3', refGen: 1 } });
+    const mouse = cdpCalls.filter((c) => c.method === 'Input.dispatchMouseEvent');
+    expect(mouse).toHaveLength(1);
+    expect(mouse[0].params).toMatchObject({ type: 'mouseMoved', x: 40, y: 50 });
+    expect(res).toMatchObject({ tabId: 1, hovered: 'e3' });
+  });
+
+  it('select returns what the page selected', async () => {
+    evaluateReturns({ selected: [{ value: 'b', label: 'Banana' }] });
+    const res = await mod.handleRequest({ method: 'select', params: { ref: 'e2', value: 'b' } });
+    expect(res).toEqual({ tabId: 1, ref: 'e2', selected: [{ value: 'b', label: 'Banana' }] });
+  });
+
+  it('select surfaces the page error', async () => {
+    evaluateReturns({ error: 'no option matching "z" — options: A' });
+    await expect(mod.handleRequest({ method: 'select', params: { ref: 'e2', value: 'z' } }))
+      .rejects.toThrow(/no option matching/);
+  });
+
+  it('wait resolves met once the text appears on the 3rd poll', async () => {
+    let n = 0;
+    cdpReplies['Runtime.evaluate'] = () => ({ result: { value: { met: ++n >= 3, url: 'u' } } });
+    vi.useFakeTimers();
+    const p = mod.handleRequest({ method: 'wait', params: { text: 'Done' } });
+    await vi.advanceTimersByTimeAsync(1000);
+    await expect(p).resolves.toMatchObject({ tabId: 1, met: true });
+    expect(n).toBe(3);
+  });
+
+  it('wait caps timeoutMs at 15000 and reports met:false instead of failing', async () => {
+    evaluateReturns({ met: false, url: 'u' });
+    vi.useFakeTimers();
+    const p = mod.handleRequest({ method: 'wait', params: { text: 'Never', timeoutMs: 60_000 } });
+    await vi.advanceTimersByTimeAsync(15_500);
+    const res = await p;
+    expect(res).toMatchObject({ met: false });
+    expect(res.waitedMs).toBeGreaterThanOrEqual(15_000);
+    expect(res.waitedMs).toBeLessThan(16_000);
+  });
+
+  it('wait with gone:true is met when the text disappears', async () => {
+    let n = 0;
+    cdpReplies['Runtime.evaluate'] = () => ({ result: { value: { met: ++n < 2, url: 'u' } } });
+    vi.useFakeTimers();
+    const p = mod.handleRequest({ method: 'wait', params: { text: 'Loading', gone: true } });
+    await vi.advanceTimersByTimeAsync(1000);
+    await expect(p).resolves.toMatchObject({ met: true });
+  });
+
+  it('wait on urlIncludes checks the page URL', async () => {
+    evaluateReturns({ met: false, url: 'https://a.test/done?x=1' });
+    const res = await mod.handleRequest({ method: 'wait', params: { urlIncludes: '/done' } });
+    expect(res).toMatchObject({ met: true });
+  });
+
+  it('wait with nothing to wait for is an error', async () => {
+    await expect(mod.handleRequest({ method: 'wait', params: {} }))
+      .rejects.toThrow('wait needs text, selector or urlIncludes');
+  });
+});

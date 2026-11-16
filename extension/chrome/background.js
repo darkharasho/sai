@@ -23,6 +23,8 @@ import {
   SCROLL_FN_SOURCE,
   LOCATION_FN_SOURCE,
   FOCUS_FN_SOURCE,
+  SELECT_FN_SOURCE,
+  WAIT_CHECK_FN_SOURCE,
 } from './pageScripts.js';
 
 const NATIVE_HOST = 'com.sai.browser_bridge';
@@ -55,6 +57,11 @@ const CDP_TIMEOUT_MS = 8000;
 
 /** In-page cap for Runtime.evaluate, so a runaway page script is cut off too. */
 const EVALUATE_TIMEOUT_MS = 6000;
+
+/** browser_wait: default and hard cap (must stay under SAI's 20 s call timeout). */
+const WAIT_DEFAULT_MS = 5000;
+const WAIT_MAX_MS = 15_000;
+const WAIT_POLL_MS = 200;
 
 /** How long the toolbar probe waits before treating a silent tab as ours. */
 const PROBE_TIMEOUT_MS = 1500;
@@ -955,6 +962,68 @@ const HANDLERS = {
       const after = await settle(tabId);
       return { tabId, ...(action ? { action } : {}), url: after?.url ?? url, title: after?.title ?? null };
     });
+  },
+
+  async hover(params) {
+    const tabId = await resolveTabId(params);
+    return runAction(tabId, async () => {
+      const target = await evaluateOrThrow(tabId, RESOLVE_FN_SOURCE, { ref: params?.ref, refGen: params?.refGen });
+      await cdp(tabId, 'Input.dispatchMouseEvent', { type: 'mouseMoved', x: target.x, y: target.y, buttons: 0 });
+      const after = await settle(tabId, 500);
+      return { tabId, hovered: params?.ref, url: after?.url ?? target.url, title: after?.title ?? target.title };
+    });
+  },
+
+  async select(params) {
+    const tabId = await resolveTabId(params);
+    return runAction(tabId, async () => {
+      const res = await evaluateOrThrow(tabId, SELECT_FN_SOURCE, {
+        ref: params?.ref,
+        refGen: params?.refGen,
+        value: params?.value,
+        label: params?.label,
+        values: params?.values,
+      });
+      return { tabId, ref: params?.ref, selected: res.selected };
+    });
+  },
+
+  /**
+   * Polls until a condition holds. Never fails on timeout — `met: false` is
+   * an answer, and the caller decides what it means.
+   */
+  async wait(params) {
+    const tabId = await resolveTabId(params);
+    const { text, selector, urlIncludes } = params ?? {};
+    if (!text && !selector && !urlIncludes) throw new Error('wait needs text, selector or urlIncludes');
+    const gone = params?.gone === true;
+    const requested = typeof params?.timeoutMs === 'number' ? params.timeoutMs : WAIT_DEFAULT_MS;
+    const timeoutMs = Math.max(0, Math.min(WAIT_MAX_MS, requested));
+    const started = Date.now();
+
+    for (;;) {
+      if (dialogs.has(tabId)) {
+        return { tabId, met: false, waitedMs: Date.now() - started, dialog: dialogs.get(tabId) };
+      }
+      let res = null;
+      try {
+        res = await evaluateFn(tabId, WAIT_CHECK_FN_SOURCE, { text, selector });
+      } catch {
+        res = null; // mid-navigation; try again
+      }
+      if (res?.error) throw new Error(res.error);
+      if (res) {
+        let present = (text || selector) ? res.met === true : true;
+        if (urlIncludes) present = present && String(res.url || '').includes(String(urlIncludes));
+        if (present !== gone) {
+          return { tabId, met: true, waitedMs: Date.now() - started, url: res.url ?? null };
+        }
+      }
+      if (Date.now() - started >= timeoutMs) {
+        return { tabId, met: false, waitedMs: Date.now() - started, url: res?.url ?? null };
+      }
+      await sleep(WAIT_POLL_MS);
+    }
   },
 
   /** Accepts or dismisses the native dialog blocking a tab. */

@@ -14,6 +14,9 @@ describe('browser tool routing', () => {
     expect(isBrowserTool('browser_click')).toBe(true);
     expect(isBrowserTool('browser_dialog')).toBe(true);
     expect(BROWSER_TOOL_METHODS.browser_dialog).toBe('dialog');
+    expect(BROWSER_TOOL_METHODS.browser_hover).toBe('hover');
+    expect(BROWSER_TOOL_METHODS.browser_select).toBe('select');
+    expect(BROWSER_TOOL_METHODS.browser_wait).toBe('wait');
     expect(isBrowserTool('capture_window')).toBe(false);
     expect(isBrowserTool('browser_eval')).toBe(false);
   });

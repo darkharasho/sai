@@ -21,6 +21,9 @@ export const BROWSER_TOOL_METHODS: Record<string, string> = {
   browser_scroll: 'scroll',
   browser_navigate: 'navigate',
   browser_dialog: 'dialog',
+  browser_hover: 'hover',
+  browser_select: 'select',
+  browser_wait: 'wait',
 };
 
 export function isBrowserTool(tool: string): boolean {

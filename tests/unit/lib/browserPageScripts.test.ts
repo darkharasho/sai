@@ -9,6 +9,8 @@ import {
   READ_FN_SOURCE,
   RESOLVE_FN_SOURCE,
   SCROLL_FN_SOURCE,
+  SELECT_FN_SOURCE,
+  WAIT_CHECK_FN_SOURCE,
 } from '../../../extension/chrome/pageScripts.js';
 
 type Snapshot = {
@@ -498,5 +500,94 @@ describe('page scroll', () => {
     // we report that truthfully instead of claiming success.
     expect(res).toMatchObject({ moved: false });
     expect(res.scroll).toEqual({ x: 0, y: 0 });
+  });
+});
+
+
+describe('select', () => {
+  function selectFn(opts: Record<string, unknown>): Record<string, any> {
+    // eslint-disable-next-line no-eval
+    return eval(`(${SELECT_FN_SOURCE})`)(opts);
+  }
+  let changes = 0;
+
+  function mount(html: string) {
+    document.body.innerHTML = html;
+    const el = document.body.firstElementChild!;
+    (window as any).__saiRefs = [el];
+    (window as any).__saiRefGen = 1;
+    changes = 0;
+    el.addEventListener('change', () => { changes += 1; });
+    return el as HTMLSelectElement;
+  }
+
+  afterEach(() => {
+    delete (window as any).__saiRefs;
+    delete (window as any).__saiRefGen;
+    document.body.innerHTML = '';
+  });
+
+  it('selects by value', () => {
+    const el = mount('<select><option value="a">Apple</option><option value="b">Banana</option></select>');
+    const res = selectFn({ ref: 'e1', refGen: 1, value: 'b' });
+    expect(res.selected).toEqual([{ value: 'b', label: 'Banana' }]);
+    expect(el.value).toBe('b');
+    expect(changes).toBe(1);
+  });
+
+  it('selects by visible label', () => {
+    const el = mount('<select><option value="a">Apple</option><option value="b">Banana</option></select>');
+    selectFn({ ref: 'e1', label: 'Apple' });
+    expect(el.value).toBe('a');
+  });
+
+  it('selects several values on a multiple select', () => {
+    const el = mount('<select multiple><option value="a">A</option><option value="b">B</option><option value="c">C</option></select>');
+    const res = selectFn({ ref: 'e1', values: ['a', 'c'] });
+    expect(res.selected.map((o: any) => o.value)).toEqual(['a', 'c']);
+    expect([...el.selectedOptions].map((o) => o.value)).toEqual(['a', 'c']);
+  });
+
+  it('lists the options when nothing matches', () => {
+    mount('<select><option value="a">Apple</option><option value="b">Banana</option></select>');
+    expect(selectFn({ ref: 'e1', value: 'z' }).error).toBe('no option matching "z" — options: Apple, Banana');
+  });
+
+  it('refuses an element that is not a select', () => {
+    mount('<div role="listbox">x</div>');
+    expect(selectFn({ ref: 'e1', value: 'a' }).error).toMatch(/e1 is a <div>, not a <select> — use browser_click/);
+  });
+
+  it('shares the ref staleness check with the other scripts', () => {
+    mount('<select><option value="a">A</option></select>');
+    expect(selectFn({ ref: 'e1', refGen: 2, value: 'a' }).error).toMatch(/refs are stale/);
+  });
+});
+
+describe('wait check', () => {
+  function check(opts: Record<string, unknown>): Record<string, any> {
+    // eslint-disable-next-line no-eval
+    return eval(`(${WAIT_CHECK_FN_SOURCE})`)(opts);
+  }
+  afterEach(() => { document.body.innerHTML = ''; });
+
+  it('finds text on the page', () => {
+    document.body.innerHTML = '<p>Order confirmed</p>';
+    expect(check({ text: 'confirmed' }).met).toBe(true);
+    expect(check({ text: 'declined' }).met).toBe(false);
+  });
+
+  it('needs a visible element for a selector', () => {
+    document.body.innerHTML = '<div id="done"></div>';
+    const el = document.getElementById('done')!;
+    el.getBoundingClientRect = () => ({ width: 0, height: 0 } as DOMRect);
+    expect(check({ selector: '#done' }).met).toBe(false);
+    el.getBoundingClientRect = () => ({ width: 10, height: 10 } as DOMRect);
+    expect(check({ selector: '#done' }).met).toBe(true);
+    expect(check({ selector: '#nope' }).met).toBe(false);
+  });
+
+  it('reports a bad selector', () => {
+    expect(check({ selector: '[[' }).error).toMatch(/invalid selector/);
   });
 });

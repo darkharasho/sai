@@ -289,8 +289,12 @@ export const SNAPSHOT_FN_SOURCE = `function (opts) {
  * generation mismatch, a detached node, a zero-sized box, or an element
  * scrolled off-screen all return `{ error }` and the caller re-snapshots.
  */
-export const RESOLVE_FN_SOURCE = `function (opts) {
-  opts = opts || {};
+/**
+ * Turns `opts.ref` (+ `opts.refGen`) back into the live element `el`, or
+ * returns the page-side error. Embedded verbatim in every script that acts on
+ * a ref, so they all refuse stale and missing refs with the same words.
+ */
+const REF_LOOKUP = `
   var refs = window.__saiRefs;
   var gen = window.__saiRefGen || 0;
 
@@ -308,7 +312,11 @@ export const RESOLVE_FN_SOURCE = `function (opts) {
   if (!el) return { error: 'unknown ref: ' + opts.ref };
   if (!el.isConnected) return { error: 'element ' + opts.ref + ' is no longer in the page — re-snapshot first' };
   if (el.disabled === true) return { error: 'element ' + opts.ref + ' is disabled' };
+`;
 
+export const RESOLVE_FN_SOURCE = `function (opts) {
+  opts = opts || {};
+${REF_LOOKUP}
   if (opts.scrollIntoView !== false) {
     try { el.scrollIntoView({ block: 'center', inline: 'center' }); } catch (err) { /* older engines */ }
   }
@@ -459,4 +467,63 @@ export const READ_FN_SOURCE = `function (opts) {
     text: text,
     truncated: truncated
   };
+}`;
+
+/**
+ * Picks option(s) of a native <select> by value or visible label, then fires
+ * the input/change events a user's pick would. Custom (div-based) dropdowns
+ * aren't selects; they're opened and picked with clicks instead.
+ */
+export const SELECT_FN_SOURCE = `function (opts) {
+  opts = opts || {};
+${REF_LOOKUP}
+  var tag = el.tagName.toLowerCase();
+  if (tag !== 'select') {
+    return { error: opts.ref + ' is a <' + tag + '>, not a <select> — use browser_click for custom dropdowns' };
+  }
+  var options = Array.prototype.slice.call(el.options);
+  function label(o) { return String(o.label || o.text || '').trim(); }
+  function find(x) {
+    x = String(x);
+    for (var i = 0; i < options.length; i++) if (options[i].value === x) return options[i];
+    for (var j = 0; j < options.length; j++) if (label(options[j]) === x) return options[j];
+    return null;
+  }
+  var wanted = Array.isArray(opts.values) ? opts.values
+    : [opts.value !== undefined && opts.value !== null ? opts.value : opts.label];
+  var picks = [];
+  for (var k = 0; k < wanted.length; k++) {
+    var o = find(wanted[k]);
+    if (!o) {
+      return { error: 'no option matching "' + wanted[k] + '" — options: ' + options.slice(0, 30).map(label).join(', ') };
+    }
+    picks.push(o);
+  }
+  if (el.multiple) options.forEach(function (o) { o.selected = false; });
+  picks.forEach(function (o) { o.selected = true; });
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+  el.dispatchEvent(new Event('change', { bubbles: true }));
+  return { selected: picks.map(function (o) { return { value: o.value, label: label(o) }; }) };
+}`;
+
+/** One poll of browser_wait: is the text on the page / the selector visible? */
+export const WAIT_CHECK_FN_SOURCE = `function (opts) {
+  opts = opts || {};
+  var met = true;
+  if (opts.text) {
+    var body = document.body;
+    var text = body ? String(body.innerText || body.textContent || '') : '';
+    met = met && text.indexOf(String(opts.text)) !== -1;
+  }
+  if (opts.selector) {
+    var el;
+    try {
+      el = document.querySelector(opts.selector);
+    } catch (err) {
+      return { error: 'invalid selector: ' + opts.selector };
+    }
+    var r = el ? el.getBoundingClientRect() : null;
+    met = met && !!(r && (r.width > 0 || r.height > 0));
+  }
+  return { met: met, url: location.href };
 }`;

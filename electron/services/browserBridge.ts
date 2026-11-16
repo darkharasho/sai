@@ -68,6 +68,7 @@ const CALL_TIMEOUT_MS = 20_000;
  */
 export const BRIDGE_METHOD_LIST = [
   'tabs.list', 'snapshot', 'read', 'click', 'type', 'press', 'scroll', 'navigate', 'dialog',
+  'hover', 'select', 'wait',
 ] as const;
 
 export const BRIDGE_METHODS = new Set<string>(BRIDGE_METHOD_LIST);
