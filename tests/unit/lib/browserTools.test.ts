@@ -12,6 +12,8 @@ describe('browser tool routing', () => {
     expect(isBrowserTool('browser_tabs')).toBe(true);
     expect(isBrowserTool('browser_read')).toBe(true);
     expect(isBrowserTool('browser_click')).toBe(true);
+    expect(isBrowserTool('browser_dialog')).toBe(true);
+    expect(BROWSER_TOOL_METHODS.browser_dialog).toBe('dialog');
     expect(isBrowserTool('capture_window')).toBe(false);
     expect(isBrowserTool('browser_eval')).toBe(false);
   });

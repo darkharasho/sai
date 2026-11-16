@@ -67,7 +67,7 @@ const CALL_TIMEOUT_MS = 20_000;
  * tabs are reachable (only the ones the user shared).
  */
 export const BRIDGE_METHOD_LIST = [
-  'tabs.list', 'snapshot', 'read', 'click', 'type', 'press', 'scroll', 'navigate',
+  'tabs.list', 'snapshot', 'read', 'click', 'type', 'press', 'scroll', 'navigate', 'dialog',
 ] as const;
 
 export const BRIDGE_METHODS = new Set<string>(BRIDGE_METHOD_LIST);

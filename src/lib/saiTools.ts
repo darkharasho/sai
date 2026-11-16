@@ -441,6 +441,24 @@ export const SAI_TOOL_SCHEMA: SaiToolDef[] = [
     },
   },
   {
+    name: 'browser_dialog',
+    description:
+      'Accept or dismiss a native browser dialog (alert, confirm, prompt, or the "Leave site?" ' +
+      'beforeunload prompt) that is blocking a shared tab. Other browser tools report such a dialog ' +
+      'as `dialog` in their result, or fail naming it — call this then. Never accept a "Leave site?" ' +
+      'prompt on a page where the user may have unsaved work without asking them first.',
+    toolset: 'chat',
+    input_schema: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', enum: ['accept', 'dismiss'], description: 'accept = OK / Leave; dismiss = Cancel / Stay.' },
+        promptText: { type: 'string', description: 'Text to enter, for a prompt() dialog being accepted.' },
+        tabId: { type: 'number', description: 'Which shared tab. Omit when only one is attached.' },
+      },
+      required: ['action'],
+    },
+  },
+  {
     name: 'browser_navigate',
     description:
       'Navigate a shared tab to another URL on the SAME ORIGIN it is already on. Cross-origin ' +

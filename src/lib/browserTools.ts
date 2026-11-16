@@ -20,6 +20,7 @@ export const BROWSER_TOOL_METHODS: Record<string, string> = {
   browser_press: 'press',
   browser_scroll: 'scroll',
   browser_navigate: 'navigate',
+  browser_dialog: 'dialog',
 };
 
 export function isBrowserTool(tool: string): boolean {

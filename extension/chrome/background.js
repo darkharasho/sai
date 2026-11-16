@@ -254,6 +254,7 @@ async function attachTab(tab) {
 }
 
 async function detachTab(tabId, { notify = true, reason = null } = {}) {
+  dialogs.delete(tabId);
   cancelReattach(tabId, new Error(`tab ${tabId} is no longer shared with SAI`));
   try {
     await chrome.debugger.detach({ tabId });
@@ -289,6 +290,72 @@ chrome.debugger.onDetach.addListener((source, reason) => {
 chrome.tabs.onRemoved.addListener((tabId) => {
   if (attached.has(tabId)) void detachTab(tabId, { reason: 'tab-closed' });
 });
+
+// ---------------------------------------------------------------------------
+// native dialogs
+// ---------------------------------------------------------------------------
+
+/**
+ * tabId -> { type, message, url, defaultPrompt } for an open alert, confirm,
+ * prompt or "Leave site?" (beforeunload) dialog. While one is open Chrome
+ * blocks Runtime.evaluate on that page, so every call would otherwise hang.
+ * Recorded even before the tab is in `attached`: Page.enable replays a dialog
+ * that was already open when the user shared the tab.
+ */
+const dialogs = new Map();
+
+class DialogOpenError extends Error {
+  constructor(tabId, dialog) {
+    super(dialogMessage(tabId, dialog));
+    this.dialog = dialog;
+  }
+}
+
+function dialogMessage(tabId, d) {
+  const article = /^[aeiou]/i.test(d.type) ? 'an' : 'a';
+  return `${article} ${d.type} dialog is open on tab ${tabId}: "${d.message}" — call sai_browser_dialog to accept or dismiss it`;
+}
+
+function assertNoDialog(tabId) {
+  const d = dialogs.get(tabId);
+  if (d) throw new DialogOpenError(tabId, d);
+}
+
+chrome.debugger.onEvent.addListener((source, method, params) => {
+  const tabId = source?.tabId;
+  if (typeof tabId !== 'number') return;
+  if (method === 'Page.javascriptDialogOpening') {
+    const d = {
+      type: params?.type ?? 'alert',
+      message: params?.message ?? '',
+      url: params?.url ?? null,
+      defaultPrompt: params?.defaultPrompt ?? '',
+    };
+    dialogs.set(tabId, d);
+    // Fail whatever was waiting on the page now, rather than at its timeout.
+    abortInflight(tabId, new DialogOpenError(tabId, d));
+    send({ type: 'event', event: 'dialog-opened', tabId, dialog: d });
+  } else if (method === 'Page.javascriptDialogClosed') {
+    if (dialogs.delete(tabId)) send({ type: 'event', event: 'dialog-closed', tabId });
+  }
+});
+
+/**
+ * Runs a page-changing action. A dialog the action itself triggered (a
+ * "Leave site?" on navigate, an alert on click) is the action's result, not a
+ * failure: the action happened, and SAI needs to know what is now in the way.
+ */
+async function runAction(tabId, fn) {
+  let result;
+  try {
+    result = await fn();
+  } catch (err) {
+    if (!(err instanceof DialogOpenError) || !dialogs.has(tabId)) throw err;
+    result = { tabId };
+  }
+  const d = dialogs.get(tabId);
+  return d ? { ...result, dialog: d } : result;
+}
 
 // ---------------------------------------------------------------------------
 // re-attach
@@ -530,7 +597,7 @@ function cdp(tabId, method, params = {}, { timeoutMs = CDP_TIMEOUT_MS } = {}) {
  * Resolves which attached tab a request targets. A tab Chrome briefly took
  * away (see scheduleReattach) is waited for rather than refused outright.
  */
-async function resolveTabId(params) {
+async function resolveTabId(params, { allowDialog = false } = {}) {
   let tabId;
   if (typeof params?.tabId === 'number') {
     if (!attached.has(params.tabId)) {
@@ -545,6 +612,7 @@ async function resolveTabId(params) {
     throw new Error(`${attached.size} tabs attached — pass tabId (see sai_browser_tabs)`);
   }
   if (attached.get(tabId)?.state === 'reattaching') await awaitAttached(tabId);
+  if (!allowDialog) assertNoDialog(tabId);
   return tabId;
 }
 
@@ -613,6 +681,7 @@ async function settle(tabId, timeoutMs = SETTLE_TIMEOUT_MS) {
   const deadline = Date.now() + timeoutMs;
   let last = null;
   while (Date.now() < deadline) {
+    if (dialogs.has(tabId)) return last;
     try {
       last = await evaluateFn(tabId, LOCATION_FN_SOURCE, {});
     } catch {
@@ -726,13 +795,25 @@ const HANDLERS = {
         title: live?.title ?? meta.title ?? null,
         attached: true,
         state: meta.state ?? 'attached',
+        ...(dialogs.has(tabId) ? { dialog: dialogs.get(tabId) } : {}),
       };
     });
     return { tabs, note: 'Only tabs the user attached via the SAI toolbar button are visible.' };
   },
 
   async snapshot(params) {
-    const tabId = await resolveTabId(params);
+    const tabId = await resolveTabId(params, { allowDialog: true });
+    const dialog = dialogs.get(tabId);
+    if (dialog) {
+      // The page can't be evaluated or reliably captured behind a native
+      // dialog, so report the dialog itself as what is on screen.
+      return {
+        tabId,
+        dialog,
+        elements: [],
+        note: 'a dialog is blocking the page — handle it with sai_browser_dialog',
+      };
+    }
     const snap = await evaluateFn(tabId, SNAPSHOT_FN_SOURCE, {
       maxElements: params?.maxElements,
       offset: params?.offset,
@@ -763,71 +844,77 @@ const HANDLERS = {
 
   async click(params) {
     const tabId = await resolveTabId(params);
-    const target = await evaluateOrThrow(tabId, RESOLVE_FN_SOURCE, {
-      ref: params?.ref,
-      refGen: params?.refGen,
+    return runAction(tabId, async () => {
+      const target = await evaluateOrThrow(tabId, RESOLVE_FN_SOURCE, {
+        ref: params?.ref,
+        refGen: params?.refGen,
+      });
+      await clickAt(tabId, target.x, target.y);
+      const after = await settle(tabId, 1500);
+      return { tabId, clicked: params?.ref, url: after?.url ?? target.url, title: after?.title ?? target.title };
     });
-    await clickAt(tabId, target.x, target.y);
-    const after = await settle(tabId, 1500);
-    return { tabId, clicked: params?.ref, url: after?.url ?? target.url, title: after?.title ?? target.title };
   },
 
   async type(params) {
     const tabId = await resolveTabId(params);
-    const text = String(params?.text ?? '');
-    const target = await evaluateOrThrow(tabId, RESOLVE_FN_SOURCE, {
-      ref: params?.ref,
-      refGen: params?.refGen,
-      focus: true,
-    });
-    if (!target.editable) {
-      throw new Error(`${params?.ref} is a <${target.tag}>, which is not a text field`);
-    }
-    // Click first so frameworks that track focus via pointer events keep up,
-    // and only then clear — clearing before the click would let the click's
-    // own focus handling repopulate the field on some widgets.
-    await clickAt(tabId, target.x, target.y);
-    if (params?.replace === true) {
-      await evaluateOrThrow(tabId, RESOLVE_FN_SOURCE, {
-        ref: params?.ref, refGen: params?.refGen, focus: true, clear: true, scrollIntoView: false,
+    return runAction(tabId, async () => {
+      const text = String(params?.text ?? '');
+      const target = await evaluateOrThrow(tabId, RESOLVE_FN_SOURCE, {
+        ref: params?.ref,
+        refGen: params?.refGen,
+        focus: true,
       });
-    }
-    if (text) await cdp(tabId, 'Input.insertText', { text });
-    if (params?.submit === true) await dispatchKey(tabId, 'Enter');
+      if (!target.editable) {
+        throw new Error(`${params?.ref} is a <${target.tag}>, which is not a text field`);
+      }
+      // Click first so frameworks that track focus via pointer events keep up,
+      // and only then clear — clearing before the click would let the click's
+      // own focus handling repopulate the field on some widgets.
+      await clickAt(tabId, target.x, target.y);
+      if (params?.replace === true) {
+        await evaluateOrThrow(tabId, RESOLVE_FN_SOURCE, {
+          ref: params?.ref, refGen: params?.refGen, focus: true, clear: true, scrollIntoView: false,
+        });
+      }
+      if (text) await cdp(tabId, 'Input.insertText', { text });
+      if (params?.submit === true) await dispatchKey(tabId, 'Enter');
 
-    const after = await settle(tabId, params?.submit === true ? SETTLE_TIMEOUT_MS : 1000);
-    return {
-      tabId,
-      typedInto: params?.ref,
-      chars: text.length,
-      submitted: params?.submit === true,
-      url: after?.url ?? target.url,
-      title: after?.title ?? target.title,
-    };
+      const after = await settle(tabId, params?.submit === true ? SETTLE_TIMEOUT_MS : 1000);
+      return {
+        tabId,
+        typedInto: params?.ref,
+        chars: text.length,
+        submitted: params?.submit === true,
+        url: after?.url ?? target.url,
+        title: after?.title ?? target.title,
+      };
+    });
   },
 
   async press(params) {
     const tabId = await resolveTabId(params);
-    // Focus before and after, so a key that was swallowed (or that activated
-    // something behind a modal) shows up in the result instead of reading as
-    // a success. Best-effort: a page that won't evaluate still gets the key.
-    let before = null;
-    try { before = await evaluateFn(tabId, FOCUS_FN_SOURCE, {}); } catch { /* not fatal */ }
+    return runAction(tabId, async () => {
+      // Focus before and after, so a key that was swallowed (or that activated
+      // something behind a modal) shows up in the result instead of reading as
+      // a success. Best-effort: a page that won't evaluate still gets the key.
+      let before = null;
+      try { before = await evaluateFn(tabId, FOCUS_FN_SOURCE, {}); } catch { /* not fatal */ }
 
-    await dispatchKey(tabId, String(params?.key ?? ''));
-    const after = await settle(tabId, 1500);
+      await dispatchKey(tabId, String(params?.key ?? ''));
+      const after = await settle(tabId, 1500);
 
-    let focus = null;
-    try { focus = await evaluateFn(tabId, FOCUS_FN_SOURCE, {}); } catch { /* not fatal */ }
+      let focus = null;
+      try { focus = await evaluateFn(tabId, FOCUS_FN_SOURCE, {}); } catch { /* not fatal */ }
 
-    return {
-      tabId,
-      pressed: params?.key,
-      focusBefore: before?.focus ?? null,
-      focusAfter: focus?.focus ?? null,
-      url: after?.url ?? null,
-      title: after?.title ?? null,
-    };
+      return {
+        tabId,
+        pressed: params?.key,
+        focusBefore: before?.focus ?? null,
+        focusAfter: focus?.focus ?? null,
+        url: after?.url ?? null,
+        title: after?.title ?? null,
+      };
+    });
   },
 
   async scroll(params) {
@@ -843,9 +930,28 @@ const HANDLERS = {
   async navigate(params) {
     const tabId = await resolveTabId(params);
     const url = await resolveSameOriginUrl(tabId, params?.url);
-    await cdp(tabId, 'Page.navigate', { url });
-    const after = await settle(tabId);
-    return { tabId, url: after?.url ?? url, title: after?.title ?? null };
+    return runAction(tabId, async () => {
+      await cdp(tabId, 'Page.navigate', { url });
+      const after = await settle(tabId);
+      return { tabId, url: after?.url ?? url, title: after?.title ?? null };
+    });
+  },
+
+  /** Accepts or dismisses the native dialog blocking a tab. */
+  async dialog(params) {
+    const tabId = await resolveTabId(params, { allowDialog: true });
+    const d = dialogs.get(tabId);
+    if (!d) throw new Error(`no dialog is open on tab ${tabId}`);
+    const action = params?.action === 'dismiss' ? 'dismiss' : 'accept';
+    return runAction(tabId, async () => {
+      await cdp(tabId, 'Page.handleJavaScriptDialog', {
+        accept: action === 'accept',
+        ...(typeof params?.promptText === 'string' ? { promptText: params.promptText } : {}),
+      });
+      dialogs.delete(tabId);
+      const after = await settle(tabId);
+      return { tabId, handled: action, type: d.type, url: after?.url ?? null, title: after?.title ?? null };
+    });
   },
 };
 
@@ -859,5 +965,5 @@ async function handleRequest(frame) {
 // never imports it.
 export {
   HANDLERS, handleRequest, attached, resolveTabId, KEYS,
-  friendlyAttachError, rehydrate, probeAttached, ensureConnected, cdp, abortInflight,
+  friendlyAttachError, rehydrate, dialogs, probeAttached, ensureConnected, cdp, abortInflight,
 };

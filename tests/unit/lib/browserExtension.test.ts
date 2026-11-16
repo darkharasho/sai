@@ -384,3 +384,90 @@ describe('auto re-attach after a foreign-extension frame', () => {
     expect(stub.chrome.runtime.connectNative).toHaveBeenCalledTimes(2);
   });
 });
+
+describe('dialogs', () => {
+  const openDialog = (type = 'beforeunload', message = '') =>
+    stub.fire('debugger.onEvent', { tabId: 1 }, 'Page.javascriptDialogOpening', {
+      type, message, url: 'https://example.test/a', defaultPrompt: '',
+    });
+
+  beforeEach(() => share(1));
+
+  it('blocks calls while a dialog is open, without touching the page', async () => {
+    await openDialog('beforeunload');
+    await expect(mod.handleRequest({ method: 'read', params: {} }))
+      .rejects.toThrow(/a beforeunload dialog is open on tab 1: "" — call sai_browser_dialog/);
+    expect(cdpCalls.some((c) => c.method === 'Runtime.evaluate')).toBe(false);
+  });
+
+  it('an action that opens a dialog returns it promptly', async () => {
+    stub.cdp.script['Page.navigate'] = { hang: true };
+    evaluateReturns({ url: 'https://example.test/a', origin: 'https://example.test', readyState: 'complete' });
+    vi.useFakeTimers();
+    const nav = mod.handleRequest({ method: 'navigate', params: { url: '/b' } });
+    await vi.advanceTimersByTimeAsync(100);
+    await openDialog('beforeunload', 'Leave site?');
+    await vi.advanceTimersByTimeAsync(10);
+    await expect(nav).resolves.toMatchObject({ tabId: 1, dialog: { type: 'beforeunload', message: 'Leave site?' } });
+  });
+
+  it('reports a dialog that was already open when the tab was shared', async () => {
+    mod.attached.clear();
+    stub.cdp.script['Runtime.evaluate'] = { error: 'Debugger is not attached to the tab with id: 1.' };
+    stub.cdp.script['Page.enable'] = {
+      reply: () => {
+        // Chrome replays an open dialog as soon as Page is enabled.
+        void stub.fire('debugger.onEvent', { tabId: 1 }, 'Page.javascriptDialogOpening', {
+          type: 'alert', message: 'hi', url: 'u',
+        });
+        return {};
+      },
+    };
+    await stub.fire('action.onClicked', { id: 1, url: 'https://a.test' });
+    await vi.waitFor(() => expect(mod.attached.has(1)).toBe(true));
+    await expect(mod.handleRequest({ method: 'click', params: { ref: 'e1' } }))
+      .rejects.toThrow(/an? alert dialog is open on tab 1: "hi"/);
+  });
+
+  it('accepts a dialog and reports where the tab ended up', async () => {
+    await openDialog('beforeunload');
+    evaluateReturns({ url: 'https://example.test/b', title: 'B', readyState: 'complete' });
+    const res = await mod.handleRequest({ method: 'dialog', params: { action: 'accept' } });
+    expect(cdpCalls.find((c) => c.method === 'Page.handleJavaScriptDialog')?.params).toEqual({ accept: true });
+    expect(res).toMatchObject({ tabId: 1, handled: 'accept', type: 'beforeunload', url: 'https://example.test/b' });
+    expect(mod.dialogs.has(1)).toBe(false);
+  });
+
+  it('dismisses a prompt, passing promptText through', async () => {
+    await openDialog('prompt', 'Name?');
+    evaluateReturns({ url: 'u', title: 't', readyState: 'complete' });
+    await mod.handleRequest({ method: 'dialog', params: { action: 'dismiss', promptText: 'x' } });
+    expect(cdpCalls.find((c) => c.method === 'Page.handleJavaScriptDialog')?.params)
+      .toEqual({ accept: false, promptText: 'x' });
+  });
+
+  it('dialog with nothing open is an error', async () => {
+    await expect(mod.handleRequest({ method: 'dialog', params: { action: 'accept' } }))
+      .rejects.toThrow(/no dialog is open on tab 1/);
+  });
+
+  it('closing clears the dialog', async () => {
+    await openDialog('alert', 'x');
+    await stub.fire('debugger.onEvent', { tabId: 1 }, 'Page.javascriptDialogClosed', { result: true });
+    expect(mod.dialogs.has(1)).toBe(false);
+  });
+
+  it('snapshot reports the dialog without evaluating', async () => {
+    await openDialog('confirm', 'Sure?');
+    const res = await mod.handleRequest({ method: 'snapshot', params: {} });
+    expect(res).toMatchObject({ tabId: 1, dialog: { type: 'confirm', message: 'Sure?' }, elements: [] });
+    expect(res.note).toMatch(/sai_browser_dialog/);
+    expect(cdpCalls).toHaveLength(0);
+  });
+
+  it('tabs.list shows the open dialog', async () => {
+    await openDialog('alert', 'x');
+    const res = await mod.handleRequest({ method: 'tabs.list', params: {} });
+    expect(res.tabs[0]).toMatchObject({ tabId: 1, dialog: { type: 'alert' } });
+  });
+});
