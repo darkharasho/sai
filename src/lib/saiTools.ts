@@ -404,7 +404,7 @@ export const SAI_TOOL_SCHEMA: SaiToolDef[] = [
   {
     name: 'browser_press',
     description:
-      'Press a single key in a shared tab, sent to whatever is focused. ' +
+      'Press a key or key combo in a shared tab, sent to whatever is focused. ' +
       'USE THIS for Escape to dismiss a dialog, Tab to move between fields, arrow keys in a menu, or ' +
       'Space to toggle a focused checkbox, radio or switch — Enter does NOT activate those, and on an ' +
       'app with keyboard shortcuts it can fall through to the page behind a dialog and trigger ' +
@@ -416,7 +416,10 @@ export const SAI_TOOL_SCHEMA: SaiToolDef[] = [
       properties: {
         key: {
           type: 'string',
-          description: 'One of: Enter, Space, Tab, Escape, Backspace, Delete, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Home, End, PageUp, PageDown.',
+          description:
+            'A named key (Enter, Space, Tab, Escape, Backspace, Delete, ArrowUp, ArrowDown, ArrowLeft, ' +
+            'ArrowRight, Home, End, PageUp, PageDown), any single character ("a", "/"), or a combo with ' +
+            'Control / Shift / Alt / Meta joined by "+", e.g. "Control+a", "Shift+Tab", "Meta+Enter".',
         },
         tabId: { type: 'number', description: 'Which shared tab. Omit when only one is attached.' },
       },

@@ -561,3 +561,15 @@ describe('hover, select, wait', () => {
       .rejects.toThrow('wait needs text, selector or urlIncludes');
   });
 });
+
+describe('key combos', () => {
+  beforeEach(() => share(1));
+
+  it('sends the modifier bitmask on both key events', async () => {
+    await mod.handleRequest({ method: 'press', params: { key: 'Control+a' } });
+    const keys = cdpCalls.filter((c) => c.method === 'Input.dispatchKeyEvent');
+    expect(keys).toHaveLength(2);
+    expect(keys[0].params).toMatchObject({ type: 'rawKeyDown', key: 'a', modifiers: 2 });
+    expect(keys[1].params).toMatchObject({ type: 'keyUp', key: 'a', modifiers: 2 });
+  });
+});
