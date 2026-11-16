@@ -19,6 +19,7 @@ import { getActiveTerminalId } from '../../terminalBuffer';
 import SaiLogo from '../SaiLogo';
 import { matchLinkPreview } from './linkPreview';
 import LinkPreviewChip from './LinkPreviewChip';
+import { useLinkContextMenu } from './LinkContextMenu';
 import StreamingAssistantHead from './StreamingAssistantHead';
 import { hasRevealed, markRevealed } from './revealRegistry';
 import { useSaiAnimationPref } from './useSaiAnimationPref';
@@ -807,6 +808,23 @@ function ChatMessage({
     ? watchTargetsFromMessage(message).filter(t => watcherUrlAllowlist.has(t.url))
     : watchTargetsFromMessage(message);
 
+  // Left-click and the right-click menu's "Open link" share one behavior:
+  // sai-file:// opens in the editor, everything else in the browser.
+  const openHref = useCallback((href: string) => {
+    if (href.startsWith('sai-file://')) {
+      if (!onFileOpen) return;
+      const raw = href.slice('sai-file://'.length);
+      const lineMatch = raw.match(/:(\d+)$/);
+      const line = lineMatch ? parseInt(lineMatch[1], 10) : undefined;
+      const rel = lineMatch ? raw.slice(0, -lineMatch[0].length) : raw;
+      const abs = rel.startsWith('/') ? rel : `${projectPath}/${rel}`;
+      onFileOpen(abs, line);
+    } else {
+      window.sai.openExternal(href);
+    }
+  }, [onFileOpen, projectPath]);
+  const linkMenu = useLinkContextMenu(openHref);
+
   const markdownComponents = useMemo(() => ({
     pre: ({ children, ...props }: any) => (
       <CodeBlock {...props}>{children}</CodeBlock>
@@ -823,23 +841,14 @@ function ChatMessage({
           style={{ color: 'var(--accent)', textDecoration: 'underline' }}
           onClick={(e) => {
             e.preventDefault();
-            if (href?.startsWith('sai-file://') && onFileOpen) {
-              const raw = href.slice('sai-file://'.length);
-              const lineMatch = raw.match(/:(\d+)$/);
-              const line = lineMatch ? parseInt(lineMatch[1], 10) : undefined;
-              const rel = lineMatch ? raw.slice(0, -lineMatch[0].length) : raw;
-              const abs = rel.startsWith('/') ? rel : `${projectPath}/${rel}`;
-              onFileOpen(abs, line);
-            } else if (href) {
-              window.sai.openExternal(href);
-            }
+            if (href) openHref(href);
           }}
         >
           {children}
         </a>
       );
     },
-  }), [onFileOpen, projectPath]);
+  }), [openHref]);
 
   // sai_task calls drive the task rail, not the transcript. A message holding
   // nothing else renders nothing (after all hooks, so hook order stays stable
@@ -858,8 +867,10 @@ function ChatMessage({
       className={`chat-msg chat-msg-${message.role}`}
       style={flipPhase === 'measuring' ? { visibility: 'hidden' } : undefined}
       layoutId={flipActive ? undefined : pinnedLayoutId}
+      onContextMenu={linkMenu.onContextMenu}
       {...effectiveEntryProps}
     >
+      {linkMenu.element}
       {message.role === 'assistant' && message.reasoning && (
         <ReasoningBlock
           text={message.reasoning}

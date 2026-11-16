@@ -183,7 +183,7 @@ export default function LinkPreviewChip({ preview, children }: Props) {
   }
 
   return (
-    <span className="link-preview-wrap" ref={cardRef}>
+    <span className="link-preview-wrap" ref={cardRef} data-link-href={preview.url}>
       <button
         type="button"
         className={`link-preview-chip${state === 'loading' ? ' link-preview-chip-loading' : ''}`}
