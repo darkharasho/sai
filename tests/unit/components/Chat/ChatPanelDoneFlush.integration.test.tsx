@@ -120,4 +120,38 @@ describe('done-time flush to parent', () => {
     expect(last.role).toBe('assistant');
     expect(last.content).toBe(full);
   });
+
+  // Regression (v1.34.0): `result` clears the workspace's busy flag, so App can
+  // render — and unmount the hidden panel — BEFORE the separate `done` frame
+  // arrives. done is never seen, so the done-time flush never runs; App's
+  // unmount flush then persisted the last COMMITTED report, which lagged the
+  // queued final text ("…for signed wraps you just" — tail lost on screen).
+  it('hands the parent the full text when it unmounts before done arrives', async () => {
+    const props = baseProps();
+    const { unmount } = render(<ChatPanel {...props} />);
+    await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+    const handlers = mockSai.claudeOnMessage.mock.calls.map(([h]: any[]) => h as (m: any) => void);
+    const emit = (msg: any) => { for (const h of handlers) h({ projectPath: '/project', scope: 'chat', ...msg }); };
+    const full = 'Then I will start plan 3 for the signed wraps you just approved.';
+
+    await act(async () => {
+      emit({ type: 'streaming_start', turnSeq: 2 });
+      emit({ type: 'assistant', message: { content: [{ type: 'text', delta: true, text: 'Then I' }] } });
+    });
+    await act(async () => { await new Promise(res => setTimeout(res, 300)); });
+    // Tail + reconcile frame + result land, then the panel unmounts (busy
+    // cleared by result) in the same flush — done never reaches it.
+    await act(async () => {
+      emit({ type: 'assistant', message: { content: [{ type: 'text', delta: true, text: full.slice('Then I'.length) }] } });
+      emit({ type: 'assistant', message: { content: [{ type: 'text', text: full, final: true }] } });
+      emit({ type: 'result', turnSeq: 2 });
+      unmount();
+    });
+
+    const calls = (props.onMessagesChange as any).mock.calls;
+    const reported = calls[calls.length - 1][0];
+    const last = reported[reported.length - 1];
+    expect(last.role).toBe('assistant');
+    expect(last.content).toBe(full);
+  });
 });

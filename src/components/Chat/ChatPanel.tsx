@@ -2151,6 +2151,17 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
     onMessagesChange?.(messagesRef.current.map(m => (m.reasoningLive ? { ...m, reasoningLive: undefined } : m)));
   }, [onMessagesChange]);
 
+  // Unmount flush. `result` clears the workspace's busy flag, which can unmount
+  // a hidden panel BEFORE the separate `done` frame arrives — so the done-time
+  // flush above never runs, and App's unmount save would persist the last
+  // COMMITTED report, which lags queued updates (the reply's tail, the final
+  // reconcile frame). Hand App the eager ref on the way out. Passive-effect
+  // cleanups of a deleted subtree run before App's own effects in the same
+  // commit, so App's unmount flush sees this report.
+  const unmountFlushRef = useRef(() => {});
+  unmountFlushRef.current = () => { flushStreamingText(); flushMessagesToParent(); };
+  useEffect(() => () => unmountFlushRef.current(), []);
+
   // GitHubWatcherCard dispatches a snapshot event on phase transitions. We attach
   // the snapshot to the owning message so it persists with chat history and cards
   // resume from their last-known state when the chat is reopened.
