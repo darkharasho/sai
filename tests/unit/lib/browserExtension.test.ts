@@ -84,36 +84,60 @@ describe('sharing = control', () => {
   });
 });
 
-describe('same-origin navigation', () => {
+describe('navigation', () => {
   beforeEach(() => share(1));
+  const here = { url: 'https://a.test/x', origin: 'https://a.test', title: 'A', readyState: 'complete' };
 
-  it('refuses a different origin', async () => {
-    evaluateReturns({ url: 'https://a.test/x', origin: 'https://a.test', readyState: 'complete' });
-    await expect(mod.handleRequest({ method: 'navigate', params: { url: 'https://b.test/y' } }))
-      .rejects.toThrow(/same-origin only/);
-    expect(cdpCalls.some((c) => c.method === 'Page.navigate')).toBe(false);
+  it('navigates to another origin', async () => {
+    evaluateReturns(here);
+    await mod.handleRequest({ method: 'navigate', params: { url: 'https://b.test/y' } });
+    expect(cdpCalls.find((c) => c.method === 'Page.navigate')?.params.url).toBe('https://b.test/y');
   });
 
-  it('refuses javascript: and data: URLs', async () => {
-    evaluateReturns({ url: 'https://a.test/x', origin: 'https://a.test', readyState: 'complete' });
+  it('refuses javascript:, data: and file: URLs', async () => {
+    evaluateReturns(here);
     for (const url of ['javascript:alert(1)', 'data:text/html,<b>x', 'file:///etc/passwd']) {
       await expect(mod.handleRequest({ method: 'navigate', params: { url } }))
         .rejects.toThrow(/only http\(s\) is allowed/);
     }
+    expect(cdpCalls.some((c) => c.method === 'Page.navigate')).toBe(false);
   });
 
-  it('allows a relative path on the same origin', async () => {
-    evaluateReturns({ url: 'https://a.test/x', origin: 'https://a.test', readyState: 'complete' });
+  it('resolves a relative path against the current page', async () => {
+    evaluateReturns(here);
     await mod.handleRequest({ method: 'navigate', params: { url: '/settings' } });
-
-    const nav = cdpCalls.find((c) => c.method === 'Page.navigate');
-    expect(nav?.params.url).toBe('https://a.test/settings');
+    expect(cdpCalls.find((c) => c.method === 'Page.navigate')?.params.url).toBe('https://a.test/settings');
   });
 
-  it('treats a port change as a different origin', async () => {
-    evaluateReturns({ url: 'https://a.test/x', origin: 'https://a.test', readyState: 'complete' });
-    await expect(mod.handleRequest({ method: 'navigate', params: { url: 'https://a.test:8443/y' } }))
-      .rejects.toThrow(/same-origin only/);
+  it('back uses the previous history entry', async () => {
+    evaluateReturns(here);
+    cdpReplies['Page.getNavigationHistory'] = { currentIndex: 1, entries: [{ id: 7 }, { id: 8 }] };
+    await mod.handleRequest({ method: 'navigate', params: { action: 'back' } });
+    expect(cdpCalls.find((c) => c.method === 'Page.navigateToHistoryEntry')?.params).toEqual({ entryId: 7 });
+  });
+
+  it('forward uses the next history entry', async () => {
+    evaluateReturns(here);
+    cdpReplies['Page.getNavigationHistory'] = { currentIndex: 0, entries: [{ id: 7 }, { id: 8 }] };
+    await mod.handleRequest({ method: 'navigate', params: { action: 'forward' } });
+    expect(cdpCalls.find((c) => c.method === 'Page.navigateToHistoryEntry')?.params).toEqual({ entryId: 8 });
+  });
+
+  it('back at the start of history is an error', async () => {
+    cdpReplies['Page.getNavigationHistory'] = { currentIndex: 0, entries: [{ id: 7 }] };
+    await expect(mod.handleRequest({ method: 'navigate', params: { action: 'back' } }))
+      .rejects.toThrow(/no previous page in this tab's history/);
+  });
+
+  it('reload calls Page.reload', async () => {
+    evaluateReturns(here);
+    await mod.handleRequest({ method: 'navigate', params: { action: 'reload' } });
+    expect(cdpCalls.some((c) => c.method === 'Page.reload')).toBe(true);
+  });
+
+  it('refuses url and action together', async () => {
+    await expect(mod.handleRequest({ method: 'navigate', params: { url: '/a', action: 'back' } }))
+      .rejects.toThrow(/pass either url or action, not both/);
   });
 });
 

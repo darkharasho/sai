@@ -750,31 +750,42 @@ async function clickAt(tabId, x, y) {
 }
 
 /**
- * Same-origin gate for navigation. Driving a consented tab to an arbitrary
- * URL is a much bigger surface than clicking what is already on screen, so
- * anything that leaves the current origin — or uses a non-http scheme — is
- * refused and left to the user.
+ * Resolves a navigation target. Any http(s) URL is allowed — sharing a tab
+ * grants control of it — but other schemes (javascript:, data:, file:, …) are
+ * refused: they run code or read local files rather than load a page.
  */
-async function resolveSameOriginUrl(tabId, raw) {
-  const here = await evaluateFn(tabId, LOCATION_FN_SOURCE, {});
-  if (!here?.url) throw new Error('could not determine the current page URL');
+async function resolveNavigableUrl(tabId, raw) {
+  let base;
+  try {
+    base = (await evaluateFn(tabId, LOCATION_FN_SOURCE, {}))?.url;
+  } catch {
+    base = undefined;
+  }
+  return checkHttpUrl(raw, base);
+}
 
+function checkHttpUrl(raw, base) {
   let target;
   try {
-    target = new URL(String(raw), here.url);
+    target = base ? new URL(String(raw), base) : new URL(String(raw));
   } catch {
     throw new Error(`not a valid URL: ${raw}`);
   }
   if (target.protocol !== 'http:' && target.protocol !== 'https:') {
     throw new Error(`refusing to navigate to a ${target.protocol} URL — only http(s) is allowed`);
   }
-  if (target.origin !== here.origin) {
-    throw new Error(
-      `refusing to navigate from ${here.origin} to ${target.origin} — ` +
-      'the bridge is same-origin only; the user can open another origin themselves',
-    );
-  }
   return target.href;
+}
+
+/** Moves one step through the tab's session history. */
+async function stepHistory(tabId, direction) {
+  const hist = await cdp(tabId, 'Page.getNavigationHistory', {});
+  const index = (hist?.currentIndex ?? 0) + (direction === 'back' ? -1 : 1);
+  const entry = hist?.entries?.[index];
+  if (!entry) {
+    throw new Error(`no ${direction === 'back' ? 'previous' : 'next'} page in this tab's history`);
+  }
+  await cdp(tabId, 'Page.navigateToHistoryEntry', { entryId: entry.id });
 }
 
 // ---------------------------------------------------------------------------
@@ -929,11 +940,20 @@ const HANDLERS = {
 
   async navigate(params) {
     const tabId = await resolveTabId(params);
-    const url = await resolveSameOriginUrl(tabId, params?.url);
+    const action = params?.action;
+    if (action && params?.url) throw new Error('pass either url or action, not both');
+    if (action && !['back', 'forward', 'reload'].includes(action)) {
+      throw new Error(`unknown navigate action: ${action} (expected back, forward or reload)`);
+    }
+    if (!action && !params?.url) throw new Error('navigate needs a url, or an action of back, forward or reload');
+
+    const url = action ? null : await resolveNavigableUrl(tabId, params.url);
     return runAction(tabId, async () => {
-      await cdp(tabId, 'Page.navigate', { url });
+      if (action === 'reload') await cdp(tabId, 'Page.reload', {});
+      else if (action) await stepHistory(tabId, action);
+      else await cdp(tabId, 'Page.navigate', { url });
       const after = await settle(tabId);
-      return { tabId, url: after?.url ?? url, title: after?.title ?? null };
+      return { tabId, ...(action ? { action } : {}), url: after?.url ?? url, title: after?.title ?? null };
     });
   },
 
@@ -965,5 +985,5 @@ async function handleRequest(frame) {
 // never imports it.
 export {
   HANDLERS, handleRequest, attached, resolveTabId, KEYS,
-  friendlyAttachError, rehydrate, dialogs, probeAttached, ensureConnected, cdp, abortInflight,
+  friendlyAttachError, rehydrate, dialogs, checkHttpUrl, probeAttached, ensureConnected, cdp, abortInflight,
 };

@@ -41,9 +41,11 @@ describe('browser tool routing', () => {
     }
   });
 
-  it('documents that navigation is same-origin only', () => {
+  it('navigate advertises cross-origin and history actions', () => {
     const nav = SAI_TOOL_SCHEMA.find((t) => t.name === 'browser_navigate')!;
-    expect(nav.description).toMatch(/same.origin/i);
+    expect(nav.description).not.toMatch(/same.origin/i);
+    expect((nav.input_schema as any).properties.action.enum).toEqual(['back', 'forward', 'reload']);
+    expect((nav.input_schema as any).required ?? []).not.toContain('url');
   });
 
   it('maps tool names to bridge methods and forwards input', async () => {

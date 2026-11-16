@@ -461,16 +461,17 @@ export const SAI_TOOL_SCHEMA: SaiToolDef[] = [
   {
     name: 'browser_navigate',
     description:
-      'Navigate a shared tab to another URL on the SAME ORIGIN it is already on. Cross-origin ' +
-      'navigation is refused — ask the user to open a different site themselves.',
+      'Navigate a shared tab: to any http(s) `url` (absolute, or relative to the current page), or ' +
+      'through its history with `action` back / forward / reload. Pass exactly one of the two. If ' +
+      'the page asks "Leave site?", the result carries `dialog` — see browser_dialog.',
     toolset: 'chat',
     input_schema: {
       type: 'object',
       properties: {
-        url: { type: 'string', description: 'Absolute or relative URL on the current origin, e.g. "/settings".' },
+        url: { type: 'string', description: 'Absolute http(s) URL, or a path relative to the current page, e.g. "/settings".' },
+        action: { type: 'string', enum: ['back', 'forward', 'reload'], description: 'History step or reload, instead of a url.' },
         tabId: { type: 'number', description: 'Which shared tab. Omit when only one is attached.' },
       },
-      required: ['url'],
     },
   },
   {
