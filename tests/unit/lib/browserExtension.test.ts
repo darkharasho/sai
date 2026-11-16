@@ -680,3 +680,90 @@ describe('child tabs and tab management', () => {
     expect(mod.attached.has(1)).toBe(false);
   });
 });
+
+describe('final review fixes', () => {
+  beforeEach(() => share(1));
+
+  it('a toolbar click during an in-flight re-attach leaves the tab detached', async () => {
+    let finishAttach!: () => void;
+    stub.chrome.debugger.attach.mockImplementationOnce(() => new Promise<void>((r) => { finishAttach = r; }));
+    vi.useFakeTimers();
+    await stub.fire('debugger.onDetach', { tabId: 1 }, 'target_closed');
+    await vi.advanceTimersByTimeAsync(250); // attempt starts, attach pending
+    await stub.fire('action.onClicked', { id: 1, url: 'https://a.test' });
+    stub.chrome.debugger.detach.mockClear();
+    finishAttach();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(stub.chrome.debugger.detach).toHaveBeenCalledWith({ tabId: 1 });
+    expect(mod.attached.has(1)).toBe(false);
+  });
+
+  it('closing the last shared tab still answers the request', async () => {
+    mod.ensureConnected();
+    await stub.fire('port.onMessage', { type: 'request', id: 'r1', method: 'tabs.close', params: { tabId: 1 } });
+    await vi.waitFor(() =>
+      expect(stub.posted).toContainEqual({ type: 'response', id: 'r1', ok: true, result: { closed: 1 } }));
+  });
+
+  it('a dialog Chrome says is already gone is cleared, not stuck', async () => {
+    await stub.fire('debugger.onEvent', { tabId: 1 }, 'Page.javascriptDialogOpening', { type: 'alert', message: 'x' });
+    stub.cdp.script['Page.handleJavaScriptDialog'] = { error: 'No dialog is showing' };
+    evaluateReturns({ url: 'u', title: 't', readyState: 'complete' });
+    const res = await mod.handleRequest({ method: 'dialog', params: { action: 'accept' } });
+    expect(res).toMatchObject({ tabId: 1, handled: 'none' });
+    expect(mod.dialogs.has(1)).toBe(false);
+  });
+
+  it('re-attach forgets a dialog that may have closed while detached', async () => {
+    await stub.fire('debugger.onEvent', { tabId: 1 }, 'Page.javascriptDialogOpening', { type: 'alert', message: 'x' });
+    vi.useFakeTimers();
+    await stub.fire('debugger.onDetach', { tabId: 1 }, 'target_closed');
+    await vi.advanceTimersByTimeAsync(250);
+    expect(mod.attached.get(1)?.state).toBe('attached');
+    expect(mod.dialogs.has(1)).toBe(false);
+  });
+
+  it('rehydrate re-enables Page so an open dialog is replayed', async () => {
+    mod.attached.clear();
+    stub.chrome.debugger.getTargets = vi.fn((cb: any) => cb([{ tabId: 5, attached: true }]));
+    stub.cdp.script['Page.enable'] = {
+      reply: () => {
+        void stub.fire('debugger.onEvent', { tabId: 5 }, 'Page.javascriptDialogOpening', { type: 'alert', message: 'hi' });
+        return {};
+      },
+    };
+    await mod.rehydrate();
+    expect(mod.attached.has(5)).toBe(true);
+    expect(mod.dialogs.get(5)).toMatchObject({ type: 'alert' });
+  });
+
+  it('dialog refuses an unknown action instead of accepting', async () => {
+    await stub.fire('debugger.onEvent', { tabId: 1 }, 'Page.javascriptDialogOpening', { type: 'beforeunload', message: '' });
+    for (const action of [undefined, 'cancel', 'stay']) {
+      await expect(mod.handleRequest({ method: 'dialog', params: { action } }))
+        .rejects.toThrow(/action must be accept or dismiss/);
+    }
+    expect(cdpCalls.some((c) => c.method === 'Page.handleJavaScriptDialog')).toBe(false);
+  });
+
+  it('navigate finishes inside the 20s SAI budget when the page never answers', async () => {
+    stub.cdp.script['Runtime.evaluate'] = { hang: true };
+    stub.cdp.script['Page.navigate'] = { hang: true };
+    vi.useFakeTimers();
+    let settled: any = 'pending';
+    mod.handleRequest({ method: 'navigate', params: { url: 'https://b.test/' } })
+      .then((r: any) => { settled = r; }, (e: any) => { settled = e; });
+    await vi.advanceTimersByTimeAsync(17_000);
+    expect(settled).toMatchObject({ tabId: 1, url: 'https://b.test/' });
+  });
+
+  it('wait finishes inside the budget even when polls hang', async () => {
+    stub.cdp.script['Runtime.evaluate'] = { hang: true };
+    vi.useFakeTimers();
+    let settled: any = 'pending';
+    mod.handleRequest({ method: 'wait', params: { text: 'x', timeoutMs: 15_000 } })
+      .then((r: any) => { settled = r; }, (e: any) => { settled = e; });
+    await vi.advanceTimersByTimeAsync(16_000);
+    expect(settled).toMatchObject({ met: false });
+  });
+});

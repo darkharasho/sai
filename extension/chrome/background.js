@@ -74,6 +74,16 @@ const ACTION_GRACE_MS = 3000;
 const CHILD_ATTACH_TRIES = 3;
 const CHILD_ATTACH_GAP_MS = 200;
 
+/**
+ * Budget pieces that keep navigate under SAI's 20 s call timeout even when
+ * the page never answers: 3 s to read the current URL + 5 s for the navigation
+ * to commit + the 5 s settle, plus up to 3 s waiting for a re-attach.
+ */
+const LOCATION_READ_TIMEOUT_MS = 3000;
+const NAVIGATE_COMMIT_TIMEOUT_MS = 5000;
+/** Never give a poll less than this, even near a deadline. */
+const MIN_POLL_EVAL_MS = 250;
+
 /** How long the toolbar probe waits before treating a silent tab as ours. */
 const PROBE_TIMEOUT_MS = 1500;
 
@@ -103,6 +113,7 @@ const attached = new Map();
 let port = null;
 let connecting = false;
 let reconnectAttempt = 0;
+let requestsInFlight = 0;
 let reconnectTimer = null;
 let portOpenedAt = 0;
 /** Why the native port last closed; sent to SAI on the next hello. */
@@ -151,6 +162,9 @@ async function rehydrate() {
     const target = targets.find((t) => t.tabId === tabId);
     attached.set(tabId, { url: target?.url, title: target?.title, state: 'attached' });
     adopted.push(tabId);
+    // Dialog state lived in the old worker's memory; enabling Page again makes
+    // Chrome replay a dialog that is still open.
+    try { await cdp(tabId, 'Page.enable', {}, { timeoutMs: 2000 }); } catch { /* non-fatal */ }
   }
   await persistAttached();
   await refreshBadge();
@@ -286,10 +300,7 @@ async function detachTab(tabId, { notify = true, reason = null } = {}) {
   await persistAttached();
   await refreshBadge();
   if (notify) send({ type: 'event', event: 'detached', tabId, reason });
-  if (!attached.size && port) {
-    try { port.disconnect(); } catch { /* noop */ }
-    port = null;
-  }
+  closePortIfIdle();
 }
 
 chrome.action.onClicked.addListener((tab) => {
@@ -487,12 +498,22 @@ async function reattachAttempt(tabId, job) {
     // Chrome may have handed the session back on its own.
     if (/already attached/i.test(error) && (await probeAttached(tabId))) ok = true;
   }
-  if (reattaching.get(tabId) !== job) return; // cancelled while we awaited
+  if (reattaching.get(tabId) !== job) {
+    // Cancelled while attach was in flight (the user unshared the tab, or it
+    // closed). If the attach still went through, undo it: the user said stop.
+    if (ok) {
+      try { await chrome.debugger.detach({ tabId }); } catch { /* already gone */ }
+    }
+    return;
+  }
 
   if (ok) {
     reattaching.delete(tabId);
     const meta = attached.get(tabId);
     if (meta) meta.state = 'attached';
+    // A dialog may have closed while we were detached and couldn't hear it.
+    // Forget it; Page.enable replays one that is still open.
+    dialogs.delete(tabId);
     try { await cdp(tabId, 'Page.enable', {}); } catch { /* non-fatal */ }
     send({ type: 'event', event: 'reattached', tabId });
     diag('reattached', { tabId, attempts: job.attempt, waitedMs: Date.now() - job.startedAt });
@@ -583,10 +604,14 @@ function ensureConnected() {
   port.onMessage.addListener((frame) => {
     reconnectAttempt = 0; // SAI answered: the link works
     if (frame?.type !== 'request') return;
+    requestsInFlight += 1;
     handleRequest(frame).then(
       (result) => send({ type: 'response', id: frame.id, ok: true, result }),
       (err) => send({ type: 'response', id: frame.id, ok: false, error: String(err?.message || err) }),
-    );
+    ).finally(() => {
+      requestsInFlight -= 1;
+      closePortIfIdle();
+    });
   });
 
   port.onDisconnect.addListener(() => {
@@ -624,6 +649,17 @@ function scheduleReconnect() {
     reconnectTimer = null;
     if (attached.size) ensureConnected();
   }, delay);
+}
+
+/**
+ * With nothing shared the port has no reason to stay open — but a request
+ * that just unshared the last tab (tabs.close) still has to be answered, so
+ * only close once nothing is in flight.
+ */
+function closePortIfIdle() {
+  if (attached.size || requestsInFlight || !port) return;
+  try { port.disconnect(); } catch { /* noop */ }
+  port = null;
 }
 
 /** A diagnostic frame for SAI's devlog. Fire-and-forget, never throws. */
@@ -704,14 +740,14 @@ async function resolveTabId(params, { allowDialog = false } = {}) {
 }
 
 /** Evaluates one of the pageScripts sources and unwraps the CDP envelope. */
-async function evaluateFn(tabId, source, opts) {
+async function evaluateFn(tabId, source, opts, { timeoutMs = CDP_TIMEOUT_MS } = {}) {
   const expression = `(${source})(${JSON.stringify(opts ?? {})})`;
   const res = await cdp(tabId, 'Runtime.evaluate', {
     expression,
     returnByValue: true,
     awaitPromise: false,
-    timeout: EVALUATE_TIMEOUT_MS,
-  });
+    timeout: Math.min(EVALUATE_TIMEOUT_MS, timeoutMs),
+  }, { timeoutMs });
   if (res?.exceptionDetails) {
     const text = res.exceptionDetails.exception?.description || res.exceptionDetails.text;
     throw new Error(`page evaluation failed: ${text}`);
@@ -770,7 +806,10 @@ async function settle(tabId, timeoutMs = SETTLE_TIMEOUT_MS) {
   while (Date.now() < deadline) {
     if (dialogs.has(tabId)) return last;
     try {
-      last = await evaluateFn(tabId, LOCATION_FN_SOURCE, {});
+      // Each poll gets only the time left, so a hung page can't stretch the
+      // settle past its deadline by a whole CDP timeout.
+      const left = Math.max(MIN_POLL_EVAL_MS, deadline - Date.now());
+      last = await evaluateFn(tabId, LOCATION_FN_SOURCE, {}, { timeoutMs: left });
     } catch {
       // Mid-navigation the context is torn down; that's expected, so retry.
       last = null;
@@ -815,7 +854,7 @@ async function clickAt(tabId, x, y) {
 async function resolveNavigableUrl(tabId, raw) {
   let base;
   try {
-    base = (await evaluateFn(tabId, LOCATION_FN_SOURCE, {}))?.url;
+    base = (await evaluateFn(tabId, LOCATION_FN_SOURCE, {}, { timeoutMs: LOCATION_READ_TIMEOUT_MS }))?.url;
   } catch {
     base = undefined;
   }
@@ -1009,7 +1048,15 @@ const HANDLERS = {
     return runAction(tabId, async () => {
       if (action === 'reload') await cdp(tabId, 'Page.reload', {});
       else if (action) await stepHistory(tabId, action);
-      else await cdp(tabId, 'Page.navigate', { url });
+      else {
+        try {
+          await cdp(tabId, 'Page.navigate', { url }, { timeoutMs: NAVIGATE_COMMIT_TIMEOUT_MS });
+        } catch (err) {
+          // Page.navigate only answers once the navigation commits; a slow
+          // server isn't a failed navigation. Let settle report where we are.
+          if (!(err instanceof CdpTimeoutError)) throw err;
+        }
+      }
       const after = await settle(tabId);
       return { tabId, ...(action ? { action } : {}), url: after?.url ?? url, title: after?.title ?? null };
     });
@@ -1058,7 +1105,8 @@ const HANDLERS = {
       }
       let res = null;
       try {
-        res = await evaluateFn(tabId, WAIT_CHECK_FN_SOURCE, { text, selector });
+        const left = Math.max(MIN_POLL_EVAL_MS, timeoutMs - (Date.now() - started));
+        res = await evaluateFn(tabId, WAIT_CHECK_FN_SOURCE, { text, selector }, { timeoutMs: left });
       } catch {
         res = null; // mid-navigation; try again
       }
@@ -1115,15 +1163,30 @@ const HANDLERS = {
     const tabId = await resolveTabId(params, { allowDialog: true });
     const d = dialogs.get(tabId);
     if (!d) throw new Error(`no dialog is open on tab ${tabId}`);
-    const action = params?.action === 'dismiss' ? 'dismiss' : 'accept';
+    const action = params?.action;
+    // Never default to accept: a "Leave site?" accepted by mistake loses the
+    // user's unsaved work.
+    if (action !== 'accept' && action !== 'dismiss') {
+      throw new Error(`dialog action must be accept or dismiss (got ${JSON.stringify(action)})`);
+    }
     return runAction(tabId, async () => {
-      await cdp(tabId, 'Page.handleJavaScriptDialog', {
-        accept: action === 'accept',
-        ...(typeof params?.promptText === 'string' ? { promptText: params.promptText } : {}),
-      });
+      let handled = action;
+      try {
+        await cdp(tabId, 'Page.handleJavaScriptDialog', {
+          accept: action === 'accept',
+          ...(typeof params?.promptText === 'string' ? { promptText: params.promptText } : {}),
+        });
+      } catch (err) {
+        // We missed its close event (e.g. it closed while we were detached).
+        if (!/no (javascript )?dialog/i.test(String(err?.message || err))) throw err;
+        handled = 'none';
+      }
       dialogs.delete(tabId);
       const after = await settle(tabId);
-      return { tabId, handled: action, type: d.type, url: after?.url ?? null, title: after?.title ?? null };
+      return {
+        tabId, handled, type: d.type, url: after?.url ?? null, title: after?.title ?? null,
+        ...(handled === 'none' ? { note: 'the dialog had already closed' } : {}),
+      };
     });
   },
 };
