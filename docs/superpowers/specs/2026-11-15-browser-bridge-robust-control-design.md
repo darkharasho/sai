@@ -100,8 +100,37 @@ to keep the per-tab sharing model, with sharing a tab also meaning control.
 
 ### 1b. Detaching (user-reported: happens "a LOT") — diagnose first
 
-The user reports frequent detaching. The cause isn't known yet, so the first task
-is to instrument and reproduce. Fixes come after. Candidates from reading the code:
+The user reports frequent detaching. **The user found the trigger: it happens when
+the 1Password autofill menu pops up.** That menu is an iframe that 1Password's
+extension injects into the page. Chrome doesn't let an extension's `chrome.debugger`
+session stay on a page that contains another extension's frame, so it fires
+`chrome.debugger.onDetach` and the bridge drops the tab. Any password manager or
+extension that injects a frame (Grammarly, Bitwarden, …) will do the same. The
+instrumentation below confirms the exact `reason` Chrome reports.
+
+**Auto re-attach (primary fix).** When `onDetach` fires with any reason other than
+`canceled_by_user` (the user dismissing the infobar), keep the tab shared. Don't
+drop it:
+- Mark it `state: 'reattaching'` in the map, send a `reattaching` event, and
+  retry `chrome.debugger.attach` with backoff (250 ms, 500 ms, 1 s, 2 s, then
+  every 5 s, giving up after 2 min). Chrome usually refuses while the foreign
+  frame is still in the page. It succeeds once the menu closes.
+- On success, re-run `Page.enable`, set `state: 'attached'`, and send
+  `reattached`. Refs from an earlier snapshot stay valid, because they live on
+  the page, not in the session.
+- A call on a reattaching tab first waits up to 3 s for the re-attach. If that
+  isn't enough, it fails with: `Chrome detached the debugger on tab N because
+  another extension (likely a password manager's autofill menu) put a frame in
+  the page — reattaching automatically; press Escape or dismiss the menu, then
+  retry`. Pressing Escape can't go through CDP while the tab is detached, so the
+  message tells SAI the user (or a retry after the menu auto-closes) has to clear it.
+- On `target_closed` because the tab really closed (`chrome.tabs.onRemoved`
+  fired, or attach fails with "No tab with given id"), drop the tab.
+- `canceled_by_user` → drop the tab (the user's intent), as today.
+- The toolbar click on a reattaching tab counts as "ours" and detaches it,
+  cancelling the retries.
+
+Other candidates from reading the code, also covered:
 
 - **The link drops, not the debugger.** `browser-bridge-host.ts` exits whenever
   the SAI socket closes (SAI restart, or a newer relay winning the socket). The
