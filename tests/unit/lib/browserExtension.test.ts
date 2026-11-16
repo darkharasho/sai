@@ -1,87 +1,35 @@
 /**
- * The control gate is the security boundary of the whole browser-control
- * feature: it is the single thing standing between "the user shared a tab so
- * SAI could read it" and "SAI typed into their bank".
+ * The browser-bridge service worker, loaded against a stubbed `chrome` so its
+ * request handlers, attachment bookkeeping and recovery paths can be driven
+ * directly rather than only through a real browser.
  *
- * The service worker is loaded here against a stubbed `chrome` so the gate can
- * be exercised directly, rather than only through a real browser.
+ * Sharing a tab means SAI can control it: there is no read-only mode.
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { makeChromeStub, loadWorker, type ChromeStub } from './chromeStub';
 
-type Listener = (...args: any[]) => void;
-
-function stubChrome() {
-  const listeners: Record<string, Listener[]> = {};
-  const on = () => ({ addListener: (fn: Listener) => void fn });
-
-  const chrome = {
-    runtime: {
-      connectNative: vi.fn(() => ({
-        onMessage: on(),
-        onDisconnect: on(),
-        postMessage: vi.fn(),
-        disconnect: vi.fn(),
-      })),
-      getManifest: () => ({ version: '0.2.0' }),
-      onStartup: on(),
-      onInstalled: on(),
-      lastError: undefined as undefined | { message: string },
-    },
-    storage: { session: { get: vi.fn(async () => ({})), set: vi.fn(async () => undefined) } },
-    action: {
-      setBadgeText: vi.fn(async () => undefined),
-      setBadgeBackgroundColor: vi.fn(async () => undefined),
-      setTitle: vi.fn(async () => undefined),
-      onClicked: on(),
-    },
-    alarms: { create: vi.fn(async () => undefined), clear: vi.fn(async () => undefined), onAlarm: on() },
-    contextMenus: {
-      removeAll: vi.fn(async () => undefined),
-      create: vi.fn(),
-      update: vi.fn(async () => undefined),
-      onClicked: on(),
-    },
-    tabs: { onActivated: on() },
-    debugger: {
-      attach: vi.fn(async () => undefined),
-      detach: vi.fn(async () => undefined),
-      getTargets: vi.fn((cb: Listener) => cb([])),
-      sendCommand: vi.fn(),
-      onDetach: on(),
-    },
-    _listeners: listeners,
-  };
-  return chrome;
-}
-
-let chromeStub: ReturnType<typeof stubChrome>;
+let stub: ChromeStub;
 let mod: any;
-
-/** CDP replies, keyed by the method the worker sends. */
+/** CDP calls the worker made, in order. */
+let cdpCalls: ChromeStub['cdp']['calls'];
+/** CDP replies keyed by method: a value, or a function of the params. */
 let cdpReplies: Record<string, any>;
-let cdpCalls: Array<{ method: string; params: any }>;
 
 beforeEach(async () => {
-  vi.resetModules();
-  chromeStub = stubChrome();
-  cdpCalls = [];
-  cdpReplies = {};
-
-  chromeStub.debugger.sendCommand = vi.fn(
-    (_target: any, method: string, params: any, cb: Listener) => {
-      cdpCalls.push({ method, params });
-      // Runtime.evaluate carries a page-script result; everything else (the
-      // Input domain) just acknowledges.
-      const reply = Object.prototype.hasOwnProperty.call(cdpReplies, method)
-        ? cdpReplies[method]
-        : {};
-      cb(typeof reply === 'function' ? reply(params) : reply);
+  stub = makeChromeStub();
+  cdpCalls = stub.cdp.calls;
+  cdpReplies = new Proxy({}, {
+    set(_t, method: string, value) {
+      stub.cdp.script[method] = { reply: value };
+      return true;
     },
-  ) as any;
-
-  (globalThis as any).chrome = chromeStub;
-  mod = await import('../../../extension/chrome/background.js');
+  });
+  mod = await loadWorker(stub);
   mod.attached.clear();
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 /** Makes Runtime.evaluate return `value` for whichever page script runs. */
@@ -89,48 +37,13 @@ function evaluateReturns(value: unknown) {
   cdpReplies['Runtime.evaluate'] = { result: { value } };
 }
 
-function share(tabId: number, control: boolean) {
-  mod.attached.set(tabId, { url: 'https://example.test/a', title: 'A', control });
+function share(tabId: number) {
+  mod.attached.set(tabId, { url: 'https://example.test/a', title: 'A', state: 'attached' });
 }
 
-const CONTROL_METHODS = ['click', 'type', 'press', 'scroll', 'navigate'];
-
-describe('control gate', () => {
-  it('refuses every control method on a read-only tab', async () => {
-    share(1, false);
-    evaluateReturns({ x: 5, y: 5, editable: true, tag: 'INPUT', url: 'https://example.test/a' });
-
-    for (const method of CONTROL_METHODS) {
-      await expect(
-        mod.handleRequest({ method, params: { ref: 'e1', text: 'x', key: 'Enter', url: '/b' } }),
-        `${method} should be refused`,
-      ).rejects.toThrow(/shared read-only/);
-    }
-  });
-
-  it('names the exact menu item so the user can act on the refusal', async () => {
-    share(1, false);
-    await expect(mod.handleRequest({ method: 'click', params: { ref: 'e1' } }))
-      .rejects.toThrow(/Let SAI control this tab/);
-  });
-
-  it('dispatches no CDP command at all when refused', async () => {
-    share(1, false);
-    await expect(mod.handleRequest({ method: 'click', params: { ref: 'e1' } })).rejects.toThrow();
-    // The gate must come before anything touches the page.
-    expect(cdpCalls).toHaveLength(0);
-  });
-
-  it('still allows read methods on a read-only tab', async () => {
-    share(1, false);
-    evaluateReturns({ url: 'https://example.test/a', title: 'A', text: 'hello', truncated: false });
-
-    const res = await mod.handleRequest({ method: 'read', params: {} });
-    expect(res).toMatchObject({ tabId: 1, text: 'hello' });
-  });
-
-  it('allows control once the tab is granted it', async () => {
-    share(1, true);
+describe('sharing = control', () => {
+  it('drives any attached tab', async () => {
+    share(1);
     evaluateReturns({ x: 20, y: 30, editable: false, tag: 'BUTTON', url: 'https://example.test/a', title: 'A' });
 
     const res = await mod.handleRequest({ method: 'click', params: { ref: 'e2', refGen: 1 } });
@@ -141,14 +54,37 @@ describe('control gate', () => {
     expect(mouse[1].params).toMatchObject({ x: 20, y: 30, button: 'left' });
   });
 
-  it('refuses control on a tab that was never shared', async () => {
+  it('refuses a tab that was never shared', async () => {
     await expect(mod.handleRequest({ method: 'click', params: { tabId: 99, ref: 'e1' } }))
       .rejects.toThrow(/not attached/);
+  });
+
+  it('installs no context menu', () => {
+    // The stub has no chrome.contextMenus; loading the worker must not need it.
+    expect(stub.chrome.contextMenus).toBeUndefined();
+    expect(mod.HANDLERS).toBeDefined();
+  });
+
+  it('badge is amber with the control title', async () => {
+    await stub.fire('action.onClicked', { id: 1, url: 'https://a.test', title: 'A' });
+    await vi.waitFor(() => {
+      expect(stub.chrome.action.setBadgeBackgroundColor).toHaveBeenLastCalledWith({ color: '#d29922' });
+      expect(stub.chrome.action.setTitle).toHaveBeenLastCalledWith({
+        title: '1 tab(s) shared with SAI — SAI can control them',
+      });
+    });
+  });
+
+  it('still reads a page', async () => {
+    share(1);
+    evaluateReturns({ url: 'https://example.test/a', title: 'A', text: 'hello', truncated: false });
+    const res = await mod.handleRequest({ method: 'read', params: {} });
+    expect(res).toMatchObject({ tabId: 1, text: 'hello' });
   });
 });
 
 describe('same-origin navigation', () => {
-  beforeEach(() => share(1, true));
+  beforeEach(() => share(1));
 
   it('refuses a different origin', async () => {
     evaluateReturns({ url: 'https://a.test/x', origin: 'https://a.test', readyState: 'complete' });
@@ -181,7 +117,7 @@ describe('same-origin navigation', () => {
 });
 
 describe('typing', () => {
-  beforeEach(() => share(1, true));
+  beforeEach(() => share(1));
 
   it('refuses to type into a non-editable element', async () => {
     evaluateReturns({ x: 1, y: 1, editable: false, tag: 'BUTTON', url: 'u', title: 't' });
@@ -206,7 +142,7 @@ describe('typing', () => {
 });
 
 describe('key dispatch', () => {
-  beforeEach(() => share(1, true));
+  beforeEach(() => share(1));
 
   it('rejects a key outside the supported set', async () => {
     await expect(mod.handleRequest({ method: 'press', params: { key: 'F13' } }))
@@ -257,7 +193,7 @@ describe('key dispatch', () => {
   });
 
   it('still presses the key when the page will not report focus', async () => {
-    cdpReplies['Runtime.evaluate'] = () => { throw new Error('context destroyed'); };
+    stub.cdp.script['Runtime.evaluate'] = { error: 'context destroyed' };
 
     const res: any = await mod.handleRequest({ method: 'press', params: { key: 'Escape' } });
     expect(res.focusBefore).toBeNull();
@@ -266,7 +202,7 @@ describe('key dispatch', () => {
 });
 
 describe('stale refs', () => {
-  beforeEach(() => share(1, true));
+  beforeEach(() => share(1));
 
   it('propagates the page-side staleness refusal instead of clicking', async () => {
     evaluateReturns({ error: 'refs are stale (page changed since snapshot 1, now 2) — re-snapshot first' });

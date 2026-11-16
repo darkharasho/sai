@@ -303,7 +303,7 @@ export const SAI_TOOL_SCHEMA: SaiToolDef[] = [
       "List the browser tabs the user has shared with SAI. Only tabs they explicitly attached (by " +
       "clicking the SAI Browser Bridge toolbar button) are visible — everything else in their browser " +
       'is invisible to you. CALL THIS FIRST when a browser task could involve more than one tab, to get ' +
-      'the tabId the other browser tools take. Read-only.',
+      'the tabId the other browser tools take.',
     toolset: 'chat',
     input_schema: {
       type: 'object',
@@ -317,7 +317,7 @@ export const SAI_TOOL_SCHEMA: SaiToolDef[] = [
       'labelled elements on screen, each with a stable `ref`. USE THIS instead of walking the user ' +
       'through "now look at the top right" — look yourself, then describe what you actually see. ' +
       'Requires the user to have attached the tab first. Also returns `refGen`: pass it to the ' +
-      'control tools so a stale ref is rejected rather than acted on. Read-only itself. ' +
+      'control tools so a stale ref is rejected rather than acted on. ' +
       'If the control you want is not in the list, DO NOT just raise `maxElements` — use `match` to ' +
       'search by name, `root` to scope to a region, or `offset` to page. An open dialog is listed ' +
       'first automatically and reported as `modal`. Check `total` vs `returned` to see what was left out.',
@@ -354,7 +354,7 @@ export const SAI_TOOL_SCHEMA: SaiToolDef[] = [
     description:
       'Read the visible text of a shared browser tab, or of one element in it via `selector`. USE THIS ' +
       'when you need the page\'s words — an error message, docs, a table — rather than its layout; ' +
-      'prefer it over browser_snapshot for text-heavy pages. Read-only.',
+      'prefer it over browser_snapshot for text-heavy pages.',
     toolset: 'chat',
     input_schema: {
       type: 'object',
@@ -368,9 +368,7 @@ export const SAI_TOOL_SCHEMA: SaiToolDef[] = [
   {
     name: 'browser_click',
     description:
-      'Click an element in a shared tab, by the `ref` from browser_snapshot. REQUIRES the user to ' +
-      'have enabled control on that tab (right-click the SAI toolbar button, "Let SAI control this ' +
-      'tab"); a read-only tab returns an error saying so — relay that rather than retrying. Always ' +
+      'Click an element in a shared tab, by the `ref` from browser_snapshot. Always ' +
       'browser_snapshot first to get a current ref, and pass the snapshot\'s `refGen` so a ref that ' +
       'went stale is refused instead of clicking the wrong thing.',
     toolset: 'chat',
@@ -387,8 +385,7 @@ export const SAI_TOOL_SCHEMA: SaiToolDef[] = [
   {
     name: 'browser_type',
     description:
-      'Type text into a field in a shared tab, by the `ref` from browser_snapshot. Requires control ' +
-      'on that tab (see browser_click). Set `submit` to press Enter afterwards — that is how you run ' +
+      'Type text into a field in a shared tab, by the `ref` from browser_snapshot. Set `submit` to press Enter afterwards — that is how you run ' +
       'a search. Set `replace` to clear the field first; otherwise text is inserted at the cursor.',
     toolset: 'chat',
     input_schema: {
@@ -407,7 +404,7 @@ export const SAI_TOOL_SCHEMA: SaiToolDef[] = [
   {
     name: 'browser_press',
     description:
-      'Press a single key in a shared tab, sent to whatever is focused. Requires control on that tab. ' +
+      'Press a single key in a shared tab, sent to whatever is focused. ' +
       'USE THIS for Escape to dismiss a dialog, Tab to move between fields, arrow keys in a menu, or ' +
       'Space to toggle a focused checkbox, radio or switch — Enter does NOT activate those, and on an ' +
       'app with keyboard shortcuts it can fall through to the page behind a dialog and trigger ' +
@@ -429,7 +426,7 @@ export const SAI_TOOL_SCHEMA: SaiToolDef[] = [
   {
     name: 'browser_scroll',
     description:
-      'Scroll a shared tab. Requires control on that tab. USE THIS when browser_snapshot reports an ' +
+      'Scroll a shared tab. USE THIS when browser_snapshot reports an ' +
       'element outside the viewport, or to page through a long list. Re-snapshot afterwards: scrolling ' +
       'changes which elements are reachable.',
     toolset: 'chat',
@@ -446,9 +443,8 @@ export const SAI_TOOL_SCHEMA: SaiToolDef[] = [
   {
     name: 'browser_navigate',
     description:
-      'Navigate a shared tab to another URL on the SAME ORIGIN it is already on. Requires control on ' +
-      'that tab. Cross-origin navigation is refused by design — ask the user to open a different site ' +
-      'themselves rather than trying to work around it.',
+      'Navigate a shared tab to another URL on the SAME ORIGIN it is already on. Cross-origin ' +
+      'navigation is refused — ask the user to open a different site themselves.',
     toolset: 'chat',
     input_schema: {
       type: 'object',

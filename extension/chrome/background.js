@@ -7,10 +7,9 @@
  * the attachment lasts. Clicking again detaches. Tabs you never attached are
  * not enumerated, so SAI cannot even see that they exist.
  *
- * Clicking the toolbar button shares a tab READ-ONLY. Control (click, type,
- * navigate) is a second, explicit opt-in per tab, via the right-click menu on
- * that same button — so a tab shared for reading can never be driven, and
- * "SAI can see this" never silently becomes "SAI can act here".
+ * Sharing a tab means SAI can control it (click, type, navigate). There is no
+ * separate read-only mode: the toolbar click is the one consent decision, and
+ * the amber badge says so.
  *
  * Transport: chrome.runtime.connectNative to a relay process, which forwards
  * frames to the already-running SAI app over a unix socket / named pipe. SAI
@@ -41,12 +40,13 @@ const SCREENSHOT_TIERS = [
   { maxWidth: 600, quality: 35 },
 ];
 
-const CONTROL_MENU_ID = 'sai-allow-control';
+/** Badge colour while any tab is shared. Amber: shared means drivable. */
+const BADGE_COLOR = '#d29922';
 
 /** How long an action waits for the page to settle before reporting back. */
 const SETTLE_TIMEOUT_MS = 5000;
 
-/** tabId -> { url, title, control } captured at attach time. */
+/** tabId -> { url, title, state: 'attached' | 'reattaching' }. */
 const attached = new Map();
 
 let port = null;
@@ -58,12 +58,10 @@ let connecting = false;
 
 async function persistAttached() {
   const tabIds = [...attached.keys()];
-  // Control grants are kept in *session* storage on purpose: they outlive a
-  // service-worker teardown (which happens constantly) but never a browser
-  // restart, so consent to be driven is not something you grant once forever.
-  const controlled = [...attached.entries()].filter(([, m]) => m.control).map(([id]) => id);
+  // Session storage outlives a service-worker teardown (which happens
+  // constantly) but never a browser restart.
   try {
-    await chrome.storage.session.set({ attachedTabIds: tabIds, controlledTabIds: controlled });
+    await chrome.storage.session.set({ attachedTabIds: tabIds });
   } catch {
     /* session storage is best-effort; attachment itself is the source of truth */
   }
@@ -76,11 +74,9 @@ async function persistAttached() {
  */
 async function rehydrate() {
   let stored = [];
-  let controlled = [];
   try {
-    const got = await chrome.storage.session.get(['attachedTabIds', 'controlledTabIds']);
+    const got = await chrome.storage.session.get(['attachedTabIds']);
     stored = Array.isArray(got?.attachedTabIds) ? got.attachedTabIds : [];
-    controlled = Array.isArray(got?.controlledTabIds) ? got.controlledTabIds : [];
   } catch {
     stored = [];
   }
@@ -97,11 +93,7 @@ async function rehydrate() {
   for (const tabId of stored) {
     const target = targets.find((t) => t.tabId === tabId && t.attached);
     if (target) {
-      attached.set(tabId, {
-        url: target.url,
-        title: target.title,
-        control: controlled.includes(tabId),
-      });
+      attached.set(tabId, { url: target.url, title: target.title, state: 'attached' });
     }
   }
   await persistAttached();
@@ -111,16 +103,13 @@ async function rehydrate() {
 
 async function refreshBadge() {
   const count = attached.size;
-  const controlling = [...attached.values()].some((m) => m.control);
   try {
     await chrome.action.setBadgeText({ text: count ? String(count) : '' });
-    // Amber whenever any tab can be driven — "SAI can act here" should never
-    // look the same as "SAI can look here".
-    await chrome.action.setBadgeBackgroundColor({ color: controlling ? '#d29922' : '#2f81f7' });
+    await chrome.action.setBadgeBackgroundColor({ color: BADGE_COLOR });
     await chrome.action.setTitle({
       title: count
-        ? `${count} tab(s) shared with SAI${controlling ? ' — control enabled' : ' (read-only)'}`
-        : 'Attach this tab to SAI',
+        ? `${count} tab(s) shared with SAI — SAI can control them`
+        : 'Share this tab with SAI',
     });
   } catch {
     /* badge is cosmetic */
@@ -140,25 +129,11 @@ async function attachTab(tab) {
   } catch {
     /* non-fatal: snapshot/read still work */
   }
-  // Always read-only to begin with. Control is a deliberate second step.
-  attached.set(tab.id, { url: tab.url, title: tab.title, control: false });
+  attached.set(tab.id, { url: tab.url, title: tab.title, state: 'attached' });
   await persistAttached();
   await refreshBadge();
   ensureConnected();
   send({ type: 'event', event: 'attached', tabId: tab.id, url: tab.url, title: tab.title });
-}
-
-/**
- * Control is granted per tab and never survives a detach — re-attaching a tab
- * starts it read-only again, so a stale grant can't outlive the user's intent.
- */
-async function setControl(tabId, control) {
-  const meta = attached.get(tabId);
-  if (!meta) return;
-  meta.control = control;
-  await persistAttached();
-  await refreshBadge();
-  send({ type: 'event', event: control ? 'control-granted' : 'control-revoked', tabId });
 }
 
 async function detachTab(tabId, { notify = true } = {}) {
@@ -170,12 +145,6 @@ async function detachTab(tabId, { notify = true } = {}) {
   attached.delete(tabId);
   await persistAttached();
   await refreshBadge();
-  // Detaching drops any control grant with it; the checkbox must follow.
-  try {
-    await chrome.contextMenus.update(CONTROL_MENU_ID, { checked: false });
-  } catch {
-    /* menu may not exist yet */
-  }
   if (notify) send({ type: 'event', event: 'detached', tabId });
   if (!attached.size && port) {
     try { port.disconnect(); } catch { /* noop */ }
@@ -201,46 +170,8 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === KEEPALIVE_ALARM && attached.size) ensureConnected();
 });
 
-/**
- * The control opt-in lives in the toolbar button's right-click menu. A plain
- * left-click can't carry it: `action.onClicked` reports no modifier keys, and
- * a popup would replace the one-click share that already works.
- */
-async function installContextMenu() {
-  try {
-    await chrome.contextMenus.removeAll();
-    chrome.contextMenus.create({
-      id: CONTROL_MENU_ID,
-      title: 'Let SAI control this tab',
-      type: 'checkbox',
-      checked: false,
-      contexts: ['action'],
-    });
-  } catch {
-    /* menu is an affordance, not the enforcement point */
-  }
-}
-
-chrome.contextMenus.onClicked.addListener((info, tab) => {
-  if (info.menuItemId !== CONTROL_MENU_ID || !tab?.id) return;
-  if (!attached.has(tab.id)) {
-    // Nothing to grant control over yet. Put the checkbox back.
-    void chrome.contextMenus.update(CONTROL_MENU_ID, { checked: false });
-    return;
-  }
-  void setControl(tab.id, info.checked === true);
-});
-
-/** Keep the checkbox showing the active tab's real state, not the last one's. */
-chrome.tabs.onActivated.addListener(({ tabId }) => {
-  void chrome.contextMenus.update(CONTROL_MENU_ID, {
-    checked: attached.get(tabId)?.control === true,
-  }).catch(() => { /* menu may not exist yet */ });
-});
-
 chrome.runtime.onStartup.addListener(() => void rehydrate());
 chrome.runtime.onInstalled.addListener(() => void rehydrate());
-void installContextMenu();
 void rehydrate();
 
 // ---------------------------------------------------------------------------
@@ -318,22 +249,6 @@ function resolveTabId(params) {
     throw new Error('no tab is attached — click the SAI toolbar button on the tab you want to share');
   }
   throw new Error(`${attached.size} tabs attached — pass tabId (see sai_browser_tabs)`);
-}
-
-/**
- * Resolves the target tab *and* asserts the user granted control on it. Every
- * mutating handler goes through this rather than `resolveTabId`, so a
- * read-only tab stays read-only even if a new method forgets to check.
- */
-function resolveControlledTabId(params) {
-  const tabId = resolveTabId(params);
-  if (!attached.get(tabId)?.control) {
-    throw new Error(
-      `tab ${tabId} is shared read-only — the user must right-click the SAI toolbar button ` +
-      'and tick "Let SAI control this tab" before it can be clicked or typed into',
-    );
-  }
-  return tabId;
 }
 
 /** Evaluates one of the pageScripts sources and unwraps the CDP envelope. */
@@ -548,7 +463,7 @@ const HANDLERS = {
   },
 
   async click(params) {
-    const tabId = resolveControlledTabId(params);
+    const tabId = resolveTabId(params);
     const target = await evaluateOrThrow(tabId, RESOLVE_FN_SOURCE, {
       ref: params?.ref,
       refGen: params?.refGen,
@@ -559,7 +474,7 @@ const HANDLERS = {
   },
 
   async type(params) {
-    const tabId = resolveControlledTabId(params);
+    const tabId = resolveTabId(params);
     const text = String(params?.text ?? '');
     const target = await evaluateOrThrow(tabId, RESOLVE_FN_SOURCE, {
       ref: params?.ref,
@@ -593,7 +508,7 @@ const HANDLERS = {
   },
 
   async press(params) {
-    const tabId = resolveControlledTabId(params);
+    const tabId = resolveTabId(params);
     // Focus before and after, so a key that was swallowed (or that activated
     // something behind a modal) shows up in the result instead of reading as
     // a success. Best-effort: a page that won't evaluate still gets the key.
@@ -617,9 +532,7 @@ const HANDLERS = {
   },
 
   async scroll(params) {
-    // Scrolling changes nothing on the page, but it moves what a later click
-    // would land on, so it stays behind the same control gate.
-    const tabId = resolveControlledTabId(params);
+    const tabId = resolveTabId(params);
     const res = await evaluateOrThrow(tabId, SCROLL_FN_SOURCE, {
       dy: typeof params?.dy === 'number' ? params.dy : (params?.to ? 0 : 600),
       dx: params?.dx,
@@ -629,7 +542,7 @@ const HANDLERS = {
   },
 
   async navigate(params) {
-    const tabId = resolveControlledTabId(params);
+    const tabId = resolveTabId(params);
     const url = await resolveSameOriginUrl(tabId, params?.url);
     await cdp(tabId, 'Page.navigate', { url });
     const after = await settle(tabId);
@@ -644,6 +557,5 @@ async function handleRequest(frame) {
 }
 
 // Exported for the unit tests only — Chrome loads this as a service worker and
-// never imports it. The control gate is the security boundary of this whole
-// feature, so it is worth being able to test directly.
-export { HANDLERS, handleRequest, attached, resolveControlledTabId, KEYS };
+// never imports it.
+export { HANDLERS, handleRequest, attached, resolveTabId, KEYS };

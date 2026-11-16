@@ -31,13 +31,11 @@ describe('browser tool routing', () => {
     expect(SAI_TOOL_SCHEMA.filter((t) => forbidden.test(t.name))).toEqual([]);
   });
 
-  it('tells the model that control tools need the user to opt in', () => {
-    // If the description omits this, the model retries the refusal instead of
-    // telling the user the one thing that would fix it.
-    for (const name of ['browser_click', 'browser_type', 'browser_press', 'browser_scroll', 'browser_navigate']) {
-      const tool = SAI_TOOL_SCHEMA.find((t) => t.name === name)!;
-      expect(tool, `${name} missing`).toBeDefined();
-      expect(tool.description, `${name} description`).toMatch(/control/i);
+  it('no longer tells the model to ask for a control opt-in', () => {
+    // Sharing a tab grants control; an opt-in instruction would make the model
+    // send the user hunting for a menu that no longer exists.
+    for (const t of SAI_TOOL_SCHEMA.filter((x) => x.name.startsWith('browser_'))) {
+      expect(t.description, `${t.name} description`).not.toMatch(/Let SAI control|read-only|Requires control/i);
     }
   });
 
