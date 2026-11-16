@@ -1,72 +1,114 @@
 # Browser bridge
 
-Lets SAI *see* a browser tab you explicitly share — and, if you separately say
-so, *act* in it — so it can look at what you're looking at instead of narrating
-steps for you to follow.
-
-Sharing and control are two different decisions, and the second is never
-implied by the first.
+Lets SAI see **and control** a browser tab you explicitly share, so it can look
+at what you're looking at and act in it instead of narrating steps for you to
+follow.
 
 ## Consent model
 
 Nothing is shared until you click the extension's toolbar button on a tab.
+**Sharing a tab means SAI can control it.** There is no separate read-only mode.
 
-- Clicking attaches a `chrome.debugger` (CDP) session to **that tab only**, for
-  reading. Chrome shows its own *"DevTools is debugging this tab"* infobar for
-  as long as the attachment lasts, and the extension badge shows how many tabs
-  are shared.
-- Clicking again detaches. Closing the tab detaches.
-- Tabs you never attached are not enumerated — `sai_browser_tabs` lists only
-  attached tabs, so SAI can't see that your other tabs exist. The extension
-  deliberately does not request the `tabs` permission.
+- Clicking attaches a `chrome.debugger` (CDP) session to **that tab only**.
+  Chrome shows its own *"DevTools is debugging this tab"* infobar for as long as
+  the attachment lasts. The badge is **amber** and shows how many tabs are
+  shared, and its tooltip says SAI can control them.
+- Clicking again detaches, and so does closing the tab or dismissing Chrome's
+  infobar. The toolbar button asks Chrome whether the tab is really attached
+  before it decides, so a restarted extension can never leave a tab stuck in a
+  state where clicking doesn't work.
+- If sharing fails, the badge shows `!` on that tab for a few seconds, and the
+  tooltip says why. For example, DevTools is open on the tab, or it is a
+  `chrome://` page.
+- Tabs you never shared are not enumerated. `sai_browser_tabs` lists only shared
+  tabs, so SAI can't see that your other tabs exist. The extension deliberately
+  doesn't request the `tabs` permission.
+- **Child tabs:** a tab that opens because of something SAI did (it clicked a
+  `target=_blank` link, or a login button opened an OAuth popup) is shared
+  automatically. That covers anything opened during an SAI action on a shared
+  tab, or within 3 s after it. A tab *you* open from a shared tab (middle-click,
+  Ctrl+click) stays private unless you click the toolbar button on it.
 - Password field values are returned as `•••`, never as text.
 
-Things to know before attaching a tab you care about: a snapshot includes the
-values of ordinary (non-password) form fields, and a screenshot captures
-whatever is on screen. Don't attach a tab mid-2FA.
-
-### Granting control
-
-A shared tab is **read-only until you grant control on it specifically**:
-right-click the SAI toolbar button and tick **"Let SAI control this tab"**.
-
-- The grant is **per tab**, not global. Other shared tabs stay read-only.
-- The badge turns **amber** whenever any tab can be driven, so "SAI can act
-  here" never looks like "SAI can look here".
-- Detaching drops the grant. Re-attaching starts read-only again.
-- Grants live in `chrome.storage.session`, so they survive the service worker
-  being torn down (which happens constantly) but **never a browser restart**.
-- Control is not a left-click modifier because `action.onClicked` reports no
-  modifier keys, and a popup would replace the one-click share that works.
-
-Without a grant, every control method fails with a message naming the exact
-menu item — so the model tells you how to enable it rather than silently
-failing or retrying.
+Things to know before sharing a tab you care about: a snapshot includes the
+values of ordinary (non-password) form fields, a screenshot captures whatever
+is on screen, and SAI can click, type and navigate anywhere on the web from
+that tab. Don't share a tab mid-2FA.
 
 ### What control can and cannot do
 
-Allowed: `click`, `type`, `press` (a fixed key list), `scroll`, and `navigate`.
+Allowed:
+- `click`, `hover`, `type`, `select` (native `<select>`), `press` and `scroll`
+- `navigate` to any http(s) URL, or back / forward / reload
+- `wait` for text, a selector or a URL
+- accept or dismiss native dialogs
+- open and close shared tabs
 
-`press` takes `Enter, Space, Tab, Escape, Backspace, Delete, Arrow*, Home, End,
-PageUp, PageDown` — `Space` because it is the only way to toggle a focused
-checkbox, radio or switch. Enter doesn't activate those at all; on an app with
-global keyboard shortcuts it falls through to the page behind the dialog and
-activates something else, which is worse than doing nothing. Since `press` is
-the one action with no ref behind it, it reports the focused element's role,
-name and checked state before and after, so a key that was swallowed is
-visible instead of reading as success.
+`press` takes a named key (`Enter, Space, Tab, Escape, Backspace, Delete,
+Arrow*, Home, End, PageUp, PageDown`), any single character, or a `+`-joined
+combo with `Control`/`Shift`/`Alt`/`Meta` (`Control+a`, `Shift+Tab`). Shortcut
+combos insert no text.
+- **Use Space, not Enter, on toggles.** Space is the only key that toggles a
+  focused checkbox, radio or switch. Enter doesn't activate those at all. On an
+  app with global keyboard shortcuts, Enter falls through to the page behind the
+  dialog and activates something else.
+- **Focus is reported.** `press` is the one action with no ref behind it, so it
+  reports the focused element's role, name and checked state before and after.
+  A key that was swallowed shows up instead of reading as success.
 
 Deliberately absent:
 
 - **No arbitrary script execution.** There is no eval/inject tool. The page
   scripts that *are* evaluated are a fixed set shipped with the extension.
-- **No cross-origin navigation.** `navigate` resolves the target against the
-  current page and refuses anything that changes origin, or any non-http(s)
-  scheme. Clicking a link that happens to leave the origin is still fine — that
-  is the page behaving normally, not SAI choosing a destination.
-- **No raw CDP.** The main process speaks only the method names below; nothing
-  in the path can send an `Input.*` command directly, so the per-tab grant
-  can't be bypassed from the SAI side.
+- **No non-web schemes.** `navigate` and `open_tab` refuse `javascript:`,
+  `data:`, `file:` and everything else that isn't http(s).
+- **No raw CDP.** The main process speaks only the method names below. Nothing
+  in the path can send an `Input.*` command directly, so SAI can't reach a tab
+  the user didn't share.
+
+### Dialogs
+
+While an `alert`, `confirm`, `prompt` or *"Leave site?"* (`beforeunload`) dialog
+is open, Chrome blocks script evaluation on that page. Before this was handled,
+every call hung until it timed out. Now:
+
+- The bridge listens for `Page.javascriptDialogOpening`. Any call on that tab
+  fails at once with `a beforeunload dialog is open on tab N: "…" — call
+  sai_browser_dialog to accept or dismiss it`.
+- An action that *caused* the dialog (a `navigate` away from unsaved work, a
+  `click` on a button that calls `confirm()`) returns successfully, with the
+  dialog in its `dialog` field.
+- `sai_browser_snapshot` and `sai_browser_tabs` show the open dialog instead of
+  failing.
+- `sai_browser_dialog { action: accept | dismiss, promptText? }` answers it.
+  Nothing is ever accepted automatically: "Leave site?" can mean unsaved work.
+
+A dialog that was already open when you shared the tab is reported the same way,
+because Chrome replays it when the bridge enables the Page domain.
+
+### Password managers and other extensions
+
+Chrome won't let one extension keep debugging a page while **another
+extension's frame** is in it. 1Password's inline autofill menu is exactly that,
+and so are Bitwarden's, Grammarly's and similar overlays. When one appears,
+Chrome detaches the bridge's debugger from the tab.
+
+The bridge treats any detach you didn't ask for as temporary:
+
+- The tab stays shared, and its state becomes `reattaching` (visible in
+  `sai_browser_tabs`).
+- It retries attaching at 250 ms, 500 ms, 1 s, 2 s, then every 5 s. Chrome
+  allows it back once the menu closes.
+- After 2 minutes without success, it gives up and the tab is unshared.
+- A call that arrives while re-attaching waits up to 3 s. If that isn't enough,
+  it fails with a message telling SAI that a password manager's menu is the
+  likely cause.
+
+Dismissing Chrome's infobar (`canceled_by_user`) or closing the tab still
+unshares it immediately.
+
+Every CDP command is also time-boxed (8 s, with a 6 s in-page cap on script
+evaluation), so nothing hangs silently.
 
 ### Acting on a stale ref
 
@@ -270,26 +312,30 @@ invasive, for a local developer tool.
 
 ## Tools
 
-Read tools — available on any attached tab:
-
-| Tool | What it returns |
-| --- | --- |
-| `sai_browser_tabs` | The attached tabs, with `tabId`, URL, title |
-| `sai_browser_snapshot` | Screenshot (JPEG) + interactive/labelled elements with `ref`, `role`, `name`, `box`, plus `refGen` |
-| `sai_browser_read` | Visible text of the page, or of one `selector` |
-
-Control tools — additionally require **"Let SAI control this tab"** on that tab:
-
 | Tool | What it does |
 | --- | --- |
+| `sai_browser_tabs` | The shared tabs, with `tabId`, URL, title, `state` and any open `dialog` |
+| `sai_browser_snapshot` | Screenshot (JPEG) + interactive/labelled elements with `ref`, `role`, `name`, `box`, plus `refGen` |
+| `sai_browser_read` | Visible text of the page, or of one `selector` |
 | `sai_browser_click` | Clicks the element at `ref` (real CDP mouse events at its centre) |
+| `sai_browser_hover` | Moves the mouse over `ref`, for hover menus and tooltips |
 | `sai_browser_type` | Types into `ref`; `replace` clears first, `submit` presses Enter |
-| `sai_browser_press` | Sends one key from a fixed list to whatever is focused |
+| `sai_browser_select` | Picks option(s) of a native `<select>` by `value`, `label` or `values` |
+| `sai_browser_press` | Sends a key, character or combo to whatever is focused |
 | `sai_browser_scroll` | Scrolls by `dy`/`dx`, or jumps `to` top/bottom |
-| `sai_browser_navigate` | Navigates to a **same-origin** URL |
+| `sai_browser_navigate` | Goes to any http(s) `url`, or `action` back / forward / reload |
+| `sai_browser_wait` | Waits for `text`, `selector` or `urlIncludes` (or for it to be `gone`); returns `met` |
+| `sai_browser_dialog` | Accepts or dismisses the native dialog blocking a tab |
+| `sai_browser_open_tab` | Opens a background tab next to a shared one and shares it |
+| `sai_browser_close_tab` | Closes a shared tab |
 
-Every tool takes an optional `tabId`; omit it when exactly one tab is attached.
-Control tools take `ref` plus the `refGen` from the snapshot that produced it.
+Actions (`click`, `type`, `press`, `hover`, `select`, `navigate`, `dialog`)
+report `openedTabs` when they caused new tabs, and `dialog` when they caused a
+dialog.
+
+Every tool takes an optional `tabId`; omit it when exactly one tab is attached
+(`close_tab` always needs it). Ref-based tools take `ref` plus the `refGen` from
+the snapshot that produced it.
 
 Snapshot refs (`e1`, `e2`, …) are stashed on the page as `window.__saiRefs`,
 with a generation counter in `window.__saiRefGen`, so a control call can
@@ -316,16 +362,33 @@ no host" from "attached and working". Work down this list:
      --enable-logging=stderr --v=1 2>&1 | grep -i native
    ```
 
-Note that the extension retries on its 30-second keepalive alarm while a tab is
-attached, so a fix can take up to 30s to take effect without re-clicking.
+While a tab is shared, the extension reconnects as soon as its port drops,
+backing off 0.5 s → 1 s → 2 s → 5 s. The 30-second keepalive alarm is a backstop.
+On SAI's side, a call that arrives within a minute of the link dropping waits up
+to 4 s for it to come back before failing.
+
+### The devlog
+
+SAI writes the bridge's diagnostics to its devlog on channel `browserBridge`.
+Read these first when a tab "keeps detaching":
+
+| Event | Meaning |
+| --- | --- |
+| `relay-connected` / `relay-dropped` | The browser's relay connected to SAI, or dropped (with a `reason`) |
+| `detach` | Chrome detached the debugger: `tabId`, `reason` (`target_closed`, `canceled_by_user`, …) |
+| `reattached` / `reattach-gave-up` | Outcome of the automatic re-attach, with attempt count |
+| `attach-failed` | A toolbar click couldn't share the tab, with Chrome's raw error |
+| `child-attach-failed` | A tab opened by an SAI action couldn't be shared |
+| `rehydrate` | The extension restarted and re-adopted `adopted` of `stored` tabs |
+| `port-reconnected` | The native port came back; `previousError` says why it closed |
 
 ## Known limitations
 
 - **MV3 service worker lifetime.** The worker is torn down when idle. Native
   port traffic resets the idle timer (Chrome 116+), and a 30-second
   `chrome.alarms` keepalive runs while any tab is attached, but if the worker
-  does die the port closes and SAI reports the bridge as disconnected until the
-  next attach or alarm. This is the most likely source of flakiness.
+  does die the port closes, and the extension reconnects within a few seconds.
+  On restart it re-adopts any tab its debugger is still attached to.
 - **1 MB native message cap.** Chrome's hard limit. Screenshots are JPEG and
   step down through 1024px/q60 → 800px/q45 → 600px/q35 until they fit; a
   snapshot that still doesn't fit errors with a suggestion to pass
@@ -334,6 +397,10 @@ attached, so a fix can take up to 30s to take effect without re-clicking.
   instance takes over the bridge from the first. Newest relay connection wins.
 - **Blocked surfaces.** `chrome://*`, the Chrome Web Store, and other
   extensions' pages can't be attached. Permanent Chrome restriction.
+- **Foreign-extension frames block control until they close.** See *Password
+  managers and other extensions* above. While a password manager's menu is
+  open, the tab is `reattaching`, and dismissing the menu (Escape) gives control
+  back.
 - **Same-process frames only.** The snapshot walks the top-level document;
   cross-origin iframes are not traversed.
 - **No Firefox.** Firefox has no `chrome.debugger` equivalent, so it would be
