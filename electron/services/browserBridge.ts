@@ -19,6 +19,7 @@ import * as net from 'node:net';
 import * as fs from 'node:fs';
 import * as crypto from 'node:crypto';
 import { bridgeDir, bridgeSocketPath, bridgeTokenPath } from './browserBridgePaths';
+import { devlog } from './devlog';
 
 export interface BridgeHandle {
   socketPath: string;
@@ -75,6 +76,7 @@ function rejectAllPending(inst: Instance, message: string): void {
 }
 
 function dropRelay(inst: Instance, message: string): void {
+  if (inst.relay) devlog('browserBridge', 'relay-dropped', { reason: message });
   if (inst.relay) {
     try { inst.relay.destroy(); } catch { /* noop */ }
   }
@@ -93,6 +95,7 @@ function handleFrame(inst: Instance, frame: unknown): void {
     result?: unknown;
     error?: string;
     event?: string;
+    kind?: string;
     tabId?: number;
     attachedTabIds?: unknown;
   };
@@ -106,6 +109,13 @@ function handleFrame(inst: Instance, frame: unknown): void {
   }
 
   if (f?.type === 'event') {
+    // The extension's diagnostics (detach reasons, port drops, attach
+    // failures) exist only to be read later; they change no state here.
+    if (f.event === 'diag' && typeof f.kind === 'string') {
+      const { type: _t, event: _e, ...data } = f as Record<string, unknown>;
+      devlog('browserBridge', f.kind, data);
+      return;
+    }
     if (f.event === 'attached' && typeof f.tabId === 'number') inst.attachedTabIds.add(f.tabId);
     if (f.event === 'detached' && typeof f.tabId === 'number') inst.attachedTabIds.delete(f.tabId);
     return;
@@ -168,6 +178,7 @@ function attachRelay(inst: Instance, socket: net.Socket): void {
         // reconnecting service worker isn't locked out by a stale socket.
         if (inst.relay && inst.relay !== socket) dropRelay(inst, 'replaced by a newer browser connection');
         inst.relay = socket;
+        devlog('browserBridge', 'relay-connected', {});
         try { socket.write(JSON.stringify({ type: 'welcome' }) + '\n'); } catch { /* noop */ }
         continue;
       }

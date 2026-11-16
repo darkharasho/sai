@@ -66,6 +66,7 @@ describe('sharing = control', () => {
   });
 
   it('badge is amber with the control title', async () => {
+    stub.cdp.script['Runtime.evaluate'] = { error: 'Debugger is not attached to the tab with id: 1.' };
     await stub.fire('action.onClicked', { id: 1, url: 'https://a.test', title: 'A' });
     await vi.waitFor(() => {
       expect(stub.chrome.action.setBadgeBackgroundColor).toHaveBeenLastCalledWith({ color: '#d29922' });
@@ -210,5 +211,77 @@ describe('stale refs', () => {
     await expect(mod.handleRequest({ method: 'click', params: { ref: 'e1', refGen: 1 } }))
       .rejects.toThrow(/stale/);
     expect(cdpCalls.some((c) => c.method === 'Input.dispatchMouseEvent')).toBe(false);
+  });
+});
+
+describe('attachment truth', () => {
+  it('cdp times out with the method name', async () => {
+    share(1);
+    stub.cdp.script['Runtime.evaluate'] = { hang: true };
+    vi.useFakeTimers();
+    const p = mod.handleRequest({ method: 'read', params: {} });
+    const settled = expect(p).rejects.toThrow(/CDP Runtime\.evaluate timed out after 8s on tab 1/);
+    await vi.advanceTimersByTimeAsync(8000);
+    await settled;
+  });
+
+  it('toolbar click on an attached-but-forgotten tab detaches it', async () => {
+    // The map is empty (worker restarted) but Chrome still has our debugger on tab 3.
+    await stub.fire('action.onClicked', { id: 3, url: 'https://a.test' });
+    await vi.waitFor(() => expect(stub.chrome.debugger.detach).toHaveBeenCalledWith({ tabId: 3 }));
+    expect(stub.chrome.debugger.attach).not.toHaveBeenCalled();
+  });
+
+  it('toolbar click on a dialog-wedged tab detaches it', async () => {
+    stub.cdp.script['Runtime.evaluate'] = { hang: true };
+    vi.useFakeTimers();
+    const click = stub.fire('action.onClicked', { id: 3, url: 'https://a.test' });
+    await vi.advanceTimersByTimeAsync(1500);
+    await click;
+    expect(stub.chrome.debugger.detach).toHaveBeenCalledWith({ tabId: 3 });
+    expect(stub.chrome.debugger.attach).not.toHaveBeenCalled();
+  });
+
+  it('attaches when the probe says the tab is not ours', async () => {
+    stub.cdp.script['Runtime.evaluate'] = { error: 'Debugger is not attached to the tab with id: 3.' };
+    await stub.fire('action.onClicked', { id: 3, url: 'https://a.test' });
+    await vi.waitFor(() => expect(mod.attached.has(3)).toBe(true));
+    expect(stub.chrome.debugger.attach).toHaveBeenCalledWith({ tabId: 3 }, '1.3');
+  });
+
+  it('shows an attach failure on the badge and title', async () => {
+    stub.cdp.script['Runtime.evaluate'] = { error: 'Debugger is not attached to the tab with id: 3.' };
+    stub.chrome.debugger.attach.mockRejectedValueOnce(
+      new Error('Another debugger is already attached to the tab with id: 3.'),
+    );
+    // A port must exist for diag frames to be posted.
+    share(9);
+    mod.ensureConnected();
+    await stub.fire('action.onClicked', { id: 3, url: 'https://a.test' });
+    await vi.waitFor(() => expect(stub.chrome.action.setBadgeText).toHaveBeenCalledWith({ tabId: 3, text: '!' }));
+    expect(stub.chrome.action.setTitle).toHaveBeenCalledWith(expect.objectContaining({
+      tabId: 3, title: expect.stringContaining('DevTools (or another debugger) is open'),
+    }));
+    expect(stub.posted).toContainEqual(expect.objectContaining({ type: 'event', event: 'diag', kind: 'attach-failed' }));
+    expect(mod.attached.has(3)).toBe(false);
+  });
+
+  it('maps known attach errors to plain text', () => {
+    expect(mod.friendlyAttachError('Cannot access a chrome:// URL')).toBe("Chrome doesn't allow sharing this page");
+    expect(mod.friendlyAttachError('No tab with given id 4.')).toBe('That tab is gone');
+    expect(mod.friendlyAttachError('weird')).toBe('weird');
+  });
+
+  it('rehydrate adopts tabs missing from storage', async () => {
+    stub.chrome.debugger.getTargets = vi.fn((cb: any) => cb([{ tabId: 5, attached: true, url: 'u', title: 't' }]));
+    await mod.rehydrate();
+    expect(mod.attached.has(5)).toBe(true);
+  });
+
+  it('rehydrate ignores attached targets that are not ours', async () => {
+    stub.chrome.debugger.getTargets = vi.fn((cb: any) => cb([{ tabId: 5, attached: true }]));
+    stub.cdp.script['Runtime.evaluate'] = { error: 'Debugger is not attached to the tab with id: 5.' };
+    await mod.rehydrate();
+    expect(mod.attached.has(5)).toBe(false);
   });
 });

@@ -46,11 +46,29 @@ const BADGE_COLOR = '#d29922';
 /** How long an action waits for the page to settle before reporting back. */
 const SETTLE_TIMEOUT_MS = 5000;
 
+/**
+ * Every CDP command is time-boxed. A page wedged by a native dialog, or a
+ * debugger session Chrome has quietly dropped, would otherwise hang the call
+ * until SAI's own 20 s timeout with no hint as to why.
+ */
+const CDP_TIMEOUT_MS = 8000;
+
+/** In-page cap for Runtime.evaluate, so a runaway page script is cut off too. */
+const EVALUATE_TIMEOUT_MS = 6000;
+
+/** How long the toolbar probe waits before treating a silent tab as ours. */
+const PROBE_TIMEOUT_MS = 1500;
+
+/** How long an attach failure stays on the badge. */
+const ATTACH_ERROR_BADGE_MS = 4000;
+
 /** tabId -> { url, title, state: 'attached' | 'reattaching' }. */
 const attached = new Map();
 
 let port = null;
 let connecting = false;
+/** Why the native port last closed; sent to SAI on the next hello. */
+let lastPortError = null;
 
 // ---------------------------------------------------------------------------
 // attachment state
@@ -69,8 +87,9 @@ async function persistAttached() {
 
 /**
  * The service worker can be torn down while tabs stay attached (the debugger
- * session outlives it). On restart, re-derive our map from the targets Chrome
- * still reports as ours rather than trusting storage blindly.
+ * session outlives it). On restart, rebuild the map by asking Chrome rather
+ * than trusting storage: storage is only a hint, and it can be empty while our
+ * debugger is still on a tab — which used to leave that tab un-reattachable.
  */
 async function rehydrate() {
   let stored = [];
@@ -80,25 +99,103 @@ async function rehydrate() {
   } catch {
     stored = [];
   }
-  if (!stored.length) return;
 
-  const targets = await new Promise((resolve) => {
+  const targets = await getTargets();
+  const candidates = new Set(stored);
+  for (const t of targets) {
+    if (t.attached && typeof t.tabId === 'number') candidates.add(t.tabId);
+  }
+
+  const adopted = [];
+  for (const tabId of candidates) {
+    if (attached.has(tabId)) continue;
+    if (!(await probeAttached(tabId))) continue;
+    const target = targets.find((t) => t.tabId === tabId);
+    attached.set(tabId, { url: target?.url, title: target?.title, state: 'attached' });
+    adopted.push(tabId);
+  }
+  await persistAttached();
+  await refreshBadge();
+  if (attached.size) ensureConnected();
+  diag('rehydrate', { stored: stored.length, adopted: adopted.length });
+}
+
+function getTargets() {
+  return new Promise((resolve) => {
     try {
       chrome.debugger.getTargets((t) => resolve(Array.isArray(t) ? t : []));
     } catch {
       resolve([]);
     }
   });
+}
 
-  for (const tabId of stored) {
-    const target = targets.find((t) => t.tabId === tabId && t.attached);
-    if (target) {
-      attached.set(tabId, { url: target.url, title: target.title, state: 'attached' });
-    }
+/**
+ * Is our debugger on this tab? A cheap command answers it: Chrome rejects it
+ * at once for a tab we aren't attached to. A tab that doesn't answer at all is
+ * attached but wedged (a native dialog blocks evaluation), so silence counts as
+ * ours.
+ */
+async function probeAttached(tabId) {
+  try {
+    await cdp(tabId, 'Runtime.evaluate', { expression: '1', returnByValue: true }, { timeoutMs: PROBE_TIMEOUT_MS });
+    return true;
+  } catch (err) {
+    return err instanceof CdpTimeoutError;
   }
-  await persistAttached();
-  await refreshBadge();
-  if (attached.size) ensureConnected();
+}
+
+/** Plain-language versions of the attach errors Chrome actually throws. */
+function friendlyAttachError(message) {
+  const m = String(message || '');
+  if (/Another debugger is already attached/i.test(m)) {
+    return 'DevTools (or another debugger) is open on this tab — close it and click again';
+  }
+  if (/Cannot access|chrome:\/\/|chrome-extension:\/\/|cannot be scripted/i.test(m)) {
+    return "Chrome doesn't allow sharing this page";
+  }
+  if (/No tab with given id/i.test(m)) return 'That tab is gone';
+  return m;
+}
+
+/** Flags a failed share on that tab's badge for a few seconds. */
+async function showAttachError(tabId, message) {
+  try {
+    await chrome.action.setBadgeText({ tabId, text: '!' });
+    await chrome.action.setTitle({ tabId, title: `Couldn't share this tab with SAI: ${message}` });
+  } catch {
+    /* cosmetic */
+  }
+  setTimeout(() => {
+    void (async () => {
+      try {
+        await chrome.action.setBadgeText({ tabId, text: '' });
+        await chrome.action.setTitle({ tabId, title: '' });
+      } catch { /* cosmetic */ }
+      await refreshBadge();
+    })();
+  }, ATTACH_ERROR_BADGE_MS);
+}
+
+/**
+ * The toolbar button. Decides attach-vs-detach from what Chrome says, not just
+ * from our map, which a worker restart can empty while the debugger stays on.
+ */
+async function toggleTab(tab) {
+  const ours = attached.has(tab.id) || (await probeAttached(tab.id));
+  if (ours) {
+    await detachTab(tab.id, { reason: 'user' });
+    return;
+  }
+  try {
+    await attachTab(tab);
+  } catch (err) {
+    const raw = String(err?.message || err);
+    const message = friendlyAttachError(raw);
+    diag('attach-failed', { tabId: tab.id, error: raw });
+    console.error('[sai-bridge] attach failed:', raw);
+    await showAttachError(tab.id, message);
+  }
 }
 
 async function refreshBadge() {
@@ -125,7 +222,7 @@ async function attachTab(tab) {
   await chrome.debugger.attach({ tabId: tab.id }, CDP_VERSION);
   // Page must be enabled before captureScreenshot is reliable on some targets.
   try {
-    await chrome.debugger.sendCommand({ tabId: tab.id }, 'Page.enable', {});
+    await cdp(tab.id, 'Page.enable', {});
   } catch {
     /* non-fatal: snapshot/read still work */
   }
@@ -136,7 +233,7 @@ async function attachTab(tab) {
   send({ type: 'event', event: 'attached', tabId: tab.id, url: tab.url, title: tab.title });
 }
 
-async function detachTab(tabId, { notify = true } = {}) {
+async function detachTab(tabId, { notify = true, reason = null } = {}) {
   try {
     await chrome.debugger.detach({ tabId });
   } catch {
@@ -145,7 +242,7 @@ async function detachTab(tabId, { notify = true } = {}) {
   attached.delete(tabId);
   await persistAttached();
   await refreshBadge();
-  if (notify) send({ type: 'event', event: 'detached', tabId });
+  if (notify) send({ type: 'event', event: 'detached', tabId, reason });
   if (!attached.size && port) {
     try { port.disconnect(); } catch { /* noop */ }
     port = null;
@@ -153,15 +250,14 @@ async function detachTab(tabId, { notify = true } = {}) {
 }
 
 chrome.action.onClicked.addListener((tab) => {
-  if (!tab?.id) return;
-  const run = attached.has(tab.id) ? detachTab(tab.id) : attachTab(tab);
-  run.catch((err) => console.error('[sai-bridge] toggle failed:', err));
+  if (!tab?.id) return undefined;
+  return toggleTab(tab).catch((err) => console.error('[sai-bridge] toggle failed:', err));
 });
 
-chrome.debugger.onDetach.addListener((source) => {
-  if (typeof source.tabId === 'number' && attached.has(source.tabId)) {
-    void detachTab(source.tabId);
-  }
+chrome.debugger.onDetach.addListener((source, reason) => {
+  if (typeof source.tabId !== 'number') return;
+  diag('detach', { tabId: source.tabId, reason, known: attached.has(source.tabId) });
+  if (attached.has(source.tabId)) void detachTab(source.tabId, { reason });
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
@@ -212,6 +308,8 @@ function ensureConnected() {
     const why = chrome.runtime.lastError?.message;
     if (why) console.warn('[sai-bridge] native port closed:', why);
     port = null;
+    // Recorded locally only: with the port gone there is no one to tell.
+    lastPortError = why || null;
   });
 
   send({
@@ -220,19 +318,63 @@ function ensureConnected() {
     version: chrome.runtime.getManifest().version,
     attachedTabIds: [...attached.keys()],
   });
+  if (lastPortError) {
+    diag('port-reconnected', { previousError: lastPortError });
+    lastPortError = null;
+  }
+}
+
+/** A diagnostic frame for SAI's devlog. Fire-and-forget, never throws. */
+function diag(kind, data = {}) {
+  send({ type: 'event', event: 'diag', kind, ...data });
 }
 
 // ---------------------------------------------------------------------------
 // CDP helpers
 // ---------------------------------------------------------------------------
 
-function cdp(tabId, method, params = {}) {
+class CdpTimeoutError extends Error {}
+
+/**
+ * In-flight CDP calls per tab, so a tab-wide event (a dialog opening, the
+ * debugger detaching) can fail them at once instead of letting each wait out
+ * its timeout.
+ */
+const inflight = new Map();
+
+function abortInflight(tabId, err) {
+  const set = inflight.get(tabId);
+  if (!set) return;
+  inflight.delete(tabId);
+  for (const fail of set) fail(err);
+}
+
+function cdp(tabId, method, params = {}, { timeoutMs = CDP_TIMEOUT_MS } = {}) {
   return new Promise((resolve, reject) => {
-    chrome.debugger.sendCommand({ tabId }, method, params, (result) => {
-      const err = chrome.runtime.lastError;
-      if (err) reject(new Error(err.message));
-      else resolve(result);
-    });
+    let set = inflight.get(tabId);
+    if (!set) inflight.set(tabId, (set = new Set()));
+    let timer = null;
+    const finish = () => {
+      clearTimeout(timer);
+      set.delete(fail);
+      if (!set.size && inflight.get(tabId) === set) inflight.delete(tabId);
+    };
+    const fail = (err) => { finish(); reject(err); };
+    set.add(fail);
+    timer = setTimeout(() => {
+      fail(new CdpTimeoutError(`CDP ${method} timed out after ${timeoutMs / 1000}s on tab ${tabId}`));
+    }, timeoutMs);
+    try {
+      chrome.debugger.sendCommand({ tabId }, method, params, (result) => {
+        const err = chrome.runtime.lastError;
+        if (!set.has(fail)) return; // already timed out or aborted
+        finish();
+        if (err) reject(new Error(err.message));
+        else resolve(result);
+      });
+    } catch (err) {
+      fail(err instanceof Error ? err : new Error(String(err)));
+    }
   });
 }
 
@@ -258,6 +400,7 @@ async function evaluateFn(tabId, source, opts) {
     expression,
     returnByValue: true,
     awaitPromise: false,
+    timeout: EVALUATE_TIMEOUT_MS,
   });
   if (res?.exceptionDetails) {
     const text = res.exceptionDetails.exception?.description || res.exceptionDetails.text;
@@ -558,4 +701,7 @@ async function handleRequest(frame) {
 
 // Exported for the unit tests only — Chrome loads this as a service worker and
 // never imports it.
-export { HANDLERS, handleRequest, attached, resolveTabId, KEYS };
+export {
+  HANDLERS, handleRequest, attached, resolveTabId, KEYS,
+  friendlyAttachError, rehydrate, probeAttached, ensureConnected, cdp, abortInflight,
+};

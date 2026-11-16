@@ -3,13 +3,16 @@
  * the way electron/browser-bridge-host.ts does, and SAI's call() round-trips
  * through it.
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as net from 'node:net';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import * as crypto from 'node:crypto';
 import * as bridge from '@electron/services/browserBridge';
+import { devlog } from '@electron/services/devlog';
+
+vi.mock('@electron/services/devlog', () => ({ devlog: vi.fn() }));
 
 const TOKEN = 'a'.repeat(64);
 
@@ -245,5 +248,17 @@ describe('browserBridge', () => {
     for (const method of bridge.BRIDGE_METHODS) {
       expect(method).not.toMatch(/^(Input|Runtime|Page|Network|Target)\./);
     }
+  });
+
+  it('writes extension diag frames and relay changes to the devlog', async () => {
+    const relay = await FakeRelay.connect();
+    await relay.next();
+    relay.send({ type: 'event', event: 'diag', kind: 'detach', reason: 'x', tabId: 1 });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(devlog).toHaveBeenCalledWith('browserBridge', 'relay-connected', expect.anything());
+    expect(devlog).toHaveBeenCalledWith('browserBridge', 'detach', expect.objectContaining({ reason: 'x' }));
+    relay.close();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(devlog).toHaveBeenCalledWith('browserBridge', 'relay-dropped', expect.objectContaining({ reason: 'browser disconnected' }));
   });
 });
