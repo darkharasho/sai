@@ -17,6 +17,7 @@ import { loadGuardCard } from '../../lib/loadGuardBuffer';
 import { buildPendingQuestionAnswer } from '../../lib/pendingQuestionAnswer';
 import { normalizeSlashCommands, type SlashCommandInfo } from '../../lib/slashCommands';
 import WaitingIndicator from './WaitingIndicator';
+import FollowUpIndicator from './FollowUpIndicator';
 import UserInputRequestPanel from './UserInputRequestPanel';
 import McpElicitationPanel from './McpElicitationPanel';
 
@@ -222,6 +223,8 @@ interface ChatPanelProps {
    * real completion. Consumed by Task 9 to render a waiting pill/indicator.
    */
   waiting?: { wait: WaitMeta; startedAtMs: number } | null;
+  /** Follow-up judge state for this scope (Claude only): the AI promised to pick back up. */
+  followUp?: { state: 'following' | 'resuming' | 'stalled'; waitingFor: string | null } | null;
   /** Background-work sidebar plumbing, passed straight to the wait pill. */
   liveBackgroundTaskCount?: number;
   onToggleBackgroundTasks?: () => void;
@@ -458,7 +461,7 @@ const LOAD_MORE_CHUNK = 30; // messages to load when scrolling up
 const LOAD_GUARD_ERROR_QUIET_MS = 15_000;
 
 
-export default function ChatPanel({ projectPath, overlayControl, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, availableModels, claudeOverrideState, aiProvider, codexModel, onCodexModelChange, codexModels, onCodexModelsRefresh, codexPermission, onCodexPermissionChange, codexEffort, onCodexEffortChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, kimiModel, onKimiModelChange, kimiModels, kimiApprovalMode, onKimiApprovalModeChange, initialMessages, onMessagesChange, onTurnComplete, onClaudeSessionId, onGeminiSessionId, onKimiSessionId, onCodexSessionId, activeFilePath, onFileOpen, isActive, isStreaming = false, awaitingQuestion = false, initialDraft, onDraftChange, initialContextItems, onContextItemsChange, messageQueue = [], onQueueAdd, onQueueRemove, onQueueShift, onQueuePromote, sessionId, terminalTabs = [], onSlashCommandsUpdate, claudeScope = 'chat', onOpenMcpPanel, initialPendingApproval = null, renderToolCall, activeMetaRuntime, mentionInsertRef: mentionInsertRefProp, waiting = null, liveBackgroundTaskCount, onToggleBackgroundTasks, backgroundTasksOpen, taskUiEnabled = false, backgroundTasks, onStopBackgroundTask, claudeSessionId }: ChatPanelProps) {
+export default function ChatPanel({ projectPath, overlayControl, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, availableModels, claudeOverrideState, aiProvider, codexModel, onCodexModelChange, codexModels, onCodexModelsRefresh, codexPermission, onCodexPermissionChange, codexEffort, onCodexEffortChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, kimiModel, onKimiModelChange, kimiModels, kimiApprovalMode, onKimiApprovalModeChange, initialMessages, onMessagesChange, onTurnComplete, onClaudeSessionId, onGeminiSessionId, onKimiSessionId, onCodexSessionId, activeFilePath, onFileOpen, isActive, isStreaming = false, awaitingQuestion = false, initialDraft, onDraftChange, initialContextItems, onContextItemsChange, messageQueue = [], onQueueAdd, onQueueRemove, onQueueShift, onQueuePromote, sessionId, terminalTabs = [], onSlashCommandsUpdate, claudeScope = 'chat', onOpenMcpPanel, initialPendingApproval = null, renderToolCall, activeMetaRuntime, mentionInsertRef: mentionInsertRefProp, waiting = null, followUp = null, liveBackgroundTaskCount, onToggleBackgroundTasks, backgroundTasksOpen, taskUiEnabled = false, backgroundTasks, onStopBackgroundTask, claudeSessionId }: ChatPanelProps) {
   const [messages, setMessagesRaw] = useState<ChatMessageType[]>(() => {
     const initial = initialMessages || [];
     // Anything present at mount is history, not a fresh arrival — a workspace/
@@ -2771,7 +2774,16 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
             </TaskRegistryContext.Provider>
             {isWaiting && waiting && (
               <div className="chat-waiting-row">
-                <WaitingIndicator wait={waiting.wait} startedAtMs={waiting.startedAtMs} onCancel={handleCancelWait} liveTaskCount={liveBackgroundTaskCount} onToggleTasks={onToggleBackgroundTasks} tasksOpen={backgroundTasksOpen} />
+                <WaitingIndicator wait={waiting.wait} startedAtMs={waiting.startedAtMs} onCancel={handleCancelWait} liveTaskCount={liveBackgroundTaskCount} onToggleTasks={onToggleBackgroundTasks} tasksOpen={backgroundTasksOpen} label={followUp?.state === 'following' ? `Waiting on ${followUp.waitingFor ?? 'this'}` : undefined} />
+              </div>
+            )}
+            {followUp && !isWaiting && !streamingForDisplay && (
+              <div className="chat-waiting-row">
+                <FollowUpIndicator
+                  state={followUp.state}
+                  waitingFor={followUp.waitingFor}
+                  onCheckNow={() => { void handleSend(followUp.waitingFor ? `Check on ${followUp.waitingFor} and continue where you left off.` : 'Check on what you were waiting for and continue where you left off.'); }}
+                />
               </div>
             )}
           </>

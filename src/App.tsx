@@ -64,6 +64,7 @@ import { mergeSessionRefresh } from './lib/sessionRefresh';
 import { turnEndIsStale } from './lib/turnSeqGuard';
 import { resolveClaudeConfig, setWorkspaceOverride, sanitizeOverrideMap, type ClaudeOverrideMap } from './lib/claudeWorkspaceConfig';
 import type { WaitMeta } from '../electron/services/waitClassifier';
+import type { FollowUpState } from '../electron/services/followupState';
 import { isTerminalDetail, type BackgroundTaskDetail } from '../electron/services/claudeBackend/backgroundTasks';
 import { WAKEUP_GRACE_MS } from '../electron/services/waitClassifier';
 import { hasChatListener, scopeMessageBuffer } from './lib/chatFrameGate';
@@ -339,9 +340,22 @@ export default function App() {
   // plan review. Scope-keyed so one chat's turn ending can't clear a sibling
   // chat's waiting state; the workspace-level set is derived below.
   const [awaitingQuestionScopes, setAwaitingQuestionScopes] = useState<Set<string>>(new Set());
+  // Follow-up judge: scopes whose AI promised to pick back up (⟳) or stalled (⚠).
+  const [followUpScopes, setFollowUpScopes] = useState<Map<string, { state: Exclude<FollowUpState, 'none'>; waitingFor: string | null }>>(new Map());
+  // Stalled follow-ups count as "needs your attention" for the sidebar markers
+  // only; the awaitingQuestion prop deliberately stays on awaitingQuestionScopes.
+  const attentionScopes = useMemo(() => {
+    let out: Set<string> | null = null;
+    for (const [k, v] of followUpScopes) {
+      if (v.state !== 'stalled') continue;
+      if (!out) out = new Set(awaitingQuestionScopes);
+      out.add(k);
+    }
+    return out ?? awaitingQuestionScopes;
+  }, [awaitingQuestionScopes, followUpScopes]);
   const awaitingQuestionWorkspaces = useMemo(
-    () => questionWorkspaces(awaitingQuestionScopes),
-    [awaitingQuestionScopes],
+    () => questionWorkspaces(attentionScopes),
+    [attentionScopes],
   );
   // Mirror for the claude:message handler (empty-deps effect) to do presence
   // checks without stale closures — drives notification-count symmetry.
@@ -2041,6 +2055,20 @@ export default function App() {
           }
         }
       }
+      if (msg.type === 'followup') {
+        // Never turnSeq-guarded: 'none' carries the judged (older) turn's seq and
+        // the backend already drops stale verdicts.
+        setFollowUpScopes(prev => {
+          if (msg.state === 'none') {
+            if (!prev.has(scopeKey)) return prev;
+            const next = new Map(prev); next.delete(scopeKey); return next;
+          }
+          const cur = prev.get(scopeKey);
+          if (cur && cur.state === msg.state && cur.waitingFor === (msg.waitingFor ?? null)) return prev;
+          return new Map(prev).set(scopeKey, { state: msg.state, waitingFor: msg.waitingFor ?? null });
+        });
+        return;
+      }
       if (msg.type === 'scope_suspended') {
         setSuspendedScopes(prev => prev.has(scopeKey) ? prev : new Set(prev).add(scopeKey));
         // Persist so the yellow indicator survives an app restart. Regular
@@ -2084,6 +2112,10 @@ export default function App() {
           setChatStreamingWorkspaces(prev => prev.has(msg.projectPath) ? prev : new Set(prev).add(msg.projectPath));
         }
         setStreamingScopes(prev => prev.has(scopeKey) ? prev : new Set(prev).add(scopeKey));
+        setFollowUpScopes(prev => {
+          if (!prev.has(scopeKey)) return prev;
+          const next = new Map(prev); next.delete(scopeKey); return next;
+        });
         // Clear any waiting state for this scope — the turn has resumed.
         setWaitingScopes(prev => {
           if (!prev.has(scopeKey)) return prev;
@@ -3382,6 +3414,7 @@ export default function App() {
                       : streamingScopes.has(`${wsPath}:chat`) &&
                         chatStreamingSessionRef.current.get(wsPath) === ((aiProvider === 'kimi' ? ws.activeSession.kimiSessionId : ws.activeSession.geminiSessionId) ?? null)
                   }
+                  followUp={aiProvider === 'claude' ? followUpScopes.get(`${wsPath}:${ws.activeSession.id}`) ?? null : null}
                   waiting={
                     // waits are claude-only: waitingScopes never holds gemini/codex entries
                     aiProvider === 'claude'
@@ -3651,8 +3684,8 @@ export default function App() {
   // sidebar's blue "waiting for your answer" triangle.
   const questionSessionIds = useMemo(() => {
     if (!activeProjectPath) return new Set<string>();
-    return questionSessionIdsFor(awaitingQuestionScopes, activeProjectPath);
-  }, [awaitingQuestionScopes, activeProjectPath]);
+    return questionSessionIdsFor(attentionScopes, activeProjectPath);
+  }, [attentionScopes, activeProjectPath]);
 
   const suspendedSessionIds = useMemo(() => {
     if (!activeProjectPath) return new Set<string>();
