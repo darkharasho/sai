@@ -3,6 +3,8 @@ import { spawnEnv } from './claude';
 import { devlog, devlogSnip } from './devlog';
 import type { FollowUpVerdict } from './followupState';
 
+const IS_WIN = process.platform === 'win32';
+
 export const FOLLOWUP_JUDGE_TIMEOUT_MS = 15_000;
 export const FOLLOWUP_JUDGE_MAX_CHARS = 2000;
 
@@ -49,14 +51,14 @@ export function makeCliJudgeRunner(claudePath: string | undefined): JudgeRunner 
     const proc = spawn(claudePath ?? 'claude', [
       '-p', prompt, '--output-format', 'text', '--max-turns', '1', '--model', 'haiku',
       '--no-session-persistence', '--tools', '', '--strict-mcp-config',
-    ], { env: spawnEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
+    ], { env: spawnEnv(), stdio: ['ignore', 'pipe', 'pipe'], shell: IS_WIN });
     let out = '';
     proc.stdout?.on('data', (d: Buffer) => { out += d.toString(); });
     proc.stderr?.on('data', () => {});
     const onAbort = () => { proc.kill(); reject(new Error('aborted')); };
     signal.addEventListener('abort', onAbort, { once: true });
     proc.on('error', (e) => { signal.removeEventListener('abort', onAbort); reject(e); });
-    proc.on('exit', (code) => {
+    proc.on('close', (code) => {
       signal.removeEventListener('abort', onAbort);
       if (code === 0) resolve(out); else reject(new Error(`claude exited ${code}`));
     });
