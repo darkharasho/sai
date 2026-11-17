@@ -3059,6 +3059,12 @@ export default function App() {
         for (const k of removedKeys) next.delete(k);
         return next;
       });
+      setFollowUpScopes(prev => {
+        if (!removedKeys.some(k => prev.has(k))) return prev;
+        const next = new Map(prev);
+        for (const k of removedKeys) next.delete(k);
+        return next;
+      });
       setSuspendedScopes(prev => {
         if (!removedKeys.some(k => prev.has(k))) return prev;
         const next = new Set(prev);
