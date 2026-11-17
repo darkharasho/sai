@@ -50,6 +50,8 @@ import { buildSdkOptions } from './sdkOptions';
 import { buildSudoPreToolUseHook, getSudoBroker } from '../sudo';
 import { mapSdkMessage, type MapperState } from './sdkMessageMap';
 import { sweepIdleScopes, IDLE_SCOPE_MS, SWEEP_INTERVAL_MS } from '../idleScopeSweep';
+import { deriveFollowUpState, nextFollowUpDeadline, type FollowUpVerdict, type FollowUpState, type FollowUpInput } from '../followupState';
+import { judgeFollowUp, makeCliJudgeRunner } from '../followupJudge';
 import type {
   ClaudeBackend,
   StartArgs,
@@ -181,6 +183,31 @@ interface ScopeSession {
   /** Prompt timer for the settle/backstop checks (the idle sweep is only
    *  5-minutely). */
   backgroundWaitTimer: ReturnType<typeof setTimeout> | null;
+  /** Bumped by every user send (not by runtime resume turns). Stamps task
+   *  starts so the follow-up judge only counts work begun since the user's
+   *  last message as a wake source. */
+  userTurnSeq: number;
+  /** task_id → userTurnSeq at task_started, for live tasks only (deleted with
+   *  liveTasks). A dev server started an hour ago must not make every
+   *  "I'll check back" read as ⟳ forever. */
+  liveTaskUserTurn: Map<string, number>;
+  /** The follow-up indicator for the last naturally-ended turn, or null.
+   *  Set only when the judge said followUp:true; cleared by any new turn. */
+  followUp: {
+    verdict: FollowUpVerdict;
+    /** turnSeq of the judged turn. */
+    turnSeq: number;
+    /** Epoch ms ⟳ first began (hold-cap clock), or null. */
+    followingSince: number | null;
+    /** Epoch ms the wake sources went to zero (resume-grace clock), or null. */
+    drainedAt: number | null;
+    lastEmitted: FollowUpState;
+    /** Re-evaluation timer at the next deadline (grace / cap / wakeup). */
+    timer: ReturnType<typeof setTimeout> | null;
+    /** Wake source alive at the last evaluation — drainedAt is stamped on
+     *  the alive → gone edge. */
+    wakeAlive: boolean;
+  } | null;
   /** Stored for the idle sweep so we never need to parse the scope key. */
   _projectPath: string;
   _scopeName: string;
@@ -364,6 +391,13 @@ export interface SdkBackendDeps {
    * usage:update channel the OAuth poller feeds).
    */
   publishUsage?: (data: Record<string, unknown>) => void;
+  /**
+   * Read a naturally-ended turn's closing text for follow-up intent. Never
+   * awaited in the drain loop. Default: the Haiku CLI judge — but only when
+   * queryFn is NOT injected; with a fake queryFn (tests) the default is null
+   * (no judge) so tests never spawn `claude`.
+   */
+  judgeFollowUp?: ((finalText: string) => Promise<FollowUpVerdict | null>) | null;
 }
 
 /** Lazy-required so tests (node env, electron absent) never load usage.ts. */
@@ -397,6 +431,7 @@ export class SdkBackend implements ClaudeBackend {
   private readonly _notify: SdkNotify;
   private readonly _buildChatMcpServer?: (workspace: string) => McpSdkServerConfigWithInstance | undefined;
   private readonly _publishUsage: (data: Record<string, unknown>) => void;
+  private readonly _judgeFollowUp: ((finalText: string) => Promise<FollowUpVerdict | null>) | null;
   private idleSweepTimer: ReturnType<typeof setInterval> | null = null;
   /** Epoch ms of the last get_usage control request (all scopes). */
   private lastUsageFetchAt = 0;
@@ -419,6 +454,13 @@ export class SdkBackend implements ClaudeBackend {
     this._notify = deps?.notify ?? defaultNotify;
     this._buildChatMcpServer = deps?.buildChatMcpServer;
     this._publishUsage = deps?.publishUsage ?? defaultPublishUsage;
+    if (deps?.judgeFollowUp !== undefined) {
+      this._judgeFollowUp = deps.judgeFollowUp;
+    } else if (deps?.queryFn === undefined) {
+      this._judgeFollowUp = (text) => judgeFollowUp(text, makeCliJudgeRunner(this._resolveClaudePath()));
+    } else {
+      this._judgeFollowUp = null;
+    }
     this._startIdleSweep();
   }
 
@@ -485,6 +527,7 @@ export class SdkBackend implements ClaudeBackend {
     const session = this.sessions.get(scopeKey);
     if (!session || this._isBusyForMcpRestart(session)) return;
     if (session.sessionId && !session.warm) this.pendingResume.set(scopeKey, session.sessionId);
+    this._followUpOnQueryClose(session, scopeKey);
     session.query.close();
     this.sessions.delete(scopeKey);
     this._retireTaskDetails(session);
@@ -592,6 +635,8 @@ export class SdkBackend implements ClaudeBackend {
         // A warm session holds no conversation — resuming its id would just
         // reattach to an empty transcript.
         if (session.sessionId && !session.warm) this.pendingResume.set(scopeKey, session.sessionId);
+        // A new user turn is starting: the old indicator clears (not stalls).
+        this._clearFollowUp(session);
         session.query.close();
         this.sessions.delete(scopeKey);
         this._retireTaskDetails(session);
@@ -611,6 +656,7 @@ export class SdkBackend implements ClaudeBackend {
 
       this._beginTurn(session, projectPath, effectiveScope);
       session.clearFinishedOnWait = true;
+      session.userTurnSeq += 1;
       // Workspace auto-suspend watches this clock; without it a workspace with
       // only SDK activity looks quiescent and gets suspended mid-stream. Also
       // re-activates a suspended registry entry so the dropdown flips it back.
@@ -649,6 +695,7 @@ export class SdkBackend implements ClaudeBackend {
       // the recovery done always unsticks the UI.
       const session = this.sessions.get(scopeKey);
       const turnSeq = session?.turnSeq ?? null;
+      if (session) this._followUpOnQueryClose(session, scopeKey);
       try { session?.query.close(); } catch { /* already dead */ }
       this.sessions.delete(scopeKey);
       this._retireTaskDetails(session);
@@ -800,6 +847,7 @@ export class SdkBackend implements ClaudeBackend {
       // id is stashed for resume when it's closed (sweep/config restart).
       if (this._isBusy(session)) return;
       this._resolveGatesForScope(scopeKey, 'Session switched');
+      this._followUpOnQueryClose(session, scopeKey);
       session.query.close();
       this.sessions.delete(scopeKey);
       this._retireTaskDetails(session);
@@ -886,7 +934,8 @@ export class SdkBackend implements ClaudeBackend {
       this.pendingGates.delete(toolUseId);
       gate.resolve({ behavior: 'deny', message: 'Shutting down' });
     }
-    for (const session of this.sessions.values()) {
+    for (const [scopeKey, session] of this.sessions) {
+      this._followUpOnQueryClose(session, scopeKey);
       session.heldToolUses.clear();
       if (session.backgroundWaitTimer) {
         clearTimeout(session.backgroundWaitTimer);
@@ -1046,6 +1095,7 @@ export class SdkBackend implements ClaudeBackend {
     session.lastActivityAt = Date.now();
     session.awaitingInput = false;
     this._resetWaitTracking(session);
+    this._clearFollowUp(session);
 
     devlog('claude-sdk', 'beginTurn', {
       projectPath,
@@ -1290,6 +1340,9 @@ export class SdkBackend implements ClaudeBackend {
       backgroundWaitOpen: false,
       backgroundSettleAt: null,
       backgroundWaitTimer: null,
+      userTurnSeq: 0,
+      liveTaskUserTurn: new Map(),
+      followUp: null,
       _projectPath: projectPath,
       _scopeName: scope ?? 'chat',
     };
@@ -1387,6 +1440,7 @@ export class SdkBackend implements ClaudeBackend {
       switch (m.subtype) {
         case 'task_started':
           session.liveTasks.set(id, 'running');
+          session.liveTaskUserTurn.set(id, session.userTurnSeq);
           if (typeof m.task_type === 'string') session.liveTaskTypes.set(id, m.task_type);
           break;
         case 'task_progress':
@@ -1397,6 +1451,7 @@ export class SdkBackend implements ClaudeBackend {
           if (isTerminalTaskStatus(status)) {
             session.liveTasks.delete(id);
             session.liveTaskTypes.delete(id);
+            session.liveTaskUserTurn.delete(id);
             session.sawTaskSettled = true;
           } else if (typeof status === 'string') session.liveTasks.set(id, status);
           break;
@@ -1405,6 +1460,7 @@ export class SdkBackend implements ClaudeBackend {
           // Always terminal ('completed' | 'failed' | 'stopped').
           session.liveTasks.delete(id);
           session.liveTaskTypes.delete(id);
+          session.liveTaskUserTurn.delete(id);
           session.sawTaskSettled = true;
           break;
       }
@@ -1424,6 +1480,7 @@ export class SdkBackend implements ClaudeBackend {
       turnSeq: session.turnSeq,
     });
     this._armBackgroundWaitCheck(session, scopeKey);
+    if (session.followUp) this._evaluateFollowUp(session, scopeKey);
   }
 
   /** Schedule the next background-wait check: the settle window while the pill
@@ -1697,6 +1754,8 @@ export class SdkBackend implements ClaudeBackend {
               session.turnSeq += 1;
               session.activeTurnSeq = session.turnSeq;
               this._resetWaitTracking(session);
+              // An autonomous resume is a new turn too: ⟳/⚠ clears.
+              this._clearFollowUp(session);
               this._emit({ ...e, projectPath, scope: effectiveScope, sessionId: session.sessionId ?? null, turnSeq: session.turnSeq });
             } else if (e.type === 'result' || e.type === 'done') {
               this._emit({ ...e, projectPath, scope: effectiveScope, turnSeq: session.activeTurnSeq, ...(wait ? { wait } : {}), ...(producedNothing ? { continuation: true } : {}) });
@@ -1796,6 +1855,14 @@ export class SdkBackend implements ClaudeBackend {
                 });
               }, 500);
             }
+            // Follow-up judge: natural ends only, fire-and-forget — never
+            // awaited here and never able to throw into the drain.
+            const naturalEnd = rawMsg.subtype === 'success'
+              && !rawMsg.is_error
+              && (rawMsg.terminal_reason === 'completed' || rawMsg.terminal_reason == null)
+              && !superseded
+              && !producedNothing;
+            if (naturalEnd) this._runFollowUpJudge(session, scopeKey, String(rawMsg.result ?? ''));
           }
 
           // Async-launch tool_results: the runtime can background a launch the
@@ -1897,6 +1964,7 @@ export class SdkBackend implements ClaudeBackend {
           if (session.mapperState.streaming) {
             this._emit({ type: 'done', projectPath, scope: effectiveScope, turnSeq: session.turnSeq });
           }
+          this._followUpOnQueryClose(session, scopeKey);
           this.sessions.delete(scopeKey);
           this._retireTaskDetails(session);
         }
@@ -1921,6 +1989,7 @@ export class SdkBackend implements ClaudeBackend {
         this._emit({ type: 'done', projectPath, scope: session._scopeName, turnSeq: session.turnSeq });
       }
       this._dropBackgroundWait(session);
+      this._followUpOnQueryClose(session, scopeKey);
       if (session.sessionId && !session.warm) this.pendingResume.set(scopeKey, session.sessionId);
       session.query.close();
       this.sessions.delete(scopeKey);
@@ -1986,6 +2055,8 @@ export class SdkBackend implements ClaudeBackend {
       const scopeKey = toScopeKey(projectPath, scope === 'chat' ? undefined : scope);
       const session = this.sessions.get(scopeKey);
       if (!session) return;
+      // ⟳ → ⚠ now: the query (and any watcher in it) is about to die.
+      this._followUpOnQueryClose(session, scopeKey);
       // Delete first: the drain's finally then sees the session gone and skips
       // its own streaming done (the one below covers it).
       this.sessions.delete(scopeKey);
@@ -2013,6 +2084,142 @@ export class SdkBackend implements ClaudeBackend {
       session.backgroundWaitOpen = false;
       this._emit({ type: 'done', projectPath: session._projectPath, scope: session._scopeName, turnSeq: null });
     }
+  }
+
+  // ─── Follow-up indicator ───────────────────────────────────────────────────
+
+  /** Run the judge on a naturally-ended turn's closing text. The verdict is
+   *  dropped if any new turn (user send or autonomous resume — both bump
+   *  turnSeq) began, or the session was replaced, before it landed. */
+  private _runFollowUpJudge(session: ScopeSession, scopeKey: string, finalText: string): void {
+    const judge = this._judgeFollowUp;
+    if (!judge) return;
+    const turnSeq = session.turnSeq;
+    const started = Date.now();
+    let pending: Promise<FollowUpVerdict | null>;
+    try { pending = Promise.resolve(judge(finalText)); } catch (err) { pending = Promise.reject(err); }
+    pending.then((verdict) => {
+      if (this.sessions.get(scopeKey) !== session || session.turnSeq !== turnSeq || session.mapperState.streaming) {
+        devlog('followupJudge', 'verdict.dropped', {
+          scope: session._scopeName, turnSeq, liveTurnSeq: session.turnSeq,
+          sessionGone: this.sessions.get(scopeKey) !== session, streaming: session.mapperState.streaming,
+        });
+        return;
+      }
+      devlog('followupJudge', 'verdict.applied', {
+        scope: session._scopeName, turnSeq, followUp: verdict?.followUp ?? null,
+        waitingFor: verdict?.waitingFor ?? null, latencyMs: Date.now() - started,
+      });
+      if (!verdict?.followUp) return;
+      if (session.followUp?.timer) clearTimeout(session.followUp.timer);
+      const now = this._now();
+      const wakeAlive = this._followUpWakeAlive(session, now);
+      session.followUp = {
+        verdict,
+        turnSeq,
+        followingSince: null,
+        // Pinned for a background resume with nothing visibly live: the runtime
+        // may already have a resume queued, so start in the resume grace.
+        drainedAt: !wakeAlive && session.pendingBackgroundResume ? now : null,
+        lastEmitted: 'none',
+        timer: null,
+        wakeAlive,
+      };
+      this._evaluateFollowUp(session, scopeKey);
+    }).catch((err) => {
+      devlog('followupJudge', 'error', { scope: session._scopeName, turnSeq, error: err instanceof Error ? err.message : String(err) });
+    });
+  }
+
+  /** A wake source is a live task started since the user's last message, or a
+   *  scheduled wakeup whose deadline is still ahead. Facts only — never the judge. */
+  private _followUpWakeAlive(session: ScopeSession, now: number): boolean {
+    for (const id of session.liveTasks.keys()) {
+      if (session.liveTaskUserTurn.get(id) === session.userTurnSeq) return true;
+    }
+    return session.pendingWakeup && session.wakeupDeadline != null && now < session.wakeupDeadline;
+  }
+
+  /** Recompute the follow-up state from the ledger, emit on change, and arm one
+   *  timer for the next deadline (resume grace, hold cap or wakeup lapse).
+   *  queryAlive defaults to "this session still owns its scope". Never throws. */
+  private _evaluateFollowUp(session: ScopeSession, scopeKey: string, queryAlive?: boolean): void {
+    const fu = session.followUp;
+    if (!fu) return;
+    try {
+      const now = this._now();
+      const alive = queryAlive ?? this.sessions.get(scopeKey) === session;
+      const wakeAlive = alive && this._followUpWakeAlive(session, now);
+      if (fu.wakeAlive && !wakeAlive) fu.drainedAt = now;
+      fu.wakeAlive = wakeAlive;
+      const input: FollowUpInput = {
+        verdict: fu.verdict,
+        wakeSourceAlive: wakeAlive,
+        queryAlive: alive,
+        now,
+        followingSince: fu.followingSince,
+        drainedAt: fu.drainedAt,
+      };
+      const state = deriveFollowUpState(input);
+      if (state === 'following' && fu.followingSince === null) {
+        fu.followingSince = now;
+        input.followingSince = now;
+      }
+
+      if (fu.timer) { clearTimeout(fu.timer); fu.timer = null; }
+      if (alive) {
+        let deadline = nextFollowUpDeadline(input);
+        // nextFollowUpDeadline knows nothing of scheduled wakeups: re-check when
+        // the wakeup lapses so ⟳ moves to the resume grace on time.
+        if (session.pendingWakeup && session.wakeupDeadline != null && now < session.wakeupDeadline) {
+          deadline = deadline == null ? session.wakeupDeadline : Math.min(deadline, session.wakeupDeadline);
+        }
+        if (deadline != null) {
+          fu.timer = setTimeout(() => {
+            fu.timer = null;
+            if (session.followUp === fu) this._evaluateFollowUp(session, scopeKey);
+          }, Math.max(0, deadline - now));
+          fu.timer.unref?.();
+        }
+      }
+
+      if (state !== fu.lastEmitted) this._emitFollowUp(session, fu, state);
+    } catch (err) {
+      devlog('followupJudge', 'error', { scope: session._scopeName, stage: 'evaluate', error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  private _emitFollowUp(session: ScopeSession, fu: NonNullable<ScopeSession['followUp']>, state: FollowUpState): void {
+    devlog('followupJudge', 'state', {
+      scope: session._scopeName, from: fu.lastEmitted, to: state, waitingFor: fu.verdict.waitingFor, turnSeq: fu.turnSeq,
+    });
+    fu.lastEmitted = state;
+    this._emit({
+      type: 'followup',
+      projectPath: session._projectPath,
+      scope: session._scopeName,
+      state,
+      waitingFor: fu.verdict.waitingFor,
+      turnSeq: fu.turnSeq,
+    });
+  }
+
+  /** A new turn began: drop the indicator, telling the renderer if it showed one. */
+  private _clearFollowUp(session: ScopeSession): void {
+    const fu = session.followUp;
+    if (!fu) return;
+    if (fu.timer) { clearTimeout(fu.timer); fu.timer = null; }
+    session.followUp = null;
+    if (fu.lastEmitted !== 'none') this._emitFollowUp(session, fu, 'none');
+  }
+
+  /** The scope's query is closing (suspend, sweep, chat switch, MCP/config
+   *  restart, drain death, shutdown): nothing can resume, so ⟳ flips to ⚠ now.
+   *  The renderer keeps ⚠; the backend drops the state with the session. */
+  private _followUpOnQueryClose(session: ScopeSession, scopeKey: string): void {
+    if (!session.followUp) return;
+    this._evaluateFollowUp(session, scopeKey, false);
+    if (session.followUp?.timer) { clearTimeout(session.followUp.timer); session.followUp.timer = null; }
   }
 
   private _startIdleSweep(): void {

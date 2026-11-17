@@ -82,6 +82,7 @@ import { parseScopeTag } from '../../../electron/services/loadGuard/scopeTag';
 import { SdkBackend } from '../../../electron/services/claudeBackend/sdkBackend';
 import { CHAT_TASKS_NUDGE, CHAT_TASK_CARDS_NUDGE } from '../../../electron/services/chatNudges';
 import { BACKGROUND_WAIT_SETTLE_MS, BACKGROUND_WAIT_IDLE_MS } from '../../../electron/services/waitClassifier';
+import { FOLLOWUP_RESUME_GRACE_MS, FOLLOWUP_HOLD_CAP_MS } from '../../../electron/services/followupState';
 import {
   __resetMcpRuntimeStatusForTests,
   getMcpRuntimeStatus,
@@ -3318,5 +3319,330 @@ describe('SdkBackend live MCP control', () => {
       __resetMcpRuntimeStatusForTests();
       backend.destroy();
     });
+  });
+});
+
+// ─── Follow-up judge ──────────────────────────────────────────────────────────
+// After a natural turn end a cheap judge reads the closing text for "I'll pick
+// this back up" intent; the task ledger decides whether anything will deliver
+// on it (⟳ following / resuming) or not (⚠ stalled).
+
+describe('follow-up judge', () => {
+  let emits: Record<string, unknown>[];
+  beforeEach(() => { emits = []; });
+
+  /** A query whose frames are pushed by the test, live until close(). */
+  function makeLiveQuery() {
+    const queue: any[] = [];
+    let wake: (() => void) | null = null;
+    let closed = false;
+    async function* gen() {
+      while (!closed) {
+        if (queue.length) { yield queue.shift(); continue; }
+        await new Promise<void>((r) => { wake = r; });
+      }
+    }
+    const iterator = gen();
+    const q: any = {
+      interrupt: vi.fn().mockResolvedValue(undefined),
+      close: vi.fn(() => { closed = true; const w = wake; wake = null; w?.(); }),
+      [Symbol.asyncIterator]() { return iterator; },
+    };
+    const push = (...msgs: any[]) => { queue.push(...msgs); const w = wake; wake = null; w?.(); };
+    return { q, push };
+  }
+
+  function deferred<T>() {
+    let resolve!: (v: T) => void;
+    let reject!: (e: unknown) => void;
+    const promise = new Promise<T>((res, rej) => { resolve = res; reject = rej; });
+    return { promise, resolve, reject };
+  }
+
+  const flush = () => new Promise((r) => setTimeout(r, 20));
+  const TEXT = (t: string) => ({ type: 'assistant', message: { content: [{ type: 'text', text: t }] } });
+  const RESULT = (text: string, extra: Record<string, unknown> = {}) => ({
+    type: 'result', subtype: 'success', is_error: false, result: text,
+    num_turns: 1, terminal_reason: 'completed', duration_ms: 5, ...extra,
+  });
+  const TSTART = (id: string, type = 'local_bash') => ({ type: 'system', subtype: 'task_started', task_id: id, task_type: type, description: 'gh run watch', session_id: 's' });
+  const TDONE = (id: string) => ({ type: 'system', subtype: 'task_notification', task_id: id, status: 'completed', output_file: '/tmp/o', summary: 'done', session_id: 's' });
+  const followups = () => emits.filter((e) => e.type === 'followup');
+
+  function setup(judge: ReturnType<typeof vi.fn> | null, omitJudge = false) {
+    const live = makeLiveQuery();
+    const backend = new SdkBackend({
+      queryFn: vi.fn(() => live.q) as any,
+      emit: (p) => emits.push(p),
+      resolveClaudePath: () => undefined,
+      notify: { approval: vi.fn(), question: vi.fn(), planReview: vi.fn(), completion: vi.fn() },
+      ...(omitJudge ? {} : { judgeFollowUp: judge as any }),
+    });
+    const send = (message = 'go') => backend.send({ projectPath: PROJECT, message, scope: SCOPE, permMode: 'bypass' });
+    /** Push frames and wait until they have drained. */
+    const feed = async (...msgs: any[]) => { live.push(...msgs); await flush(); };
+    const session = () => (backend as any).sessions.get(`${PROJECT} ${SCOPE}`);
+    return { backend, live, send, feed, session };
+  }
+
+  it('judges a natural end with the result text', async () => {
+    const judge = vi.fn().mockResolvedValue(null);
+    const { backend, send, feed } = setup(judge);
+    send();
+    await feed(TEXT("I'll watch CI"), RESULT("I'll watch CI"));
+    expect(judge).toHaveBeenCalledTimes(1);
+    expect(judge).toHaveBeenCalledWith("I'll watch CI");
+    backend.destroy();
+  });
+
+  it('does not judge an error result', async () => {
+    const judge = vi.fn().mockResolvedValue(null);
+    const { backend, send, feed } = setup(judge);
+    send();
+    await feed(TEXT('x'), RESULT("I'll watch CI", { subtype: 'error_during_execution', is_error: true }));
+    expect(judge).not.toHaveBeenCalled();
+    backend.destroy();
+  });
+
+  it('does not judge an interrupted turn', async () => {
+    const judge = vi.fn().mockResolvedValue(null);
+    const { backend, send, feed } = setup(judge);
+    send();
+    await feed(TEXT("I'll watch CI"));
+    backend.interrupt(PROJECT, SCOPE);
+    await feed(RESULT("I'll watch CI"));
+    expect(judge).not.toHaveBeenCalled();
+    backend.destroy();
+  });
+
+  it('does not judge a continuation (num_turns 0 + empty text)', async () => {
+    const judge = vi.fn().mockResolvedValue(null);
+    const { backend, send, feed } = setup(judge);
+    send();
+    await feed(RESULT('', { num_turns: 0 }));
+    expect(judge).not.toHaveBeenCalled();
+    backend.destroy();
+  });
+
+  it('does not judge a superseded turn', async () => {
+    const judge = vi.fn().mockResolvedValue(null);
+    const { backend, send, feed } = setup(judge);
+    send('one');
+    await feed(TEXT('first'));
+    send('two'); // mid-stream: the first turn's result is now superseded
+    await feed(RESULT("I'll watch CI (old)"));
+    expect(judge).not.toHaveBeenCalled();
+    await feed(TEXT('second'), RESULT('second done'));
+    expect(judge).toHaveBeenCalledTimes(1);
+    expect(judge).toHaveBeenCalledWith('second done');
+    backend.destroy();
+  });
+
+  it('follow-up + a task started this user turn still live → following, waitingFor passed through', async () => {
+    const judge = vi.fn().mockResolvedValue({ followUp: true, waitingFor: 'CI for PR #42' });
+    const { backend, send, feed } = setup(judge);
+    send();
+    await feed(TSTART('sh-1'), TEXT("I'll watch CI"), RESULT("I'll watch CI"));
+    expect(followups()).toHaveLength(1);
+    expect(followups()[0]).toMatchObject({
+      type: 'followup', projectPath: PROJECT, scope: SCOPE, state: 'following', waitingFor: 'CI for PR #42', turnSeq: 1,
+    });
+    backend.destroy();
+  });
+
+  it('a live task started before the previous user send does not count → stalled', async () => {
+    const judge = vi.fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ followUp: true, waitingFor: 'CI' });
+    const { backend, send, feed } = setup(judge);
+    send('start dev server');
+    await feed(TSTART('dev-1'), TEXT('server up'), RESULT('server up'));
+    send('watch CI');
+    await feed(TEXT("I'll watch CI"), RESULT("I'll watch CI"));
+    expect(followups().map((e) => e.state)).toEqual(['stalled']);
+    backend.destroy();
+  });
+
+  it('follow-up with no live task and no wakeup → stalled', async () => {
+    const judge = vi.fn().mockResolvedValue({ followUp: true, waitingFor: 'CI' });
+    const { backend, send, feed } = setup(judge);
+    send();
+    await feed(TEXT("I'll watch CI"), RESULT("I'll watch CI"));
+    expect(followups().map((e) => e.state)).toEqual(['stalled']);
+    backend.destroy();
+  });
+
+  it('following → task drains → resuming; after the resume grace the timer flips it to stalled', async () => {
+    const judge = vi.fn().mockResolvedValue({ followUp: true, waitingFor: 'CI' });
+    const { backend, send, feed } = setup(judge);
+    send();
+    await feed(TSTART('sh-1'), TEXT("I'll watch CI"), RESULT("I'll watch CI"));
+    expect(followups().map((e) => e.state)).toEqual(['following']);
+
+    const timeoutSpy = vi.spyOn(globalThis, 'setTimeout');
+    await feed(TDONE('sh-1'));
+    expect(followups().map((e) => e.state)).toEqual(['following', 'resuming']);
+    const armed = timeoutSpy.mock.calls.find(([, ms]) =>
+      typeof ms === 'number' && Math.abs(ms - FOLLOWUP_RESUME_GRACE_MS) < 1_000);
+    timeoutSpy.mockRestore();
+    expect(armed).toBeDefined();
+
+    backend._nowForTest = () => Date.now() + FOLLOWUP_RESUME_GRACE_MS + 1_000;
+    (armed![0] as () => void)();
+    expect(followups().map((e) => e.state)).toEqual(['following', 'resuming', 'stalled']);
+    backend.destroy();
+  });
+
+  it('a pending wakeup is a wake source; the timer is armed at its deadline', async () => {
+    const judge = vi.fn().mockResolvedValue({ followUp: true, waitingFor: 'the deploy' });
+    const { backend, send, feed, session } = setup(judge);
+    send();
+    const timeoutSpy = vi.spyOn(globalThis, 'setTimeout');
+    await feed(
+      { type: 'assistant', message: { content: [{ type: 'tool_use', id: 'w1', name: 'ScheduleWakeup', input: { delaySeconds: 60 } }] } },
+      RESULT("I'll check back on the deploy in a minute"),
+    );
+    expect(followups().map((e) => e.state)).toEqual(['following']);
+    // Armed at the wakeup deadline (delay + WAKEUP_GRACE_MS), not at the hold cap.
+    const dueIn = session().wakeupDeadline - Date.now();
+    const armed = timeoutSpy.mock.calls.find(([, ms]) =>
+      typeof ms === 'number' && Math.abs(ms - dueIn) < 1_000);
+    timeoutSpy.mockRestore();
+    expect(armed).toBeDefined();
+    // Wakeup lapses with no resume → resuming (grace), not following forever.
+    backend._nowForTest = () => Date.now() + (armed![1] as number) + 1_000;
+    (armed![0] as () => void)();
+    expect(followups().map((e) => e.state)).toEqual(['following', 'resuming']);
+    backend.destroy();
+  });
+
+  it('the hold cap flips following to stalled', async () => {
+    const judge = vi.fn().mockResolvedValue({ followUp: true, waitingFor: 'CI' });
+    const { backend, send, feed, session } = setup(judge);
+    send();
+    await feed(TSTART('sh-1'), TEXT("I'll watch CI"), RESULT("I'll watch CI"));
+    expect(session().followUp.followingSince).toEqual(expect.any(Number));
+    backend._nowForTest = () => Date.now() + FOLLOWUP_HOLD_CAP_MS + 1_000;
+    await feed({ type: 'system', subtype: 'task_progress', task_id: 'sh-1', session_id: 's' });
+    expect(followups().map((e) => e.state)).toEqual(['following', 'stalled']);
+    backend.destroy();
+  });
+
+  it('a verdict landing after a new send began is dropped', async () => {
+    const d = deferred<any>();
+    const judge = vi.fn(() => d.promise);
+    const { backend, send, feed } = setup(judge);
+    send();
+    await feed(TSTART('sh-1'), TEXT("I'll watch CI"), RESULT("I'll watch CI"));
+    send('next');
+    d.resolve({ followUp: true, waitingFor: 'CI' });
+    await flush();
+    expect(followups()).toHaveLength(0);
+    backend.destroy();
+  });
+
+  it('a verdict landing after an autonomous resume turn began is dropped', async () => {
+    const d = deferred<any>();
+    const judge = vi.fn(() => d.promise);
+    const { backend, send, feed } = setup(judge);
+    send();
+    await feed(TSTART('sh-1'), TEXT("I'll watch CI"), RESULT("I'll watch CI"));
+    await feed(TDONE('sh-1'), TEXT('CI passed, continuing')); // runtime resume → streaming_start
+    expect(emits.some((e) => e.type === 'streaming_start' && e.turnSeq === 2)).toBe(true);
+    d.resolve({ followUp: true, waitingFor: 'CI' });
+    await flush();
+    expect(followups()).toHaveLength(0);
+    backend.destroy();
+  });
+
+  it('a new send while following emits none', async () => {
+    const judge = vi.fn().mockResolvedValue({ followUp: true, waitingFor: 'CI' });
+    const { backend, send, feed } = setup(judge);
+    send();
+    await feed(TSTART('sh-1'), TEXT("I'll watch CI"), RESULT("I'll watch CI"));
+    send('anything new?');
+    expect(followups().map((e) => e.state)).toEqual(['following', 'none']);
+    backend.destroy();
+  });
+
+  it('an autonomous resume turn while following emits none', async () => {
+    const judge = vi.fn().mockResolvedValue({ followUp: true, waitingFor: 'CI' });
+    const { backend, send, feed } = setup(judge);
+    send();
+    await feed(TSTART('sh-1'), TEXT("I'll watch CI"), RESULT("I'll watch CI"));
+    await feed(TEXT('CI passed, continuing'));
+    expect(followups().map((e) => e.state)).toEqual(['following', 'none']);
+    backend.destroy();
+  });
+
+  it('suspendScope while following emits stalled', async () => {
+    const judge = vi.fn().mockResolvedValue({ followUp: true, waitingFor: 'CI' });
+    const { backend, send, feed } = setup(judge);
+    send();
+    await feed(TSTART('sh-1'), TEXT("I'll watch CI"), RESULT("I'll watch CI"));
+    backend.suspendScope(PROJECT, SCOPE);
+    expect(followups().map((e) => e.state)).toEqual(['following', 'stalled']);
+    backend.destroy();
+  });
+
+  it('suspendWorkspace while following emits stalled', async () => {
+    const judge = vi.fn().mockResolvedValue({ followUp: true, waitingFor: 'CI' });
+    const { backend, send, feed } = setup(judge);
+    send();
+    await feed(TSTART('sh-1'), TEXT("I'll watch CI"), RESULT("I'll watch CI"));
+    backend.suspendWorkspace(PROJECT);
+    expect(followups().map((e) => e.state)).toEqual(['following', 'stalled']);
+    backend.destroy();
+  });
+
+  it('a drain that dies while following emits stalled', async () => {
+    const judge = vi.fn().mockResolvedValue({ followUp: true, waitingFor: 'CI' });
+    const { backend, live, send, feed } = setup(judge);
+    send();
+    await feed(TSTART('sh-1'), TEXT("I'll watch CI"), RESULT("I'll watch CI"));
+    live.q.close(); // runtime ends the stream on its own; the session still owns the scope
+    await flush();
+    expect(followups().map((e) => e.state)).toEqual(['following', 'stalled']);
+    backend.destroy();
+  });
+
+  it('a rejecting judge emits nothing and the next turn still works', async () => {
+    const judge = vi.fn().mockRejectedValueOnce(new Error('boom')).mockResolvedValue(null);
+    const { backend, send, feed } = setup(judge);
+    send();
+    await feed(TEXT("I'll watch CI"), RESULT("I'll watch CI"));
+    send('again');
+    await feed(TEXT('ok'), RESULT('ok'));
+    expect(followups()).toHaveLength(0);
+    expect(emits.filter((e) => e.type === 'done')).toHaveLength(2);
+    expect(judge).toHaveBeenCalledTimes(2);
+    backend.destroy();
+  });
+
+  it('a judge returning null emits nothing', async () => {
+    const judge = vi.fn().mockResolvedValue(null);
+    const { backend, send, feed } = setup(judge);
+    send();
+    await feed(TSTART('sh-1'), TEXT("I'll watch CI"), RESULT("I'll watch CI"));
+    expect(followups()).toHaveLength(0);
+    backend.destroy();
+  });
+
+  it('followUp:false emits nothing', async () => {
+    const judge = vi.fn().mockResolvedValue({ followUp: false, waitingFor: null });
+    const { backend, send, feed } = setup(judge);
+    send();
+    await feed(TSTART('sh-1'), TEXT('Done, tests pass.'), RESULT('Done, tests pass.'));
+    expect(followups()).toHaveLength(0);
+    backend.destroy();
+  });
+
+  it('a fake queryFn with no judge passed never judges (no claude spawn)', async () => {
+    const { backend, send, feed, session } = setup(null, true);
+    send();
+    await feed(TEXT("I'll watch CI"), RESULT("I'll watch CI"));
+    expect(session().followUp).toBeNull();
+    expect((backend as any)._judgeFollowUp).toBeNull();
+    backend.destroy();
   });
 });
