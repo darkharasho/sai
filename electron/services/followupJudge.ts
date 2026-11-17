@@ -49,9 +49,12 @@ export function makeCliJudgeRunner(claudePath: string | undefined): JudgeRunner 
   return (prompt, signal) => new Promise<string>((resolve, reject) => {
     if (signal.aborted) { reject(new Error('aborted')); return; }
     const proc = spawn(claudePath ?? 'claude', [
-      '-p', prompt, '--output-format', 'text', '--max-turns', '1', '--model', 'haiku',
-      '--no-session-persistence', '--tools', '', '--strict-mcp-config',
-    ], { env: spawnEnv(), stdio: ['ignore', 'pipe', 'pipe'], shell: IS_WIN });
+      '-p', '--output-format', 'text', '--max-turns', '1', '--model', 'haiku',
+      '--no-session-persistence', '--tools', IS_WIN ? '""' : '', '--strict-mcp-config',
+    ], { env: spawnEnv(), stdio: ['pipe', 'pipe', 'pipe'], shell: IS_WIN });
+    // Prompt goes via stdin, never argv: with shell:true on Windows, AI text containing & or | would be executed by cmd.
+    proc.stdin?.on('error', () => {});
+    proc.stdin?.end(prompt);
     let out = '';
     proc.stdout?.on('data', (d: Buffer) => { out += d.toString(); });
     proc.stderr?.on('data', () => {});

@@ -1,10 +1,14 @@
 import { describe, it, expect, vi } from 'vitest';
+import { EventEmitter } from 'node:events';
+
+const spawnMock = vi.hoisted(() => vi.fn());
+vi.mock('node:child_process', () => ({ spawn: spawnMock, default: { spawn: spawnMock } }));
 
 vi.mock('../../electron/services/claude', () => ({ spawnEnv: () => ({}) }));
 vi.mock('../../electron/services/devlog', () => ({ devlog: vi.fn(), devlogSnip: (t: unknown) => String(t) }));
 
 import {
-  buildJudgePrompt, parseJudgeVerdict, judgeFollowUp, FOLLOWUP_JUDGE_MAX_CHARS,
+  buildJudgePrompt, parseJudgeVerdict, makeCliJudgeRunner, judgeFollowUp, FOLLOWUP_JUDGE_MAX_CHARS,
 } from '../../electron/services/followupJudge';
 
 describe('buildJudgePrompt', () => {
@@ -55,5 +59,22 @@ describe('judgeFollowUp', () => {
   it('returns the parsed verdict', async () => {
     expect(await judgeFollowUp('hi', async () => '{"followUp":true,"waitingFor":"CI"}'))
       .toEqual({ followUp: true, waitingFor: 'CI' });
+  });
+});
+
+describe('makeCliJudgeRunner', () => {
+  it('passes the prompt via stdin, not argv', async () => {
+    const proc: any = new EventEmitter();
+    proc.stdout = new EventEmitter(); proc.stderr = new EventEmitter();
+    proc.stdin = Object.assign(new EventEmitter(), { end: vi.fn() });
+    proc.kill = vi.fn();
+    spawnMock.mockReturnValue(proc);
+    const p = makeCliJudgeRunner(undefined)('a & b | c', new AbortController().signal);
+    proc.stdout.emit('data', Buffer.from('out'));
+    proc.emit('close', 0);
+    expect(await p).toBe('out');
+    const argv: string[] = spawnMock.mock.calls[0][1];
+    expect(argv.join(' ')).not.toContain('a & b');
+    expect(proc.stdin.end).toHaveBeenCalledWith('a & b | c');
   });
 });
