@@ -874,7 +874,27 @@ export class SdkBackend implements ClaudeBackend {
       || session.awaitingInput
       || session.awaitingInterruptResult
       || session.pendingBackgroundResume
-      || (session.pendingWakeup && (session.wakeupDeadline == null || Date.now() < session.wakeupDeadline));
+      || (session.pendingWakeup && (session.wakeupDeadline == null || Date.now() < session.wakeupDeadline))
+      || this._followUpHolds(session, this._now());
+  }
+
+  /** A pending follow-up (⟳ following / resuming) pins the scope: closing the
+   *  query would kill the watcher that will pick the work back up. Same
+   *  derivation as _evaluateFollowUp (the 2h cap lives in deriveFollowUpState),
+   *  read-only. */
+  private _followUpHolds(session: ScopeSession, now: number): boolean {
+    const fu = session.followUp;
+    if (!fu) return false;
+    const wakeAlive = this._followUpWakeAlive(session, now);
+    const state = deriveFollowUpState({
+      verdict: fu.verdict,
+      wakeSourceAlive: wakeAlive,
+      queryAlive: true,
+      now,
+      followingSince: fu.followingSince,
+      drainedAt: fu.wakeAlive && !wakeAlive ? now : fu.drainedAt,
+    });
+    return state === 'following' || state === 'resuming';
   }
 
   /** Best-effort: run a deferred-respawn turn on the model the user picked.
@@ -2025,6 +2045,7 @@ export class SdkBackend implements ClaudeBackend {
       // query and the finished task can never resume the conversation.
       if (session.pendingBackgroundResume) return true;
       if (session.pendingWakeup && (session.wakeupDeadline == null || now < session.wakeupDeadline)) return true;
+      if (this._followUpHolds(session, this._now())) return true;
     }
     return false;
   }
@@ -2038,6 +2059,11 @@ export class SdkBackend implements ClaudeBackend {
     for (const scopeKey of Array.from(this.sessions.keys())) {
       this._closeBackgroundWaitIfDue(scopeKey, now);
     }
+    // Re-derive follow-ups so a capped hold flips to stalled (and emits) before
+    // the scope is judged reapable.
+    for (const [scopeKey, s] of this.sessions) {
+      if (s.followUp) this._evaluateFollowUp(s, scopeKey);
+    }
     const records = Array.from(this.sessions.entries()).map(([, s]) => ({
       workspaceId: s._projectPath,
       scope: s._scopeName,
@@ -2049,7 +2075,8 @@ export class SdkBackend implements ClaudeBackend {
       // the wakeup deadline (+grace) so an abandoned wakeup can't defer forever.
       // Same for a background wait: the runtime resumes the turn only while
       // this query is alive (unbounded — the runtime owns the task's lifetime).
-      pendingWakeup: (s.pendingWakeup && (s.wakeupDeadline == null || now < s.wakeupDeadline)) || s.pendingBackgroundResume,
+      pendingWakeup: (s.pendingWakeup && (s.wakeupDeadline == null || now < s.wakeupDeadline)) || s.pendingBackgroundResume
+        || this._followUpHolds(s, now),
     }));
     sweepIdleScopes({
       now,

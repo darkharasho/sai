@@ -3706,4 +3706,55 @@ describe('follow-up judge', () => {
     expect((backend as any)._judgeFollowUp).toBeNull();
     backend.destroy();
   });
+
+  describe('keeps the scope alive while a follow-up is pending', () => {
+    const MIN = 60_000;
+    async function following() {
+      const judge = vi.fn().mockResolvedValue({ followUp: true, waitingFor: 'CI' });
+      const ctx = setup(judge);
+      ctx.send();
+      await ctx.feed(TSTART('sh-1'), TEXT("I'll watch CI"), RESULT("I'll watch CI"));
+      expect(followups().map((e) => e.state)).toEqual(['following']);
+      return ctx;
+    }
+
+    it('a following scope idle 31 min is not swept and the workspace stays busy', async () => {
+      const { backend, live, session } = await following();
+      const t = Date.now() + 31 * MIN;
+      session().lastActivityAt = Date.now() - 31 * MIN;
+      backend._nowForTest = () => t;
+      backend._sweepOnce(t);
+      expect(live.q.close).not.toHaveBeenCalled();
+      expect(backend.isWorkspaceBusy(PROJECT)).toBe(true);
+      backend.destroy();
+    });
+
+    it('past the hold cap the sweep emits stalled, then closes the query', async () => {
+      const { backend, live, session } = await following();
+      const t = session().followUp.followingSince + FOLLOWUP_HOLD_CAP_MS + 1;
+      session().lastActivityAt = t - 31 * MIN;
+      backend._nowForTest = () => t;
+      const order: string[] = [];
+      live.q.close.mockImplementation(() => order.push('close'));
+      const origEmit = emits.push.bind(emits);
+      emits.push = ((...a: any[]) => { if (a[0]?.type === 'followup') order.push(`followup:${a[0].state}`); return origEmit(...a); }) as any;
+      backend._sweepOnce(t);
+      expect(order).toEqual(['followup:stalled', 'close']);
+      backend.destroy();
+    });
+
+    it('a stalled scope is not held', async () => {
+      const judge = vi.fn().mockResolvedValue({ followUp: true, waitingFor: 'CI' });
+      const { backend, live, send, feed, session } = setup(judge);
+      send();
+      await feed(TEXT("I'll watch CI"), RESULT("I'll watch CI")); // no wake source
+      expect(followups().map((e) => e.state)).toEqual(['stalled']);
+      const t = Date.now() + 31 * MIN;
+      session().lastActivityAt = Date.now() - 31 * MIN;
+      backend._nowForTest = () => t;
+      backend._sweepOnce(t);
+      expect(live.q.close).toHaveBeenCalled();
+      backend.destroy();
+    });
+  });
 });
