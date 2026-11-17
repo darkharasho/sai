@@ -59,7 +59,7 @@ import { registerPendingForm } from './render/formBridge';
 import { formTimeoutMs } from './render/formTimeout';
 import { RenderToolCallCard } from './components/Chat/RenderToolCallCard';
 import { installRemoteProxyHandler } from './lib/remoteProxyClient';
-import { applyQuestionEvent, questionWorkspaces, questionSessionIdsFor, scopeKeyProjectPath } from './lib/awaitingQuestionTracker';
+import { applyQuestionEvent, mergeAttentionScopes, questionWorkspaces, questionSessionIdsFor, scopeKeyProjectPath } from './lib/awaitingQuestionTracker';
 import { mergeSessionRefresh } from './lib/sessionRefresh';
 import { turnEndIsStale } from './lib/turnSeqGuard';
 import { resolveClaudeConfig, setWorkspaceOverride, sanitizeOverrideMap, type ClaudeOverrideMap } from './lib/claudeWorkspaceConfig';
@@ -344,16 +344,15 @@ export default function App() {
   const [followUpScopes, setFollowUpScopes] = useState<Map<string, { state: Exclude<FollowUpState, 'none'>; waitingFor: string | null }>>(new Map());
   // Stalled follow-ups count as "needs your attention" for the sidebar markers
   // only; the awaitingQuestion prop deliberately stays on awaitingQuestionScopes.
-  const attentionScopes = useMemo(() => {
-    let out: Set<string> | null = null;
-    for (const [k, v] of followUpScopes) {
-      if (v.state !== 'stalled') continue;
-      if (!out) out = new Set(awaitingQuestionScopes);
-      out.add(k);
-    }
-    return out ?? awaitingQuestionScopes;
-  }, [awaitingQuestionScopes, followUpScopes]);
+  const attentionScopes = useMemo(
+    () => mergeAttentionScopes(awaitingQuestionScopes, followUpScopes),
+    [awaitingQuestionScopes, followUpScopes],
+  );
   const awaitingQuestionWorkspaces = useMemo(
+    () => questionWorkspaces(awaitingQuestionScopes),
+    [awaitingQuestionScopes],
+  );
+  const attentionWorkspaces = useMemo(
     () => questionWorkspaces(attentionScopes),
     [attentionScopes],
   );
@@ -3421,6 +3420,13 @@ export default function App() {
                         chatStreamingSessionRef.current.get(wsPath) === ((aiProvider === 'kimi' ? ws.activeSession.kimiSessionId : ws.activeSession.geminiSessionId) ?? null)
                   }
                   followUp={aiProvider === 'claude' ? followUpScopes.get(`${wsPath}:${ws.activeSession.id}`) ?? null : null}
+                  onDismissFollowUp={() => setFollowUpScopes(prev => {
+                    const k = `${wsPath}:${ws.activeSession.id}`;
+                    if (!prev.has(k)) return prev;
+                    const next = new Map(prev);
+                    next.delete(k);
+                    return next;
+                  })}
                   waiting={
                     // waits are claude-only: waitingScopes never holds gemini/codex entries
                     aiProvider === 'claude'
@@ -3690,6 +3696,11 @@ export default function App() {
   // sidebar's blue "waiting for your answer" triangle.
   const questionSessionIds = useMemo(() => {
     if (!activeProjectPath) return new Set<string>();
+    return questionSessionIdsFor(awaitingQuestionScopes, activeProjectPath);
+  }, [awaitingQuestionScopes, activeProjectPath]);
+  // Sidebar marker + Chats badge: questions plus stalled follow-ups.
+  const attentionSessionIds = useMemo(() => {
+    if (!activeProjectPath) return new Set<string>();
     return questionSessionIdsFor(attentionScopes, activeProjectPath);
   }, [attentionScopes, activeProjectPath]);
 
@@ -3832,12 +3843,12 @@ export default function App() {
     () => computeChatNotificationCount({
       unread: unreadSessionIds,
       awaiting: awaitingSessionIds,
-      question: questionSessionIds,
+      question: attentionSessionIds,
       error: errorSessionIds,
       activeSessionId: activeSession?.id,
       visibleIds: visibleSessionIds,
     }),
-    [unreadSessionIds, awaitingSessionIds, questionSessionIds, errorSessionIds, activeSession?.id, visibleSessionIds],
+    [unreadSessionIds, awaitingSessionIds, attentionSessionIds, errorSessionIds, activeSession?.id, visibleSessionIds],
   );
 
 
@@ -4009,7 +4020,7 @@ export default function App() {
         completedWorkspaces={completedWorkspacesWithUnread}
         busyWorkspaces={busyWorkspaces}
         approvalWorkspaces={new Set(approvalSessions.keys())}
-        awaitingQuestionWorkspaces={awaitingQuestionWorkspaces}
+        awaitingQuestionWorkspaces={attentionWorkspaces}
         metaWorkspaces={metaWorkspaces}
         activeMetaRuntime={activeMetaRuntime}
         onActivateMeta={handleMetaWorkspaceActivate}
@@ -4174,7 +4185,7 @@ export default function App() {
                 titleGeneratingIds={titleGeneratingIds}
                 streamingSessionIds={streamingSessionIds}
                 awaitingSessionIds={awaitingSessionIds}
-                questionSessionIds={questionSessionIds}
+                questionSessionIds={attentionSessionIds}
                 errorSessionIds={errorSessionIds}
                 suspendedSessionIds={suspendedSessionIds}
                 waitingSessionIds={waitingSessionIds}

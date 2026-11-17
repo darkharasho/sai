@@ -14,7 +14,7 @@ export type JudgeRunner = (prompt: string, signal: AbortSignal) => Promise<strin
 export function buildJudgePrompt(finalText: string): string {
   const tail = finalText.slice(-FOLLOWUP_JUDGE_MAX_CHARS);
   return `Decide whether an AI assistant's closing message says or implies the AI will act again later on its own, without the user. Questions to the user and optional offers are NOT follow-ups.
-Reply with JSON only: {"followUp": boolean, "waitingFor": string|null} (waitingFor: at most 8 words, or null).
+Reply with JSON only: {"followUp": boolean, "waitingFor": string|null} (waitingFor: a short NOUN PHRASE naming the thing being waited on, at most 8 words, e.g. "CI for PR #42" or "the staging deploy" — not a verb phrase like "the deploy to finish"; null if none).
 
 Examples:
 "I'll keep watching CI and fix anything that fails." -> {"followUp":true,"waitingFor":"CI for PR #42"}

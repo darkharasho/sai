@@ -793,9 +793,9 @@ export class SdkBackend implements ClaudeBackend {
     // keep coming, the mapper re-arms streaming_start (streaming is false),
     // self-healing the UI.
     this._emit({ type: 'done', projectPath, scope: effectiveScope, turnSeq: session.turnSeq });
-    // The wait tracking just reset (a scheduled wakeup is gone): a ⟳ resting on
-    // it must move on rather than linger.
-    if (session.followUp) this._evaluateFollowUp(session, scopeKey);
+    // User Stop/Cancel ENDS the follow-up: re-evaluating would show "picking
+    // back up…" then a stalled marker for work the user just cancelled.
+    this._clearFollowUp(session);
   }
 
   // ─── reconcileScope ────────────────────────────────────────────────────────

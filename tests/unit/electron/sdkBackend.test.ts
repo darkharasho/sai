@@ -3510,7 +3510,7 @@ describe('follow-up judge', () => {
     backend.destroy();
   });
 
-  it('interrupt re-evaluates: a following resting on a cleared wakeup moves on', async () => {
+  it('interrupt ends the follow-up: following -> none, scope no longer held', async () => {
     const judge = vi.fn().mockResolvedValue({ followUp: true, waitingFor: 'the deploy' });
     const { backend, send, feed } = setup(judge);
     send();
@@ -3520,7 +3520,8 @@ describe('follow-up judge', () => {
     );
     expect(followups().map((e) => e.state)).toEqual(['following']);
     backend.interrupt(PROJECT, SCOPE);
-    expect(followups().map((e) => e.state)).toEqual(['following', 'resuming']);
+    expect(followups().map((e) => e.state)).toEqual(['following', 'none']);
+    expect(backend.isWorkspaceBusy(PROJECT)).toBe(false);
     backend.destroy();
   });
 

@@ -12,6 +12,9 @@ import {
 } from '../../electron/services/followupJudge';
 
 describe('buildJudgePrompt', () => {
+  it('asks for a noun phrase', () => {
+    expect(buildJudgePrompt('hi')).toMatch(/noun phrase/i);
+  });
   it('keeps only the last MAX_CHARS chars', () => {
     const p = buildJudgePrompt('x'.repeat(5000) + 'END');
     expect(p).toContain('END');

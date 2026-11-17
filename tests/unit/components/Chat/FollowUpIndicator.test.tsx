@@ -27,4 +27,24 @@ describe('FollowUpIndicator', () => {
     render(<FollowUpIndicator state="stalled" waitingFor={null} onCheckNow={() => {}} />);
     expect(screen.getByText('Said it would follow up on this, but nothing is watching')).toBeTruthy();
   });
+  it('Check now disables after first click and re-enables when props change', () => {
+    const onCheckNow = vi.fn();
+    const { rerender } = render(<FollowUpIndicator state="stalled" waitingFor="CI" onCheckNow={onCheckNow} />);
+    const btn = screen.getByRole('button', { name: /check now/i }) as HTMLButtonElement;
+    fireEvent.click(btn);
+    fireEvent.click(btn);
+    expect(onCheckNow).toHaveBeenCalledTimes(1);
+    expect(btn.disabled).toBe(true);
+    rerender(<FollowUpIndicator state="stalled" waitingFor="deploy" onCheckNow={onCheckNow} />);
+    expect((screen.getByRole('button', { name: /check now/i }) as HTMLButtonElement).disabled).toBe(false);
+  });
+  it('stalled row has a Dismiss button that calls onDismiss; other states do not', () => {
+    const onDismiss = vi.fn();
+    const { unmount } = render(<FollowUpIndicator state="stalled" waitingFor="CI" onCheckNow={() => {}} onDismiss={onDismiss} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+    unmount();
+    render(<FollowUpIndicator state="following" waitingFor="CI" onCheckNow={() => {}} onDismiss={onDismiss} />);
+    expect(screen.queryByRole('button', { name: 'Dismiss' })).toBeNull();
+  });
 });

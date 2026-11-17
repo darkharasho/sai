@@ -62,3 +62,19 @@ export function questionSessionIdsFor(scopeKeys: ReadonlySet<string>, projectPat
   }
   return out;
 }
+
+/** Sidebar/workspace attention markers: scopes blocked on a question UNION
+ *  stalled follow-ups. Toasts, remote status and the overlay must keep using
+ *  the question-only set — a stalled follow-up is not "waiting for your answer". */
+export function mergeAttentionScopes(
+  questions: Set<string>,
+  followUps: Map<string, { state: string }>,
+): Set<string> {
+  let out: Set<string> | null = null;
+  for (const [k, v] of followUps) {
+    if (v.state !== 'stalled') continue;
+    if (!out) out = new Set(questions);
+    out.add(k);
+  }
+  return out ?? questions;
+}

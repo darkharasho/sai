@@ -225,6 +225,7 @@ interface ChatPanelProps {
   waiting?: { wait: WaitMeta; startedAtMs: number } | null;
   /** Follow-up judge state for this scope (Claude only): the AI promised to pick back up. */
   followUp?: { state: 'following' | 'resuming' | 'stalled'; waitingFor: string | null } | null;
+  onDismissFollowUp?: () => void;
   /** Background-work sidebar plumbing, passed straight to the wait pill. */
   liveBackgroundTaskCount?: number;
   onToggleBackgroundTasks?: () => void;
@@ -461,7 +462,7 @@ const LOAD_MORE_CHUNK = 30; // messages to load when scrolling up
 const LOAD_GUARD_ERROR_QUIET_MS = 15_000;
 
 
-export default function ChatPanel({ projectPath, overlayControl, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, availableModels, claudeOverrideState, aiProvider, codexModel, onCodexModelChange, codexModels, onCodexModelsRefresh, codexPermission, onCodexPermissionChange, codexEffort, onCodexEffortChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, kimiModel, onKimiModelChange, kimiModels, kimiApprovalMode, onKimiApprovalModeChange, initialMessages, onMessagesChange, onTurnComplete, onClaudeSessionId, onGeminiSessionId, onKimiSessionId, onCodexSessionId, activeFilePath, onFileOpen, isActive, isStreaming = false, awaitingQuestion = false, initialDraft, onDraftChange, initialContextItems, onContextItemsChange, messageQueue = [], onQueueAdd, onQueueRemove, onQueueShift, onQueuePromote, sessionId, terminalTabs = [], onSlashCommandsUpdate, claudeScope = 'chat', onOpenMcpPanel, initialPendingApproval = null, renderToolCall, activeMetaRuntime, mentionInsertRef: mentionInsertRefProp, waiting = null, followUp = null, liveBackgroundTaskCount, onToggleBackgroundTasks, backgroundTasksOpen, taskUiEnabled = false, backgroundTasks, onStopBackgroundTask, claudeSessionId }: ChatPanelProps) {
+export default function ChatPanel({ projectPath, overlayControl, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, availableModels, claudeOverrideState, aiProvider, codexModel, onCodexModelChange, codexModels, onCodexModelsRefresh, codexPermission, onCodexPermissionChange, codexEffort, onCodexEffortChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, kimiModel, onKimiModelChange, kimiModels, kimiApprovalMode, onKimiApprovalModeChange, initialMessages, onMessagesChange, onTurnComplete, onClaudeSessionId, onGeminiSessionId, onKimiSessionId, onCodexSessionId, activeFilePath, onFileOpen, isActive, isStreaming = false, awaitingQuestion = false, initialDraft, onDraftChange, initialContextItems, onContextItemsChange, messageQueue = [], onQueueAdd, onQueueRemove, onQueueShift, onQueuePromote, sessionId, terminalTabs = [], onSlashCommandsUpdate, claudeScope = 'chat', onOpenMcpPanel, initialPendingApproval = null, renderToolCall, activeMetaRuntime, mentionInsertRef: mentionInsertRefProp, waiting = null, followUp = null, onDismissFollowUp, liveBackgroundTaskCount, onToggleBackgroundTasks, backgroundTasksOpen, taskUiEnabled = false, backgroundTasks, onStopBackgroundTask, claudeSessionId }: ChatPanelProps) {
   const [messages, setMessagesRaw] = useState<ChatMessageType[]>(() => {
     const initial = initialMessages || [];
     // Anything present at mount is history, not a fresh arrival — a workspace/
@@ -2782,6 +2783,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
                 <FollowUpIndicator
                   state={followUp.state}
                   waitingFor={followUp.waitingFor}
+                  onDismiss={onDismissFollowUp}
                   onCheckNow={() => { void handleSend(followUp.waitingFor ? `Check on ${followUp.waitingFor} and continue where you left off.` : 'Check on what you were waiting for and continue where you left off.'); }}
                 />
               </div>
