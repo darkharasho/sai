@@ -191,6 +191,10 @@ interface ScopeSession {
    *  liveTasks). A dev server started an hour ago must not make every
    *  "I'll check back" read as ⟳ forever. */
   liveTaskUserTurn: Map<string, number>;
+  /** A task stamped with the current userTurnSeq has finished. Only work the
+   *  current user turn started and that actually drained can seed the
+   *  follow-up resume grace — an old dev server holding the pin must not. */
+  userTurnTaskSettled: boolean;
   /** The follow-up indicator for the last naturally-ended turn, or null.
    *  Set only when the judge said followUp:true; cleared by any new turn. */
   followUp: {
@@ -657,6 +661,7 @@ export class SdkBackend implements ClaudeBackend {
       this._beginTurn(session, projectPath, effectiveScope);
       session.clearFinishedOnWait = true;
       session.userTurnSeq += 1;
+      session.userTurnTaskSettled = false;
       // Workspace auto-suspend watches this clock; without it a workspace with
       // only SDK activity looks quiescent and gets suspended mid-stream. Also
       // re-activates a suspended registry entry so the dropdown flips it back.
@@ -788,6 +793,9 @@ export class SdkBackend implements ClaudeBackend {
     // keep coming, the mapper re-arms streaming_start (streaming is false),
     // self-healing the UI.
     this._emit({ type: 'done', projectPath, scope: effectiveScope, turnSeq: session.turnSeq });
+    // The wait tracking just reset (a scheduled wakeup is gone): a ⟳ resting on
+    // it must move on rather than linger.
+    if (session.followUp) this._evaluateFollowUp(session, scopeKey);
   }
 
   // ─── reconcileScope ────────────────────────────────────────────────────────
@@ -1342,6 +1350,7 @@ export class SdkBackend implements ClaudeBackend {
       backgroundWaitTimer: null,
       userTurnSeq: 0,
       liveTaskUserTurn: new Map(),
+      userTurnTaskSettled: false,
       followUp: null,
       _projectPath: projectPath,
       _scopeName: scope ?? 'chat',
@@ -1444,11 +1453,17 @@ export class SdkBackend implements ClaudeBackend {
           if (typeof m.task_type === 'string') session.liveTaskTypes.set(id, m.task_type);
           break;
         case 'task_progress':
-          if (!session.liveTasks.has(id)) session.liveTasks.set(id, 'running');
+          if (!session.liveTasks.has(id)) {
+            session.liveTasks.set(id, 'running');
+            // First sighting: stamp it like a task_started so it can count as
+            // a current-turn wake source.
+            if (!session.liveTaskUserTurn.has(id)) session.liveTaskUserTurn.set(id, session.userTurnSeq);
+          }
           break;
         case 'task_updated': {
           const status = (m.patch as { status?: unknown } | undefined)?.status;
           if (isTerminalTaskStatus(status)) {
+            this._settleTaskForFollowUp(session, id);
             session.liveTasks.delete(id);
             session.liveTaskTypes.delete(id);
             session.liveTaskUserTurn.delete(id);
@@ -1458,6 +1473,7 @@ export class SdkBackend implements ClaudeBackend {
         }
         case 'task_notification':
           // Always terminal ('completed' | 'failed' | 'stopped').
+          this._settleTaskForFollowUp(session, id);
           session.liveTasks.delete(id);
           session.liveTaskTypes.delete(id);
           session.liveTaskUserTurn.delete(id);
@@ -2118,9 +2134,11 @@ export class SdkBackend implements ClaudeBackend {
         verdict,
         turnSeq,
         followingSince: null,
-        // Pinned for a background resume with nothing visibly live: the runtime
-        // may already have a resume queued, so start in the resume grace.
-        drainedAt: !wakeAlive && session.pendingBackgroundResume ? now : null,
+        // Work this user turn started already drained and the pin is held: the
+        // runtime may have a resume queued, so start in the resume grace. The
+        // pin alone is not enough — an older live task (dev server) the Stop
+        // hook counts sets it too, and that must read ⚠ at once.
+        drainedAt: !wakeAlive && session.pendingBackgroundResume && session.userTurnTaskSettled ? now : null,
         lastEmitted: 'none',
         timer: null,
         wakeAlive,
@@ -2129,6 +2147,13 @@ export class SdkBackend implements ClaudeBackend {
     }).catch((err) => {
       devlog('followupJudge', 'error', { scope: session._scopeName, turnSeq, error: err instanceof Error ? err.message : String(err) });
     });
+  }
+
+  /** Note a finished task that the current user turn started (follow-up seed). */
+  private _settleTaskForFollowUp(session: ScopeSession, id: string): void {
+    if (session.liveTasks.has(id) && session.liveTaskUserTurn.get(id) === session.userTurnSeq) {
+      session.userTurnTaskSettled = true;
+    }
   }
 
   /** A wake source is a live task started since the user's last message, or a

@@ -3371,8 +3371,9 @@ describe('follow-up judge', () => {
 
   function setup(judge: ReturnType<typeof vi.fn> | null, omitJudge = false) {
     const live = makeLiveQuery();
+    let options: any = null;
     const backend = new SdkBackend({
-      queryFn: vi.fn(() => live.q) as any,
+      queryFn: vi.fn((args: any) => { options = args.options; return live.q; }) as any,
       emit: (p) => emits.push(p),
       resolveClaudePath: () => undefined,
       notify: { approval: vi.fn(), question: vi.fn(), planReview: vi.fn(), completion: vi.fn() },
@@ -3382,7 +3383,14 @@ describe('follow-up judge', () => {
     /** Push frames and wait until they have drained. */
     const feed = async (...msgs: any[]) => { live.push(...msgs); await flush(); };
     const session = () => (backend as any).sessions.get(`${PROJECT} ${SCOPE}`);
-    return { backend, live, send, feed, session };
+    /** Fire the Stop hook with the runtime's background_tasks ledger, as the
+     *  runtime does just before the result frame. */
+    const stop = async (tasks: unknown) => {
+      for (const h of options?.hooks?.Stop?.flatMap((m: any) => m.hooks) ?? []) {
+        await h({ hook_event_name: 'Stop', stop_hook_active: false, background_tasks: tasks }, undefined, { signal: new AbortController().signal });
+      }
+    };
+    return { backend, live, send, feed, session, stop };
   }
 
   it('judges a natural end with the result text', async () => {
@@ -3460,6 +3468,59 @@ describe('follow-up judge', () => {
     send('watch CI');
     await feed(TEXT("I'll watch CI"), RESULT("I'll watch CI"));
     expect(followups().map((e) => e.state)).toEqual(['stalled']);
+    backend.destroy();
+  });
+
+  it('an older live task the Stop hook still counts (pin held) → stalled at once, not resuming', async () => {
+    const judge = vi.fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ followUp: true, waitingFor: 'CI' });
+    const { backend, send, feed, session, stop } = setup(judge);
+    send('start dev server');
+    await feed(TSTART('dev-1'), TEXT('server up'));
+    await stop([{ id: 'dev-1', status: 'running' }]);
+    await feed(RESULT('server up'));
+    send('watch CI');
+    await feed(TEXT("I'll check back on CI"));
+    await stop([{ id: 'dev-1', status: 'running' }]);
+    await feed(RESULT("I'll check back on CI"));
+    expect(session().pendingBackgroundResume).toBe(true); // production path: the pin is held
+    expect(followups().map((e) => e.state)).toEqual(['stalled']);
+    backend.destroy();
+  });
+
+  it('current-turn work that drained with the pin held → resuming', async () => {
+    const judge = vi.fn().mockResolvedValue({ followUp: true, waitingFor: 'the reviewer' });
+    const { backend, send, feed, session, stop } = setup(judge);
+    send();
+    await feed(TSTART('ag-1', 'local_agent'), TDONE('ag-1'), TEXT("I'll report back when the reviewer is done"));
+    await stop([]);
+    await feed(RESULT("I'll report back when the reviewer is done"));
+    expect(session().pendingBackgroundResume).toBe(true);
+    expect(followups().map((e) => e.state)).toEqual(['resuming']);
+    backend.destroy();
+  });
+
+  it('a task first seen via task_progress counts as current-turn work', async () => {
+    const judge = vi.fn().mockResolvedValue({ followUp: true, waitingFor: 'CI' });
+    const { backend, send, feed } = setup(judge);
+    send();
+    await feed({ type: 'system', subtype: 'task_progress', task_id: 'p-1', session_id: 's' }, TEXT("I'll watch CI"), RESULT("I'll watch CI"));
+    expect(followups().map((e) => e.state)).toEqual(['following']);
+    backend.destroy();
+  });
+
+  it('interrupt re-evaluates: a following resting on a cleared wakeup moves on', async () => {
+    const judge = vi.fn().mockResolvedValue({ followUp: true, waitingFor: 'the deploy' });
+    const { backend, send, feed } = setup(judge);
+    send();
+    await feed(
+      { type: 'assistant', message: { content: [{ type: 'tool_use', id: 'w1', name: 'ScheduleWakeup', input: { delaySeconds: 60 } }] } },
+      RESULT("I'll check back on the deploy in a minute"),
+    );
+    expect(followups().map((e) => e.state)).toEqual(['following']);
+    backend.interrupt(PROJECT, SCOPE);
+    expect(followups().map((e) => e.state)).toEqual(['following', 'resuming']);
     backend.destroy();
   });
 
