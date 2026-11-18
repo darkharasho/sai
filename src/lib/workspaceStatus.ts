@@ -29,3 +29,26 @@ export function workspaceDisplayState(
   if (opts?.isOpen) return 'alive';
   return 'inactive';
 }
+
+/** Workspace path of a `${projectPath}:${sessionId}` scope key. Session ids
+ *  (UUIDs / 'chat') never contain ':', so split on the last one. */
+function scopeWorkspace(scopeKey: string): string {
+  const i = scopeKey.lastIndexOf(':');
+  return i > 0 ? scopeKey.slice(0, i) : scopeKey;
+}
+
+/** Workspaces that have a parked wait (scheduled wakeup / background tasks)
+ *  and no streaming turn — "waiting", not "working". */
+export function waitingWorkspacesFrom(
+  waitingScopeKeys: Iterable<string>,
+  streamingScopeKeys: Iterable<string>,
+): Set<string> {
+  const streaming = new Set<string>();
+  for (const k of streamingScopeKeys) streaming.add(scopeWorkspace(k));
+  const out = new Set<string>();
+  for (const k of waitingScopeKeys) {
+    const ws = scopeWorkspace(k);
+    if (!streaming.has(ws)) out.add(ws);
+  }
+  return out;
+}

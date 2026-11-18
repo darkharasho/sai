@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { workspaceDisplayState } from '../../../src/lib/workspaceStatus';
+import { workspaceDisplayState, waitingWorkspacesFrom } from '../../../src/lib/workspaceStatus';
 
 describe('workspaceDisplayState', () => {
   it('returns inactive when no flags and not open', () => {
@@ -39,5 +39,19 @@ describe('question indicator state (audit 2026-06-11)', () => {
     expect(workspaceDisplayState({ awaitingQuestion: true, busy: true })).toBe('question');
     expect(workspaceDisplayState({ awaitingQuestion: true, approval: true })).toBe('approval');
     expect(workspaceDisplayState({ busy: true })).toBe('busy');
+  });
+});
+
+describe('waitingWorkspacesFrom', () => {
+  it('marks a workspace waiting when it has a wait scope and nothing streaming', () => {
+    expect([...waitingWorkspacesFrom(['/a/b:sess-1'], [])]).toEqual(['/a/b']);
+  });
+
+  it('a streaming turn in the same workspace means working, not waiting', () => {
+    expect(waitingWorkspacesFrom(['/a/b:sess-1'], ['/a/b:sess-2']).size).toBe(0);
+  });
+
+  it('streaming elsewhere does not affect it', () => {
+    expect([...waitingWorkspacesFrom(['/a/b:chat'], ['/c/d:sess-9'])]).toEqual(['/a/b']);
   });
 });

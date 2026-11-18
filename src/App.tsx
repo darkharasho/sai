@@ -19,6 +19,7 @@ import WorkspaceToast, { type ToastTone } from './components/WorkspaceToast';
 import { computeChatToasts } from './lib/chatToasts';
 import { computeChatNotificationCount, computeCompletedWorkspaces, isTurnErrored, workspaceSwitchViewStamps } from './lib/chatActivity';
 import { inferSessionProvider } from './lib/sessionProvider';
+import { waitingWorkspacesFrom } from './lib/workspaceStatus';
 import CommandPalette, { type PaletteMode } from './components/CommandPalette';
 import { useWhatsNew } from './hooks/useWhatsNew';
 import { useKeybinding } from './hooks/useKeybinding';
@@ -3739,6 +3740,14 @@ export default function App() {
     return ids;
   }, [waitingScopes, activeProjectPath]);
 
+  // Workspaces whose only activity is a parked wait (scheduled wakeup or
+  // background tasks) — no turn is streaming. A waiting turn keeps its busy
+  // slot, so without this the titlebar shows it as plain "working" gold.
+  const waitingWorkspaces = useMemo(
+    () => waitingWorkspacesFrom(waitingScopes.keys(), streamingScopes),
+    [waitingScopes, streamingScopes],
+  );
+
   // Grace timeout: a scheduled wakeup that never fires must not pin the pill
   // forever. Sweep every 5s; drop a scheduled entry past fire time + grace.
   // Expired keys are computed OUTSIDE the setState updater: the sweep also
@@ -4019,6 +4028,7 @@ export default function App() {
         onProjectChange={handleProjectSwitch}
         completedWorkspaces={completedWorkspacesWithUnread}
         busyWorkspaces={busyWorkspaces}
+        waitingWorkspaces={waitingWorkspaces}
         approvalWorkspaces={new Set(approvalSessions.keys())}
         awaitingQuestionWorkspaces={attentionWorkspaces}
         metaWorkspaces={metaWorkspaces}

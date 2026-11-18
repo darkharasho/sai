@@ -239,6 +239,32 @@ describe('TitleBar status chip (audit 2026-06-11)', () => {
     expect(container.querySelector('.ws-sq-busy:not(.ws-sq-busy-done)')).toBeNull();
   });
 
+  it('shows the waiting squircle when the only busy workspace is parked on a wait', () => {
+    const { container } = render(
+      <TitleBar
+        {...defaultProps}
+        projectPath="/home/user/current"
+        busyWorkspaces={new Set(['/ws/parked'])}
+        waitingWorkspaces={new Set(['/ws/parked'])}
+      />
+    );
+    expect(container.querySelector('.ws-sq-waiting')).toBeTruthy();
+    expect(container.querySelector('.ws-sq-busy')).toBeNull();
+  });
+
+  it('prefers busy over waiting when another workspace is actually working', () => {
+    const { container } = render(
+      <TitleBar
+        {...defaultProps}
+        projectPath="/home/user/current"
+        busyWorkspaces={new Set(['/ws/parked', '/ws/working'])}
+        waitingWorkspaces={new Set(['/ws/parked'])}
+      />
+    );
+    expect(container.querySelector('.ws-sq-busy')).toBeTruthy();
+    expect(container.querySelector('.ws-sq-waiting')).toBeNull();
+  });
+
   it('keeps the plain busy squircle when nothing is completed', () => {
     const { container } = render(
       <TitleBar
@@ -368,6 +394,15 @@ describe('TitleBar Home workspace', () => {
 
     const row = container.querySelector('[data-path="' + HOME + '"]') as HTMLElement;
     expect(row.querySelector('.ws-sq-busy')).toBeTruthy();
+  });
+
+  it('shows the waiting squircle on a row parked on a wait', async () => {
+    installMockSai();
+    const container = await openPicker({ busyWorkspaces: new Set([HOME]), waitingWorkspaces: new Set([HOME]) });
+
+    const row = container.querySelector('[data-path="' + HOME + '"]') as HTMLElement;
+    expect(row.querySelector('.ws-sq-waiting')).toBeTruthy();
+    expect(row.querySelector('.ws-sq-busy')).toBeNull();
   });
 
   it('labels the title bar "Home" instead of the home folder basename', async () => {
