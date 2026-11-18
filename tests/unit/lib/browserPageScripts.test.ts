@@ -11,6 +11,8 @@ import {
   SCROLL_FN_SOURCE,
   SELECT_FN_SOURCE,
   WAIT_CHECK_FN_SOURCE,
+  FRAME_GUARD_FN_SOURCE,
+  frameGuard,
 } from '../../../extension/chrome/pageScripts.js';
 
 type Snapshot = {
@@ -589,5 +591,77 @@ describe('wait check', () => {
 
   it('reports a bad selector', () => {
     expect(check({ selector: '[[' }).error).toMatch(/invalid selector/);
+  });
+});
+
+describe('frameGuard', () => {
+  // eslint-disable-next-line no-eval
+  const guard = (opts: Record<string, unknown> = {}) => eval(`(${FRAME_GUARD_FN_SOURCE})`)(opts);
+  const tick = () => new Promise((r) => setTimeout(r, 0));
+
+  beforeEach(() => {
+    delete (window as any).__saiFrameGuard;
+    document.body.innerHTML = '';
+  });
+
+  it('removes foreign-extension frames already in the page', () => {
+    document.body.innerHTML =
+      '<iframe id="op" src="chrome-extension://aeblfdkhhhdcdjpifhhbdiojplfjncoa/inline/menu.html"></iframe>' +
+      '<iframe id="ok" src="https://example.test/embed"></iframe>' +
+      '<com-1password-button id="btn"></com-1password-button>';
+    const res = guard();
+    expect(res.removed).toBe(2);
+    expect(document.getElementById('op')).toBeNull();
+    expect(document.getElementById('btn')).toBeNull();
+    expect(document.getElementById('ok')).not.toBeNull();
+  });
+
+  it('removes frames added later, including ones whose src is set after insertion', async () => {
+    guard();
+    const host = document.createElement('com-1password-menu');
+    document.body.appendChild(host);
+    const late = document.createElement('iframe');
+    document.body.appendChild(late);
+    await tick();
+    expect(host.isConnected).toBe(false);
+    expect(late.isConnected).toBe(true);
+    late.setAttribute('src', 'chrome-extension://nngceckbapebfimnlniiiahkandclblb/overlay.html');
+    await tick();
+    expect(late.isConnected).toBe(false);
+  });
+
+  it('reaches into open shadow roots, including ones attached after install', async () => {
+    guard();
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = host.attachShadow({ mode: 'open' });
+    const frame = document.createElement('iframe');
+    frame.src = 'chrome-extension://kbfnbcaeplbcioakkpcpgfkobkghlhen/popup.html';
+    root.appendChild(frame);
+    await tick();
+    // Shadow content added after the host was swept: caught on the next sweep.
+    guard();
+    expect(frame.isConnected).toBe(false);
+  });
+
+  it('leaves our own extension frames alone', () => {
+    document.body.innerHTML = '<iframe id="me" src="chrome-extension://saiselfid/x.html"></iframe>';
+    guard({ selfId: 'saiselfid' });
+    expect(document.getElementById('me')).not.toBeNull();
+  });
+
+  it('is idempotent: a second install keeps one observer and a running total', async () => {
+    document.body.innerHTML = '<iframe src="chrome-extension://abc/x.html"></iframe>';
+    guard();
+    const state = (window as any).__saiFrameGuard;
+    document.body.appendChild(Object.assign(document.createElement('iframe'), { src: 'chrome-extension://abc/y.html' }));
+    expect(guard().removed).toBe(2);
+    expect((window as any).__saiFrameGuard).toBe(state);
+    expect(state.roots.filter((r: unknown) => r === document)).toHaveLength(1);
+  });
+
+  it('works as a real function too (chrome.scripting path)', () => {
+    document.body.innerHTML = '<iframe src="chrome-extension://abc/x.html"></iframe>';
+    expect(frameGuard({}).removed).toBe(1);
   });
 });

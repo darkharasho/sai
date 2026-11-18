@@ -409,6 +409,82 @@ describe('auto re-attach after a foreign-extension frame', () => {
   });
 });
 
+describe('foreign-extension frame guard', () => {
+  const NOT_ALLOWED = 'Cannot access a chrome-extension:// URL of different extension';
+  const guardCalls = () => cdpCalls.filter((c) =>
+    (c.method === 'Page.addScriptToEvaluateOnNewDocument' && /__saiFrameGuard/.test(c.params.source)) ||
+    (c.method === 'Runtime.evaluate' && /__saiFrameGuard/.test(c.params.expression)));
+
+  // The toolbar probe must read the tab as not-yet-ours.
+  const unshared = () => {
+    stub.cdp.script['Runtime.evaluate'] = { error: 'Debugger is not attached to the tab with id: 1.' };
+  };
+
+  it('installs the guard on share, for this page and the next ones', async () => {
+    unshared();
+    await stub.fire('action.onClicked', { id: 1, url: 'https://a.test', title: 'A' });
+    await vi.waitFor(() => expect(mod.attached.has(1)).toBe(true));
+    const calls = guardCalls();
+    expect(calls.map((c) => c.method)).toEqual(['Page.addScriptToEvaluateOnNewDocument', 'Runtime.evaluate']);
+    // Our own extension's frames are exempt.
+    expect(calls[0].params.source).toContain('saiselfextensionid');
+  });
+
+  it('a page already holding a password-manager frame is swept, then shared', async () => {
+    unshared();
+    stub.chrome.debugger.attach.mockRejectedValueOnce(new Error(NOT_ALLOWED));
+    stub.chrome.scripting.executeScript.mockResolvedValueOnce([{ frameId: 0, result: { removed: 1 } }]);
+    await stub.fire('action.onClicked', { id: 1, url: 'https://a.test', title: 'A' });
+    await vi.waitFor(() => expect(mod.attached.has(1)).toBe(true));
+    expect(stub.chrome.scripting.executeScript).toHaveBeenCalledWith(
+      expect.objectContaining({ target: { tabId: 1, allFrames: true }, args: [{ selfId: 'saiselfextensionid' }] }),
+    );
+  });
+
+  it('a share that a sweep cannot fix still fails', async () => {
+    unshared();
+    stub.chrome.debugger.attach.mockRejectedValueOnce(new Error(NOT_ALLOWED));
+    await stub.fire('action.onClicked', { id: 1, url: 'https://a.test', title: 'A' });
+    expect(mod.attached.has(1)).toBe(false);
+    expect(stub.chrome.debugger.attach).toHaveBeenCalledTimes(1);
+  });
+
+  describe('during re-attach', () => {
+    beforeEach(() => {
+      share(1);
+      mod.ensureConnected();
+      vi.useFakeTimers();
+    });
+
+    it('sweeps the blocking frame and retries at once instead of backing off', async () => {
+      stub.chrome.debugger.attach.mockRejectedValueOnce(new Error(NOT_ALLOWED));
+      stub.chrome.scripting.executeScript.mockResolvedValueOnce([{ frameId: 0, result: { removed: 1 } }]);
+      await stub.fire('debugger.onDetach', { tabId: 1 }, 'target_closed');
+      await vi.advanceTimersByTimeAsync(250 + 100);
+      expect(stub.chrome.debugger.attach).toHaveBeenCalledTimes(2);
+      expect(mod.attached.get(1)?.state).toBe('attached');
+      expect(guardCalls().length).toBeGreaterThan(0);
+    });
+
+    it('falls back to the normal backoff when nothing was swept', async () => {
+      stub.chrome.debugger.attach.mockRejectedValueOnce(new Error(NOT_ALLOWED));
+      await stub.fire('debugger.onDetach', { tabId: 1 }, 'target_closed');
+      await vi.advanceTimersByTimeAsync(250 + 100);
+      expect(stub.chrome.debugger.attach).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(400);
+      expect(stub.chrome.debugger.attach).toHaveBeenCalledTimes(2);
+    });
+
+    it('a sweep that throws is survived', async () => {
+      stub.chrome.debugger.attach.mockRejectedValueOnce(new Error(NOT_ALLOWED));
+      stub.chrome.scripting.executeScript.mockRejectedValue(new Error('Cannot access contents of the page'));
+      await stub.fire('debugger.onDetach', { tabId: 1 }, 'target_closed');
+      await vi.advanceTimersByTimeAsync(250 + 500);
+      expect(mod.attached.get(1)?.state).toBe('attached');
+    });
+  });
+});
+
 describe('dialogs', () => {
   const openDialog = (type = 'beforeunload', message = '') =>
     stub.fire('debugger.onEvent', { tabId: 1 }, 'Page.javascriptDialogOpening', {

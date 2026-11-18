@@ -93,6 +93,25 @@ extension's frame** is in it. 1Password's inline autofill menu is exactly that,
 and so are Bitwarden's, Grammarly's and similar overlays. When one appears,
 Chrome detaches the bridge's debugger from the tab.
 
+**Prevention.** On every attach (and re-attach), the bridge installs a small
+guard in the shared tab with `Page.addScriptToEvaluateOnNewDocument` plus a
+`Runtime.evaluate` for the current page. It is a `MutationObserver` that
+removes any iframe/frame/embed/object pointing at another extension's
+`chrome-extension://` URL, and 1Password's `<com-1password-*>` host elements,
+as soon as they are added — before the frame's navigation commits, so Chrome
+never sees it. The trade-off: **1Password's inline menu doesn't appear in a
+shared tab.** Its toolbar popup and keyboard shortcut still work.
+
+**Recovery.** If a frame slips through anyway (a closed shadow root from an
+extension other than 1Password, a cross-origin iframe), Chrome refuses
+re-attach with `Cannot access a chrome-extension:// URL of different
+extension`. The bridge then runs the same guard through
+`chrome.scripting.executeScript` (no debugger needed; the content-script world
+can see into closed shadow roots via `chrome.dom.openOrClosedShadowRoot`) and
+retries after 100 ms instead of waiting out the backoff. The same sweep runs
+when the very first share of a page fails for that reason. This is why the
+extension asks for `scripting` and `<all_urls>` host access.
+
 The bridge treats any detach you didn't ask for as temporary:
 
 - The tab stays shared, and its state becomes `reattaching` (visible in
@@ -397,10 +416,11 @@ Read these first when a tab "keeps detaching":
   instance takes over the bridge from the first. Newest relay connection wins.
 - **Blocked surfaces.** `chrome://*`, the Chrome Web Store, and other
   extensions' pages can't be attached. Permanent Chrome restriction.
-- **Foreign-extension frames block control until they close.** See *Password
-  managers and other extensions* above. While a password manager's menu is
-  open, the tab is `reattaching`, and dismissing the menu (Escape) gives control
-  back.
+- **Foreign-extension frames are stripped from shared tabs.** See *Password
+  managers and other extensions* above. One the guard can't catch still
+  detaches the tab until it closes (`reattaching`; Escape on the menu gives
+  control back). Guard activity is in the devlog as `frame-sweep` /
+  `frame-guard-failed`.
 - **Same-process frames only.** The snapshot walks the top-level document;
   cross-origin iframes are not traversed.
 - **No Firefox.** Firefox has no `chrome.debugger` equivalent, so it would be

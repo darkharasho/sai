@@ -25,6 +25,8 @@ import {
   FOCUS_FN_SOURCE,
   SELECT_FN_SOURCE,
   WAIT_CHECK_FN_SOURCE,
+  FRAME_GUARD_FN_SOURCE,
+  frameGuard,
 } from './pageScripts.js';
 import { KEYS, parseKeySpec } from './keys.js';
 
@@ -101,6 +103,10 @@ const REATTACH_STEADY_MS = 5000;
 const REATTACH_GIVE_UP_MS = 120_000;
 /** How long a call on a re-attaching tab waits before failing. */
 const REATTACH_CALL_WAIT_MS = 3000;
+/** Retry delay once a sweep has cleared the frame that blocked re-attach. */
+const REATTACH_AFTER_SWEEP_MS = 100;
+/** Installing the frame guard must never stall an attach for long. */
+const FRAME_GUARD_TIMEOUT_MS = 2000;
 
 /** Native-port reconnect schedule while any tab is shared. */
 const RECONNECT_DELAYS_MS = [500, 1000, 2000, 5000];
@@ -165,6 +171,7 @@ async function rehydrate() {
     // Dialog state lived in the old worker's memory; enabling Page again makes
     // Chrome replay a dialog that is still open.
     try { await cdp(tabId, 'Page.enable', {}, { timeoutMs: 2000 }); } catch { /* non-fatal */ }
+    await installFrameGuard(tabId);
   }
   await persistAttached();
   await refreshBadge();
@@ -271,13 +278,21 @@ async function refreshBadge() {
 }
 
 async function attachTab(tab, { openedBy } = {}) {
-  await chrome.debugger.attach({ tabId: tab.id }, CDP_VERSION);
+  try {
+    await chrome.debugger.attach({ tabId: tab.id }, CDP_VERSION);
+  } catch (err) {
+    // A password manager's frame already in the page blocks the share itself.
+    // Clear it out and try once more.
+    if (!isForeignFrameError(err) || !(await sweepForeignFrames(tab.id))) throw err;
+    await chrome.debugger.attach({ tabId: tab.id }, CDP_VERSION);
+  }
   // Page must be enabled before captureScreenshot is reliable on some targets.
   try {
     await cdp(tab.id, 'Page.enable', {});
   } catch {
     /* non-fatal: snapshot/read still work */
   }
+  await installFrameGuard(tab.id);
   attached.set(tab.id, { url: tab.url, title: tab.title, state: 'attached' });
   await persistAttached();
   await refreshBadge();
@@ -515,6 +530,7 @@ async function reattachAttempt(tabId, job) {
     // Forget it; Page.enable replays one that is still open.
     dialogs.delete(tabId);
     try { await cdp(tabId, 'Page.enable', {}); } catch { /* non-fatal */ }
+    await installFrameGuard(tabId);
     send({ type: 'event', event: 'reattached', tabId });
     diag('reattached', { tabId, attempts: job.attempt, waitedMs: Date.now() - job.startedAt });
     for (const w of job.waiters) w.resolve();
@@ -530,7 +546,73 @@ async function reattachAttempt(tabId, job) {
     await detachTab(tabId, { reason: 'reattach-timeout' });
     return;
   }
+  // The frame that knocked us off is still in the page. Take it out without
+  // the debugger, then come straight back rather than waiting out the backoff.
+  if (isForeignFrameError(error) && (await sweepForeignFrames(tabId))) {
+    if (reattaching.get(tabId) !== job) return;
+    job.timer = setTimeout(() => void reattachAttempt(tabId, job), REATTACH_AFTER_SWEEP_MS);
+    return;
+  }
   queueReattachAttempt(tabId, job);
+}
+
+// ---------------------------------------------------------------------------
+// foreign-extension frames
+// ---------------------------------------------------------------------------
+
+/** Chrome's refusal while another extension's frame is in the page. */
+function isForeignFrameError(err) {
+  return /chrome-extension:\/\/ URL of different extension/i.test(String(err?.message || err || ''));
+}
+
+/**
+ * Installs frameGuard in a freshly attached tab: on every future document (so
+ * it survives navigation) and in the current one. Lost when the debugger
+ * detaches, so every attach path calls this again.
+ */
+async function installFrameGuard(tabId) {
+  const source = `(${FRAME_GUARD_FN_SOURCE})(${JSON.stringify({ selfId: chrome.runtime.id })})`;
+  try {
+    await cdp(tabId, 'Page.addScriptToEvaluateOnNewDocument', { source }, { timeoutMs: FRAME_GUARD_TIMEOUT_MS });
+  } catch (err) {
+    diag('frame-guard-failed', { tabId, step: 'new-document', error: String(err?.message || err) });
+  }
+  // An open dialog blocks Runtime.evaluate; the new-document hook still covers
+  // the next page.
+  if (dialogs.has(tabId)) return;
+  try {
+    await cdp(tabId, 'Runtime.evaluate', { expression: source, returnByValue: true }, { timeoutMs: FRAME_GUARD_TIMEOUT_MS });
+  } catch (err) {
+    diag('frame-guard-failed', { tabId, step: 'current', error: String(err?.message || err) });
+  }
+}
+
+/**
+ * Removes other extensions' frames with chrome.scripting, which works while
+ * the debugger is off the tab. Runs in the content-script world, where
+ * chrome.dom can see into closed shadow roots. True if anything was removed.
+ */
+async function sweepForeignFrames(tabId) {
+  if (!chrome.scripting?.executeScript) return false;
+  const run = (allFrames) => chrome.scripting.executeScript({
+    target: { tabId, allFrames },
+    func: frameGuard,
+    args: [{ selfId: chrome.runtime.id }],
+  });
+  let results;
+  try {
+    results = await run(true);
+  } catch {
+    try {
+      results = await run(false);
+    } catch (err) {
+      diag('frame-sweep-failed', { tabId, error: String(err?.message || err) });
+      return false;
+    }
+  }
+  const removed = (results || []).reduce((n, r) => n + (Number(r?.result?.removed) || 0), 0);
+  diag('frame-sweep', { tabId, removed });
+  return removed > 0;
 }
 
 function cancelReattach(tabId, err) {
@@ -1201,5 +1283,5 @@ async function handleRequest(frame) {
 // never imports it.
 export {
   HANDLERS, handleRequest, attached, resolveTabId, KEYS,
-  friendlyAttachError, rehydrate, dialogs, checkHttpUrl, probeAttached, ensureConnected, cdp, abortInflight,
+  friendlyAttachError, rehydrate, dialogs, isForeignFrameError, sweepForeignFrames, checkHttpUrl, probeAttached, ensureConnected, cdp, abortInflight,
 };

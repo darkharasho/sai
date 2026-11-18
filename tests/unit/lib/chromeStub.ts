@@ -57,7 +57,8 @@ export function makeChromeStub(): ChromeStub {
           disconnect: vi.fn(),
         };
       }),
-      getManifest: () => ({ version: '0.4.0' }),
+      id: 'saiselfextensionid',
+      getManifest: () => ({ version: '0.5.0' }),
       onStartup: on('runtime.onStartup'),
       onInstalled: on('runtime.onInstalled'),
       lastError: undefined as undefined | { message: string },
@@ -68,6 +69,9 @@ export function makeChromeStub(): ChromeStub {
       setBadgeBackgroundColor: vi.fn(async () => undefined),
       setTitle: vi.fn(async () => undefined),
       onClicked: on('action.onClicked'),
+    },
+    scripting: {
+      executeScript: vi.fn(async () => [{ frameId: 0, result: { removed: 0 } }]),
     },
     alarms: {
       create: vi.fn(async () => undefined),

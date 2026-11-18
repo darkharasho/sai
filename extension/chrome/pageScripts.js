@@ -527,3 +527,112 @@ export const WAIT_CHECK_FN_SOURCE = `function (opts) {
   }
   return { met: met, url: location.href };
 }`;
+
+/**
+ * Keeps other extensions' frames out of a shared page.
+ *
+ * Chrome drops our debugger the moment a page holds another extension's frame
+ * (1Password's inline autofill menu is the usual culprit), and refuses to let
+ * us back while it is there. This removes such frames — and 1Password's
+ * `<com-1password-*>` host elements, whose iframe may sit in a closed shadow
+ * root — from a MutationObserver callback, which runs before the iframe's
+ * navigation can commit, so Chrome never sees the frame.
+ *
+ * A real function (not a source string) because chrome.scripting.executeScript
+ * takes one; FRAME_GUARD_FN_SOURCE is its source for CDP. It must stay
+ * self-contained: it is serialised and run inside the page.
+ *
+ * Idempotent per JS world: a second call just sweeps again. Returns
+ * `{ removed }`, the running total of elements it has taken out in this world.
+ */
+export function frameGuard(opts) {
+  opts = opts || {};
+  var KEY = '__saiFrameGuard';
+  var selfPrefix = opts.selfId ? ('chrome-extension://' + opts.selfId + '/').toLowerCase() : null;
+  var openRoot = (typeof chrome !== 'undefined' && chrome && chrome.dom && chrome.dom.openOrClosedShadowRoot)
+    ? function (el) { try { return chrome.dom.openOrClosedShadowRoot(el); } catch (e) { return null; } }
+    : function (el) { return el.shadowRoot || null; };
+
+  var state = window[KEY];
+  if (!state) {
+    state = { removed: 0, roots: [] };
+    try {
+      Object.defineProperty(window, KEY, { value: state, configurable: true, enumerable: false });
+    } catch (e) {
+      window[KEY] = state;
+    }
+  }
+
+  function foreignUrl(u) {
+    if (!u) return false;
+    u = String(u).trim().toLowerCase();
+    if (!/^(chrome-extension|moz-extension|extension):\/\//.test(u)) return false;
+    return !(selfPrefix && u.indexOf(selfPrefix) === 0);
+  }
+
+  function offender(el) {
+    if (!el || el.nodeType !== 1) return false;
+    var tag = String(el.tagName || '').toUpperCase();
+    if (tag.indexOf('COM-1PASSWORD-') === 0) return true;
+    if (tag === 'IFRAME' || tag === 'FRAME' || tag === 'EMBED') return foreignUrl(el.getAttribute('src'));
+    if (tag === 'OBJECT') return foreignUrl(el.getAttribute('data'));
+    return false;
+  }
+
+  function kill(el) {
+    try {
+      el.remove();
+      state.removed += 1;
+    } catch (e) { /* detached already */ }
+  }
+
+  var observer = null;
+
+  function watch(root) {
+    if (!observer || state.roots.indexOf(root) !== -1) return;
+    state.roots.push(root);
+    observer.observe(root, {
+      childList: true, subtree: true, attributes: true, attributeFilter: ['src', 'data'],
+    });
+  }
+
+  function sweep(node) {
+    if (!node) return;
+    if (offender(node)) { kill(node); return; }
+    if (node.nodeType === 1) {
+      var sr = openRoot(node);
+      if (sr) { watch(sr); sweep(sr); }
+    }
+    if (!node.querySelectorAll) return;
+    var all = node.querySelectorAll('*');
+    for (var i = 0; i < all.length; i++) {
+      var el = all[i];
+      if (!el.isConnected && node.isConnected) continue; // removed with an ancestor
+      if (offender(el)) { kill(el); continue; }
+      var inner = openRoot(el);
+      if (inner) { watch(inner); sweep(inner); }
+    }
+  }
+
+  if (!state.observer && typeof MutationObserver !== 'undefined') {
+    observer = new MutationObserver(function (records) {
+      for (var r = 0; r < records.length; r++) {
+        var rec = records[r];
+        if (rec.type === 'attributes') {
+          if (offender(rec.target)) kill(rec.target);
+          continue;
+        }
+        for (var a = 0; a < rec.addedNodes.length; a++) sweep(rec.addedNodes[a]);
+      }
+    });
+    state.observer = observer;
+    watch(document);
+  } else {
+    observer = state.observer || null;
+  }
+
+  sweep(document);
+  return { removed: state.removed };
+}
+
+export const FRAME_GUARD_FN_SOURCE = frameGuard.toString();
