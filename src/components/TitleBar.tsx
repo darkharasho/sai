@@ -373,17 +373,25 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
               const tabIndicator = (kind: 'meta' | 'project') => {
                 const approval = filter(approvalWorkspaces, kind).length;
                 const completed = filter(completedWorkspaces, kind).filter(p => !busyWorkspaces?.has(p)).length;
-                const busy = filter(busyWorkspaces, kind).length;
-                if (approval === 0 && completed === 0 && busy === 0) return null;
+                const busyAll = filter(busyWorkspaces, kind);
+                const busy = busyAll.filter(p => !waitingWorkspaces?.has(p)).length;
+                const waiting = busyAll.length - busy;
+                if (approval === 0 && completed === 0 && busy === 0 && waiting === 0) return null;
                 const cls = approval > 0
                   ? 'picker-tab-meta-icon approval'
                   : completed > 0
                     ? 'picker-tab-meta-icon completed'
-                    : 'picker-tab-meta-icon busy';
-                const title = approval > 0 ? 'Approval needed' : completed > 0 ? 'Response complete' : 'Working...';
+                    : busy > 0
+                      ? 'picker-tab-meta-icon busy'
+                      : 'picker-tab-meta-icon waiting';
+                const title = approval > 0 ? 'Approval needed'
+                  : completed > 0 ? 'Response complete'
+                  : busy > 0 ? 'Working...'
+                  : 'Waiting — wakeup scheduled or background tasks running';
                 if (kind === 'meta') return <Layers size={12} className={cls} aria-label={title} />;
                 if (approval > 0) return <span className="picker-tab-dot picker-tab-approval" title={title} />;
                 if (completed > 0) return <span className="picker-tab-dot picker-tab-completed" title={title} />;
+                if (busy === 0) return <span className="picker-tab-spinner waiting" title={title} />;
                 return <span className="picker-tab-spinner" title={title} />;
               };
               return (
@@ -1349,10 +1357,12 @@ export default function TitleBar({ projectPath, onProjectChange, completedWorksp
           flex-shrink: 0;
           animation: dot-spinner-pulse 2.2s ease-in-out infinite;
         }
+        .picker-tab-spinner.waiting { background: #a78bfa; }
         .picker-tab-meta-icon { flex-shrink: 0; }
         .picker-tab-meta-icon.approval { color: #f87171; animation: approval-blink 1.2s ease-in-out infinite; }
         .picker-tab-meta-icon.completed { color: #4ade80; }
         .picker-tab-meta-icon.busy { color: var(--accent); animation: dot-spinner-pulse 2.2s ease-in-out infinite; }
+        .picker-tab-meta-icon.waiting { color: #a78bfa; animation: dot-spinner-pulse 2.2s ease-in-out infinite; }
         .meta-workspace-row {
           display: flex;
           align-items: center;

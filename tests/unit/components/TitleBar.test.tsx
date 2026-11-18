@@ -310,6 +310,50 @@ describe('TitleBar status chip (audit 2026-06-11)', () => {
       expect(row?.querySelector('.ws-sq-question')).toBeTruthy();
     });
   });
+
+  it('shows a waiting tab indicator when every busy project workspace is waiting', async () => {
+    const mockSai = createMockSai();
+    mockSai.workspaceGetAll = vi.fn().mockResolvedValue([
+      { projectPath: '/ws/parked', status: 'active' },
+      { projectPath: '/ws/other', status: 'active' },
+    ]);
+    installMockSai(mockSai);
+    const { container } = render(
+      <TitleBar
+        {...defaultProps}
+        projectPath="/ws/other"
+        busyWorkspaces={new Set(['/ws/parked'])}
+        waitingWorkspaces={new Set(['/ws/parked'])}
+      />
+    );
+    fireEvent.click(screen.getByText(/other/, { selector: '.titlebar-project-name, button, span, div' }));
+    await waitFor(() => {
+      expect(container.querySelector('.picker-tab-spinner.waiting')).toBeTruthy();
+    });
+  });
+
+  it('keeps the working tab spinner when a project workspace is actually working', async () => {
+    const mockSai = createMockSai();
+    mockSai.workspaceGetAll = vi.fn().mockResolvedValue([
+      { projectPath: '/ws/parked', status: 'active' },
+      { projectPath: '/ws/working', status: 'active' },
+      { projectPath: '/ws/other', status: 'active' },
+    ]);
+    installMockSai(mockSai);
+    const { container } = render(
+      <TitleBar
+        {...defaultProps}
+        projectPath="/ws/other"
+        busyWorkspaces={new Set(['/ws/parked', '/ws/working'])}
+        waitingWorkspaces={new Set(['/ws/parked'])}
+      />
+    );
+    fireEvent.click(screen.getByText(/other/, { selector: '.titlebar-project-name, button, span, div' }));
+    await waitFor(() => {
+      expect(container.querySelector('.picker-tab-spinner')).toBeTruthy();
+    });
+    expect(container.querySelector('.picker-tab-spinner.waiting')).toBeNull();
+  });
 });
 
 describe('TitleBar Home workspace', () => {
