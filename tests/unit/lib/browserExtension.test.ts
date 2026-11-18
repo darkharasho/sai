@@ -843,3 +843,64 @@ describe('final review fixes', () => {
     expect(settled).toMatchObject({ met: false });
   });
 });
+
+describe('self-update', () => {
+  it('reloads on SAI\'s request, handing the shared tabs to the next version', async () => {
+    share(4);
+    share(7);
+    mod.ensureConnected();
+    await stub.fire('port.onMessage', { type: 'reload', version: '0.7.0' });
+    await vi.waitFor(() => expect(stub.chrome.runtime.reload).toHaveBeenCalledTimes(1));
+    const handoff = stub.chrome.storage.local.data[mod.RELOAD_HANDOFF_KEY];
+    expect(handoff).toMatchObject({ tabIds: [4, 7], from: '0.6.0' });
+    expect(stub.posted).toContainEqual(expect.objectContaining({ kind: 'self-reload', from: '0.6.0', to: '0.7.0', tabs: 2 }));
+  });
+
+  it('waits for in-flight requests before reloading', async () => {
+    share(1);
+    stub.cdp.script['Runtime.evaluate'] = { hang: true };
+    mod.ensureConnected();
+    await stub.fire('port.onMessage', { type: 'request', id: 'r1', method: 'read', params: { tabId: 1 } });
+    await stub.fire('port.onMessage', { type: 'reload', version: '0.7.0' });
+    await new Promise((r) => setTimeout(r, 150));
+    expect(stub.chrome.runtime.reload).not.toHaveBeenCalled();
+  });
+
+  it('shares the handed-over tabs again after the reload, once', async () => {
+    const next = makeChromeStub();
+    next.chrome.storage.local.data.reloadHandoff = { tabIds: [4, 7], from: '0.5.0', at: Date.now() };
+    const worker = await loadWorker(next);
+    // onInstalled fires too after a reload; it must not share the tabs twice.
+    await next.fire('runtime.onInstalled', {});
+    await vi.waitFor(() => expect(worker.attached.size).toBe(2));
+    expect(next.chrome.debugger.attach).toHaveBeenCalledTimes(2);
+    expect(next.chrome.debugger.attach).toHaveBeenCalledWith({ tabId: 4 }, '1.3');
+    expect(next.chrome.debugger.attach).toHaveBeenCalledWith({ tabId: 7 }, '1.3');
+    expect(next.chrome.storage.local.data.reloadHandoff).toBeUndefined();
+    await vi.waitFor(() => expect(next.posted).toContainEqual(
+      expect.objectContaining({ kind: 'updated', from: '0.5.0', to: '0.6.0', resumed: 2 }),
+    ));
+  });
+
+  it('ignores a stale handoff', async () => {
+    const next = makeChromeStub();
+    next.chrome.storage.local.data.reloadHandoff = { tabIds: [4], from: '0.5.0', at: Date.now() - 10 * 60_000 };
+    const worker = await loadWorker(next);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(worker.attached.size).toBe(0);
+    expect(next.chrome.debugger.attach).not.toHaveBeenCalled();
+    expect(next.chrome.storage.local.data.reloadHandoff).toBeUndefined();
+  });
+
+  it('keeps going when a handed-over tab has since closed', async () => {
+    const next = makeChromeStub();
+    next.chrome.storage.local.data.reloadHandoff = { tabIds: [4, 9], from: '0.5.0', at: Date.now() };
+    next.chrome.tabs.get.mockImplementation(async (id: number) => {
+      if (id === 9) throw new Error('No tab with id: 9.');
+      return { id, windowId: 1 };
+    });
+    const worker = await loadWorker(next);
+    await vi.waitFor(() => expect(worker.attached.size).toBe(1));
+    expect(worker.attached.has(4)).toBe(true);
+  });
+});

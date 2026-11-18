@@ -329,6 +329,22 @@ click at all, but it needs a signed CRX served from an HTTPS update URL, and it
 flags the browser as managed by an organization. Too much machinery, and too
 invasive, for a local developer tool.
 
+### Updates
+
+Chrome rereads an unpacked extension's folder only when the extension reloads,
+so SAI copying a new version into the folder changes nothing by itself. The
+extension sends its version in its `hello`. If that version is older than the
+`manifest.json` SAI ships, SAI sends a `{ type: 'reload' }` frame. The
+extension then waits up to 5 s for requests in flight, stores its shared tab
+IDs in `chrome.storage.local` and calls `chrome.runtime.reload()`. The new
+version shares those tabs again on startup, unless the handoff is more than 60 s
+old. SAI asks once per run, so a reload that comes back on the old version (the
+browser loads the extension from a folder SAI doesn't update) can't loop.
+Settings → Browser shows the running version and warns when it's behind.
+
+Extensions before v0.6.0 don't know the frame and need one manual reload in
+`chrome://extensions`.
+
 ## Tools
 
 | Tool | What it does |

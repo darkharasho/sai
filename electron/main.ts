@@ -666,7 +666,14 @@ function createWindow() {
     // spawns when the SAI Browser Bridge extension has a tab attached. Nothing
     // connects until the user clicks the extension's toolbar button.
     try {
-      const bridgeHandle = browserBridge.start();
+      const bridgeHandle = browserBridge.start({
+        // Read from the folder Chrome loads (syncing the stable copy first),
+        // so a reload the bridge asks for actually lands on this version.
+        bundledExtensionVersion: () => {
+          const manifest = JSON.parse(fs.readFileSync(path.join(extensionDir(), 'manifest.json'), 'utf8'));
+          return typeof manifest.version === 'string' ? manifest.version : null;
+        },
+      });
       console.log('[browser-bridge] socket listening at', bridgeHandle.socketPath);
     } catch (err) {
       console.error('[browser-bridge] failed to start:', err);

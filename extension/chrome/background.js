@@ -112,6 +112,12 @@ const FRAME_GUARD_TIMEOUT_MS = 2000;
 const RECONNECT_DELAYS_MS = [500, 1000, 2000, 5000];
 /** A port that stayed up this long resets the backoff. */
 const RECONNECT_STABLE_MS = 10_000;
+/** storage.local key for the tabs to re-share after reloading into an update. */
+const RELOAD_HANDOFF_KEY = 'reloadHandoff';
+/** A handoff older than this is stale (the reload never happened, or crashed). */
+const RELOAD_HANDOFF_MAX_AGE_MS = 60_000;
+/** How long a pending self-reload waits for in-flight requests to finish. */
+const RELOAD_DRAIN_MS = 5000;
 
 /** tabId -> { url, title, state: 'attached' | 'reattaching' }. */
 const attached = new Map();
@@ -173,10 +179,81 @@ async function rehydrate() {
     try { await cdp(tabId, 'Page.enable', {}, { timeoutMs: 2000 }); } catch { /* non-fatal */ }
     await installFrameGuard(tabId);
   }
+  const resumed = await resumeAfterReload();
   await persistAttached();
   await refreshBadge();
   if (attached.size) ensureConnected();
-  diag('rehydrate', { stored: stored.length, adopted: adopted.length });
+  diag('rehydrate', { stored: stored.length, adopted: adopted.length, resumed });
+}
+
+// ---------------------------------------------------------------------------
+// self-update
+// ---------------------------------------------------------------------------
+
+/**
+ * Chrome rereads an unpacked extension's folder only when it reloads. SAI
+ * keeps that folder current and, when it sees an older version connect,
+ * sends a `reload` frame. Reloading drops every debugger session and clears
+ * session storage, so the shared tabs are handed over in local storage and
+ * shared again by the new version.
+ */
+let reloading = false;
+
+async function reloadForUpdate(frame) {
+  if (reloading) return;
+  reloading = true;
+  const deadline = Date.now() + RELOAD_DRAIN_MS;
+  while (requestsInFlight > 0 && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  const tabIds = [...attached.keys()];
+  const from = chrome.runtime.getManifest().version;
+  diag('self-reload', { from, to: typeof frame?.version === 'string' ? frame.version : null, tabs: tabIds.length });
+  try {
+    await chrome.storage.local.set({ [RELOAD_HANDOFF_KEY]: { tabIds, from, at: Date.now() } });
+  } catch {
+    /* without the handoff the tabs just need sharing again by hand */
+  }
+  chrome.runtime.reload();
+}
+
+/** Consumed once per worker: concurrent rehydrates must not both re-share. */
+let handoffTaken = null;
+
+function takeReloadHandoff() {
+  if (!handoffTaken) {
+    handoffTaken = (async () => {
+      try {
+        const got = await chrome.storage.local.get([RELOAD_HANDOFF_KEY]);
+        await chrome.storage.local.remove(RELOAD_HANDOFF_KEY);
+        const h = got?.[RELOAD_HANDOFF_KEY];
+        if (!h || !Array.isArray(h.tabIds) || Date.now() - (h.at || 0) > RELOAD_HANDOFF_MAX_AGE_MS) return null;
+        return h;
+      } catch {
+        return null;
+      }
+    })();
+  }
+  return handoffTaken;
+}
+
+/** Shares again the tabs that were shared before reloading into an update. */
+async function resumeAfterReload() {
+  const handoff = await takeReloadHandoff();
+  if (!handoff) return 0;
+  let resumed = 0;
+  for (const tabId of handoff.tabIds) {
+    if (typeof tabId !== 'number' || attached.has(tabId)) continue;
+    try {
+      const tab = await chrome.tabs.get(tabId);
+      await attachTab(tab);
+      resumed += 1;
+    } catch (err) {
+      diag('reload-reshare-failed', { tabId, error: String(err?.message || err) });
+    }
+  }
+  diag('updated', { from: handoff.from, to: chrome.runtime.getManifest().version, resumed, of: handoff.tabIds.length });
+  return resumed;
 }
 
 function getTargets() {
@@ -685,6 +762,10 @@ function ensureConnected() {
 
   port.onMessage.addListener((frame) => {
     reconnectAttempt = 0; // SAI answered: the link works
+    if (frame?.type === 'reload') {
+      void reloadForUpdate(frame);
+      return;
+    }
     if (frame?.type !== 'request') return;
     requestsInFlight += 1;
     handleRequest(frame).then(
@@ -1283,5 +1364,5 @@ async function handleRequest(frame) {
 // never imports it.
 export {
   HANDLERS, handleRequest, attached, resolveTabId, KEYS,
-  friendlyAttachError, rehydrate, dialogs, isForeignFrameError, sweepForeignFrames, checkHttpUrl, probeAttached, ensureConnected, cdp, abortInflight,
+  friendlyAttachError, rehydrate, dialogs, reloadForUpdate, RELOAD_HANDOFF_KEY, isForeignFrameError, sweepForeignFrames, checkHttpUrl, probeAttached, ensureConnected, cdp, abortInflight,
 };

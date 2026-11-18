@@ -32,6 +32,19 @@ interface BridgeStatus {
   listening: boolean;
   connected: boolean;
   attachedTabIds: number[];
+  extensionVersion?: string | null;
+  bundledExtensionVersion?: string | null;
+}
+
+/** True when dotted version `a` is older than `b`. */
+function isOlder(a: string, b: string): boolean {
+  const pa = a.split('.').map((n) => parseInt(n, 10) || 0);
+  const pb = b.split('.').map((n) => parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] ?? 0) - (pb[i] ?? 0);
+    if (d) return d < 0;
+  }
+  return false;
 }
 
 /**
@@ -232,6 +245,10 @@ export default function BrowserSettings() {
     : status?.listening
       ? 'Listening — no browser connected'
       : 'Not running';
+  const outdated = Boolean(
+    status?.connected && status.extensionVersion && status.bundledExtensionVersion
+    && isOlder(status.extensionVersion, status.bundledExtensionVersion),
+  );
 
   return (
     <section className="settings-section">
@@ -248,7 +265,21 @@ export default function BrowserSettings() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
           <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: dotColor }} />
           <span style={{ color: 'var(--text)' }}>{statusText}</span>
+          {status?.connected && status.extensionVersion && (
+            <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>· extension v{status.extensionVersion}</span>
+          )}
         </div>
+        {outdated && (
+          <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 12, color: 'var(--orange)' }}>
+            <TriangleAlert size={14} style={{ flexShrink: 0, marginTop: 1 }} />
+            <span>
+              SAI ships extension v{status!.bundledExtensionVersion}, but the browser is still running
+              v{status!.extensionVersion}. Click reload on SAI Browser Bridge in{' '}
+              <span style={codeStyle}>chrome://extensions</span>, then share the tab again. Versions from
+              v0.6.0 on update themselves.
+            </span>
+          </div>
+        )}
         {info && (
           <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
             Extension folder: <span style={codeStyle}>{info.extensionDir}</span>

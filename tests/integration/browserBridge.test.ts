@@ -94,7 +94,7 @@ afterEach(() => {
 describe('browserBridge', () => {
   it('reports not-listening before start and listening after', async () => {
     bridge._resetForTests();
-    expect(bridge.status()).toEqual({ listening: false, connected: false, attachedTabIds: [] });
+    expect(bridge.status()).toEqual({ listening: false, connected: false, attachedTabIds: [], extensionVersion: null, bundledExtensionVersion: null });
 
     bridge._test_start({ socketPath: socketPath + '2', token: TOKEN });
     await bridge.whenListening();
@@ -194,6 +194,63 @@ describe('browserBridge', () => {
     await new Promise((r) => setTimeout(r, 20));
     expect(bridge.status().attachedTabIds).toEqual([12]);
     relay.close();
+  });
+
+  describe('extension self-update', () => {
+    const restartWith = async (bundled: string | null) => {
+      bridge._resetForTests();
+      bridge._test_start({ socketPath, token: TOKEN, bundledExtensionVersion: () => bundled });
+      await bridge.whenListening();
+    };
+
+    it('tells an older extension to reload into the bundled version', async () => {
+      await restartWith('0.6.0');
+      const relay = await FakeRelay.connect();
+      await relay.next(); // welcome
+      relay.send({ type: 'hello', role: 'extension', version: '0.5.0', attachedTabIds: [] });
+      expect(await relay.next()).toEqual({ type: 'reload', version: '0.6.0' });
+      expect(bridge.status()).toMatchObject({ extensionVersion: '0.5.0', bundledExtensionVersion: '0.6.0' });
+      relay.close();
+    });
+
+    it('asks only once per run, so a reload that lands on the old version cannot loop', async () => {
+      await restartWith('0.6.0');
+      const first = await FakeRelay.connect();
+      await first.next();
+      first.send({ type: 'hello', role: 'extension', version: '0.5.0', attachedTabIds: [] });
+      expect(await first.next()).toMatchObject({ type: 'reload' });
+      first.close();
+
+      const second = await FakeRelay.connect();
+      await second.next();
+      second.send({ type: 'hello', role: 'extension', version: '0.5.0', attachedTabIds: [] });
+      await new Promise((r) => setTimeout(r, 30));
+      const req = bridge.call('tabs.list');
+      expect(await second.next()).toMatchObject({ type: 'request', method: 'tabs.list' });
+      void req.catch(() => {});
+      second.close();
+    });
+
+    it.each([
+      ['the same version', '0.6.0'],
+      ['a newer version', '0.7.0'],
+    ])('leaves %s alone', async (_label, running) => {
+      await restartWith('0.6.0');
+      const relay = await FakeRelay.connect();
+      await relay.next();
+      relay.send({ type: 'hello', role: 'extension', version: running, attachedTabIds: [] });
+      await new Promise((r) => setTimeout(r, 30));
+      const req = bridge.call('tabs.list');
+      expect(await relay.next()).toMatchObject({ type: 'request' });
+      void req.catch(() => {});
+      relay.close();
+    });
+
+    it('compares versions numerically', () => {
+      expect(bridge.compareVersions('0.10.0', '0.9.0')).toBe(1);
+      expect(bridge.compareVersions('0.5', '0.5.0')).toBe(0);
+      expect(bridge.compareVersions('0.5.0', '0.6.0')).toBe(-1);
+    });
   });
 
   it('rejects in-flight calls when the browser disconnects', async () => {

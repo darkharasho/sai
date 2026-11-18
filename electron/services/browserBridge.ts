@@ -31,6 +31,10 @@ export interface BridgeStatus {
   /** An extension port is live (i.e. at least one tab was attached). */
   connected: boolean;
   attachedTabIds: number[];
+  /** Version the connected extension reported in its hello (null = none yet). */
+  extensionVersion: string | null;
+  /** Version of the extension SAI ships, when known. */
+  bundledExtensionVersion: string | null;
 }
 
 type PendingCall = { resolve: (v: unknown) => void; reject: (e: Error) => void; timer: NodeJS.Timeout };
@@ -46,6 +50,15 @@ interface Instance {
   listening: Promise<void>;
   /** When a relay was last connected (0 = never). */
   lastRelayAt: number;
+  extensionVersion: string | null;
+  bundledVersion: () => string | null;
+  /**
+   * Bundled versions we already asked the extension to reload into. Asked at
+   * most once per SAI run: if Chrome loads the extension from a folder SAI
+   * doesn't update, the reload comes back on the old version, and asking
+   * again would loop.
+   */
+  reloadRequested: Set<string>;
 }
 
 /**
@@ -98,6 +111,7 @@ function dropRelay(inst: Instance, message: string): void {
   inst.relay = null;
   inst.buffer = '';
   inst.attachedTabIds.clear();
+  inst.extensionVersion = null;
   rejectAllPending(inst, message);
 }
 
@@ -120,6 +134,11 @@ function handleFrame(inst: Instance, frame: unknown): void {
     if (Array.isArray(f.attachedTabIds)) {
       inst.attachedTabIds = new Set(f.attachedTabIds.filter((n): n is number => typeof n === 'number'));
     }
+    const version = typeof (f as { version?: unknown }).version === 'string'
+      ? (f as { version: string }).version
+      : null;
+    inst.extensionVersion = version;
+    maybeRequestReload(inst, version);
     return;
   }
 
@@ -149,6 +168,38 @@ function handleFrame(inst: Instance, frame: unknown): void {
     if (f.ok) pending.resolve(f.result);
     else pending.reject(new Error(f.error || 'extension returned an error'));
   }
+}
+
+/** Compares dotted numeric versions; missing parts count as 0. */
+export function compareVersions(a: string, b: string): number {
+  const pa = a.split('.').map((n) => parseInt(n, 10) || 0);
+  const pb = b.split('.').map((n) => parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] ?? 0) - (pb[i] ?? 0);
+    if (d) return d < 0 ? -1 : 1;
+  }
+  return 0;
+}
+
+/**
+ * Chrome only rereads an unpacked extension's folder when it is reloaded, so
+ * SAI updating the files does nothing until someone clicks reload in
+ * chrome://extensions. An extension that is older than the one SAI ships is
+ * told to reload itself instead (extensions from v0.6.0 understand this; older
+ * ones ignore the frame and need that one manual reload).
+ */
+function maybeRequestReload(inst: Instance, running: string | null): void {
+  let bundled: string | null = null;
+  try { bundled = inst.bundledVersion(); } catch { bundled = null; }
+  if (!running || !bundled) return;
+  if (compareVersions(running, bundled) >= 0) return;
+  if (inst.reloadRequested.has(bundled)) {
+    devlog('browserBridge', 'extension-outdated', { running, bundled, note: 'reload already requested this run' });
+    return;
+  }
+  inst.reloadRequested.add(bundled);
+  devlog('browserBridge', 'extension-reload-requested', { running, bundled });
+  try { inst.relay?.write(JSON.stringify({ type: 'reload', version: bundled }) + '\n'); } catch { /* noop */ }
 }
 
 function attachRelay(inst: Instance, socket: net.Socket): void {
@@ -216,6 +267,8 @@ interface StartOptions {
   token?: string;
   /** Tests listen on a temp socket and don't want a real ~/.sai token file. */
   writeTokenFile?: boolean;
+  /** Version of the extension SAI ships; an older connected one is told to reload. */
+  bundledExtensionVersion?: () => string | null;
 }
 
 function startInternal(opts: StartOptions = {}): BridgeHandle {
@@ -255,6 +308,9 @@ function startInternal(opts: StartOptions = {}): BridgeHandle {
     attachedTabIds: new Set(),
     listening,
     lastRelayAt: 0,
+    extensionVersion: null,
+    bundledVersion: opts.bundledExtensionVersion ?? (() => null),
+    reloadRequested: new Set(),
   };
   return instance.handle;
 }
@@ -264,8 +320,8 @@ export function whenListening(): Promise<void> {
   return instance?.listening ?? Promise.reject(new Error('browser bridge is not running'));
 }
 
-export function start(): BridgeHandle {
-  return startInternal();
+export function start(opts: Pick<StartOptions, 'bundledExtensionVersion'> = {}): BridgeHandle {
+  return startInternal(opts);
 }
 
 export function stop(): void {
@@ -283,11 +339,17 @@ export function stop(): void {
 }
 
 export function status(): BridgeStatus {
-  if (!instance) return { listening: false, connected: false, attachedTabIds: [] };
+  if (!instance) {
+    return { listening: false, connected: false, attachedTabIds: [], extensionVersion: null, bundledExtensionVersion: null };
+  }
+  let bundled: string | null = null;
+  try { bundled = instance.bundledVersion(); } catch { bundled = null; }
   return {
     listening: true,
     connected: instance.relay !== null,
     attachedTabIds: [...instance.attachedTabIds],
+    extensionVersion: instance.extensionVersion,
+    bundledExtensionVersion: bundled,
   };
 }
 

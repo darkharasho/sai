@@ -58,12 +58,26 @@ export function makeChromeStub(): ChromeStub {
         };
       }),
       id: 'saiselfextensionid',
-      getManifest: () => ({ version: '0.5.0' }),
+      getManifest: () => ({ version: '0.6.0' }),
+      reload: vi.fn(),
       onStartup: on('runtime.onStartup'),
       onInstalled: on('runtime.onInstalled'),
       lastError: undefined as undefined | { message: string },
     },
-    storage: { session: { get: vi.fn(async () => ({})), set: vi.fn(async () => undefined) } },
+    storage: {
+      session: { get: vi.fn(async () => ({})), set: vi.fn(async () => undefined) },
+      // A real key/value map: the self-update handoff is written by one worker
+      // and read back by the next.
+      local: (() => {
+        const data: Record<string, any> = {};
+        return {
+          data,
+          get: vi.fn(async (keys: string[]) => Object.fromEntries(keys.filter((k) => k in data).map((k) => [k, data[k]]))),
+          set: vi.fn(async (items: Record<string, any>) => { Object.assign(data, items); }),
+          remove: vi.fn(async (key: string) => { delete data[key]; }),
+        };
+      })(),
+    },
     action: {
       setBadgeText: vi.fn(async () => undefined),
       setBadgeBackgroundColor: vi.fn(async () => undefined),
