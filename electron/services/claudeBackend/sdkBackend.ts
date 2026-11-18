@@ -191,6 +191,11 @@ interface ScopeSession {
    *  liveTasks). A dev server started an hour ago must not make every
    *  "I'll check back" read as ⟳ forever. */
   liveTaskUserTurn: Map<string, number>;
+  /** Live tasks that backed an applied follow-up (the AI said it would act
+   *  on them). They keep counting as wake sources across later user sends —
+   *  "status?" mid-watch must not flip ⟳ to ⚠ — until they finish. A dev
+   *  server never lands here unless a follow-up turn started it. */
+  followUpTaskIds: Set<string>;
   /** A task stamped with the current userTurnSeq has finished. Only work the
    *  current user turn started and that actually drained can seed the
    *  follow-up resume grace — an old dev server holding the pin must not. */
@@ -1370,6 +1375,7 @@ export class SdkBackend implements ClaudeBackend {
       backgroundWaitTimer: null,
       userTurnSeq: 0,
       liveTaskUserTurn: new Map(),
+      followUpTaskIds: new Set(),
       userTurnTaskSettled: false,
       followUp: null,
       _projectPath: projectPath,
@@ -1487,6 +1493,7 @@ export class SdkBackend implements ClaudeBackend {
             session.liveTasks.delete(id);
             session.liveTaskTypes.delete(id);
             session.liveTaskUserTurn.delete(id);
+            session.followUpTaskIds.delete(id);
             session.sawTaskSettled = true;
           } else if (typeof status === 'string') session.liveTasks.set(id, status);
           break;
@@ -1497,6 +1504,7 @@ export class SdkBackend implements ClaudeBackend {
           session.liveTasks.delete(id);
           session.liveTaskTypes.delete(id);
           session.liveTaskUserTurn.delete(id);
+          session.followUpTaskIds.delete(id);
           session.sawTaskSettled = true;
           break;
       }
@@ -2157,6 +2165,10 @@ export class SdkBackend implements ClaudeBackend {
       if (session.followUp?.timer) clearTimeout(session.followUp.timer);
       const now = this._now();
       const wakeAlive = this._followUpWakeAlive(session, now);
+      // The tasks backing this follow-up stay wake sources past the next send.
+      for (const id of session.liveTasks.keys()) {
+        if (session.liveTaskUserTurn.get(id) === session.userTurnSeq) session.followUpTaskIds.add(id);
+      }
       session.followUp = {
         verdict,
         turnSeq,
@@ -2183,11 +2195,13 @@ export class SdkBackend implements ClaudeBackend {
     }
   }
 
-  /** A wake source is a live task started since the user's last message, or a
-   *  scheduled wakeup whose deadline is still ahead. Facts only — never the judge. */
+  /** A wake source is a live task started since the user's last message, a
+   *  live task an earlier follow-up was already following, or a scheduled
+   *  wakeup whose deadline is still ahead. Facts only — never the judge. */
   private _followUpWakeAlive(session: ScopeSession, now: number): boolean {
     for (const id of session.liveTasks.keys()) {
       if (session.liveTaskUserTurn.get(id) === session.userTurnSeq) return true;
+      if (session.followUpTaskIds.has(id)) return true;
     }
     return session.pendingWakeup && session.wakeupDeadline != null && now < session.wakeupDeadline;
   }

@@ -3471,6 +3471,20 @@ describe('follow-up judge', () => {
     backend.destroy();
   });
 
+  it('a watcher an earlier follow-up was following still counts after the user asks for status → following', async () => {
+    const judge = vi.fn().mockResolvedValue({ followUp: true, waitingFor: 'CI for PR #43' });
+    const { backend, send, feed } = setup(judge);
+    send('merge when CI passes');
+    await feed(TSTART('watch-1'), TEXT("I'll merge once CI passes"), RESULT("I'll merge once CI passes"));
+    send('status?');
+    await feed(TEXT('Still running; the watcher is on it.'), RESULT('Still running; the watcher is on it.'));
+    expect(followups().map((e) => e.state)).toEqual(['following', 'none', 'following']);
+    // Once the watcher finishes it stops counting.
+    await feed(TDONE('watch-1'));
+    expect(followups().at(-1)!.state).not.toBe('following');
+    backend.destroy();
+  });
+
   it('an older live task the Stop hook still counts (pin held) → stalled at once, not resuming', async () => {
     const judge = vi.fn()
       .mockResolvedValueOnce(null)
