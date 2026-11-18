@@ -255,10 +255,10 @@ export default function BrowserSettings() {
       <div className="settings-section-label">Browser</div>
 
       <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: -6, marginBottom: 14, lineHeight: 1.5 }}>
-        Lets SAI see a browser tab you explicitly share, so it can look at what you're looking at
-        instead of talking you through it. Nothing is shared until you click the extension's toolbar
-        button on a tab — and this slice is read-only: it can snapshot and read text, but never click
-        or type.
+        Lets SAI see and drive a browser tab you explicitly share, so it can look at what you're
+        looking at and act on it instead of talking you through it. Nothing is shared until you click
+        the extension's toolbar button on a tab; SAI can then read, click, type and navigate in that
+        tab until you click the button again to stop sharing.
       </p>
 
       <div style={cardStyle}>
