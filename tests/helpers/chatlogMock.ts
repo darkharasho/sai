@@ -177,6 +177,7 @@ export function createMockChatlog(sai: Record<string, any> = {}): MockChatlog {
           chats.get(cmd.chatId)!.meta.provider = cmd.provider;
         }
         const pre = stateOf(cmd.chatId);
+        const created = !exists;
         const queue = paused || (!cmd.now && !!pre && (pre.turn.streaming || pre.queue.length > 0));
         const entry = append(cmd.chatId, {
           type: 'user_message', clientId: cmd.clientId, text: cmd.text ?? '', origin: cmd.origin ?? 'desktop',
@@ -184,6 +185,8 @@ export function createMockChatlog(sai: Record<string, any> = {}): MockChatlog {
           ...(typeof cmd.taskId === 'string' ? { taskId: cmd.taskId } : {}),
           ...(queue ? { queued: true } : {}),
         }, { projectPath: cmd.projectPath, ...(cmd.provider ? { provider: cmd.provider } : {}) });
+        // Main can't see IndexedDB: a command-created log is not imported (R15.1).
+        if (created) chats.get(cmd.chatId)!.meta.imported = false;
         const prompt = typeof cmd.promptOverride === 'string' ? cmd.promptOverride : cmd.text;
         const st = stateOf(cmd.chatId)!;
         if (queue) {
@@ -207,9 +210,11 @@ export function createMockChatlog(sai: Record<string, any> = {}): MockChatlog {
         return { seq: entry.seq };
       }
       case 'settings': {
-        if (!chats.has(cmd.chatId) && (!cmd.projectPath || !cmd.settings?.provider)) throw new Error(`unknown chat ${cmd.chatId}`);
+        const created = !chats.has(cmd.chatId);
+        if (created && (!cmd.projectPath || !cmd.settings?.provider)) throw new Error(`unknown chat ${cmd.chatId}`);
         const entry = append(cmd.chatId, { type: 'settings_changed', settings: cmd.settings }, { projectPath: cmd.projectPath, provider: cmd.settings?.provider });
         if (cmd.settings?.provider) chats.get(cmd.chatId)!.meta.provider = cmd.settings.provider;
+        if (created) chats.get(cmd.chatId)!.meta.imported = false;
         return { seq: entry.seq };
       }
       case 'interrupt': known(cmd.chatId); dispatchStop(cmd.chatId); return {};
@@ -251,8 +256,11 @@ export function createMockChatlog(sai: Record<string, any> = {}): MockChatlog {
     onEvent: vi.fn((cb: (e: ChatLogEntry) => void) => { listeners.add(cb); return () => { listeners.delete(cb); }; }),
     appendClient: vi.fn(async (chatId: string, ev: ChatEvent, init?: { projectPath: string; provider?: Provider }) => {
       if (!ev || !CLIENT.has(ev.type)) throw new Error(`appendClient: ${String(ev?.type)} is not a client event type`);
-      if (!chats.has(chatId) && !init?.projectPath) throw new Error(`appendClient: unknown chat ${chatId} and no projectPath`);
-      return append(chatId, ev, init);
+      const created = !chats.has(chatId);
+      if (created && !init?.projectPath) throw new Error(`appendClient: unknown chat ${chatId} and no projectPath`);
+      const entry = append(chatId, ev, init);
+      if (created) chats.get(chatId)!.meta.imported = false;
+      return entry;
     }),
     importMessages: vi.fn(async (chatId: string, init: { projectPath: string; provider: Provider }, messages: ChatMessage[]) => {
       const c = chats.get(chatId);
@@ -265,9 +273,13 @@ export function createMockChatlog(sai: Record<string, any> = {}): MockChatlog {
         const prefix = messages.filter(m => !have.has(m.id));
         if (prefix.length === 0) return 'marked';
         const turn = state.turn.startIndex != null ? { ...state.turn, startIndex: state.turn.startIndex + prefix.length } : state.turn;
-        c.snapshot = { chatId, seq: c.head, state: { ...state, messages: [...prefix, ...state.messages], turn } };
+        // The snapshot sits AT the history_imported entry's seq (log truncated).
+        const entry: ChatLogEntry = { chatId, seq: c.head + 1, ts: Date.now(), ev: { type: 'history_imported' } };
+        c.head = entry.seq;
+        c.snapshot = { chatId, seq: entry.seq, state: { ...state, messages: [...prefix, ...state.messages], turn, lastSeq: entry.seq } };
         c.entries = [];
-        append(chatId, { type: 'history_imported' });
+        c.meta = { ...c.meta, headSeq: c.head, snapshotSeq: c.head, updatedAt: entry.ts };
+        if (live) for (const l of [...listeners]) l(entry);
         return 'folded';
       }
       if (!init?.projectPath) return false;

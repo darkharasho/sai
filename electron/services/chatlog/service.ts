@@ -177,13 +177,15 @@ export class ChatLogService {
     if (!ev || typeof ev.type !== 'string' || !CLIENT_TYPES.has(ev.type)) {
       throw new Error(`appendClient: ${String(ev?.type)} is not a client event type`);
     }
-    let storeInit: { projectPath: string; provider: ChatSettings['provider']; imported: boolean } | undefined;
+    let storeInit: { projectPath: string; provider: ChatSettings['provider'] } | undefined;
     if (!this.store.meta(chatId)) {
       const projectPath = init?.projectPath ?? (typeof ev.projectPath === 'string' ? ev.projectPath : '');
       if (!projectPath) throw new Error(`appendClient: unknown chat ${chatId} and no projectPath`);
-      // A client creates a chat only after checking IndexedDB (ensureChatInLog
-      // imports any history first), so its log starts as the whole history.
-      storeInit = { projectPath, provider: init?.provider ?? this.opts.providerOf(projectPath, chatId), imported: true };
+      // Left unimported: main can't see the renderer's IndexedDB (a phone may
+      // send to a chat whose history was never migrated), so a later
+      // ensureChatInLog must still be able to fold that history in. The
+      // renderer marks it once it has checked (importMessages).
+      storeInit = { projectPath, provider: init?.provider ?? this.opts.providerOf(projectPath, chatId) };
     }
     return this.appendAndFanOut(chatId, ev, storeInit);
   }
@@ -198,9 +200,7 @@ export class ChatLogService {
     init: { projectPath: string; provider: ChatSettings['provider']; title?: string; createdAt: number; updatedAt: number },
     messages: ChatMessage[],
   ): 'created' | 'folded' | 'marked' | false {
-    const result = this.store.importMessages(chatId, init, messages);
-    if (result === 'folded') this.appendAndFanOut(chatId, { type: 'history_imported' });
-    return result;
+    return this.store.importMessages(chatId, init, messages, (entry) => this.fanOut(chatId, entry));
   }
 
   /** For chats left mid-turn by a previous run with no live backend now: close the turn. */
@@ -262,15 +262,10 @@ export class ChatLogService {
     }
   }
 
-  private appendAndFanOut(chatId: string, ev: ChatEvent, init?: { projectPath: string; provider: ChatSettings['provider']; imported?: boolean }): ChatLogEntry {
+  private appendAndFanOut(chatId: string, ev: ChatEvent, init?: { projectPath: string; provider: ChatSettings['provider'] }): ChatLogEntry {
     const wasStreaming = this.store.meta(chatId)?.openTurn === true;
     const entry = this.store.append(chatId, ev, init);
-    try { this.opts.sendToRenderer('chatlog:event', entry); } catch (err) {
-      this.opts.devlog('chatlog.sendError', { chatId, error: errText(err) });
-    }
-    try { this.opts.bus()?.publish(`chatlog:${chatId}`, entry as unknown as Record<string, unknown>); } catch (err) {
-      this.opts.devlog('chatlog.busError', { chatId, error: errText(err) });
-    }
+    this.fanOut(chatId, entry);
     const isStreaming = this.store.meta(chatId)?.openTurn === true;
     const h = this.turnHooks;
     try {
@@ -281,6 +276,16 @@ export class ChatLogService {
       this.opts.devlog('chatlog.turnHookError', { chatId, type: ev.type, error: errText(err) });
     }
     return entry;
+  }
+
+  /** Sends an appended entry to the renderer (`chatlog:event`) and the remote bus (`chatlog:<chatId>`). */
+  private fanOut(chatId: string, entry: ChatLogEntry): void {
+    try { this.opts.sendToRenderer('chatlog:event', entry); } catch (err) {
+      this.opts.devlog('chatlog.sendError', { chatId, error: errText(err) });
+    }
+    try { this.opts.bus()?.publish(`chatlog:${chatId}`, entry as unknown as Record<string, unknown>); } catch (err) {
+      this.opts.devlog('chatlog.busError', { chatId, error: errText(err) });
+    }
   }
 
   private remember(key: string): void {

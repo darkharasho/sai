@@ -225,16 +225,21 @@ export class ChatLogStore {
 
   /**
    * Imports a chat's pre-log history. A new chat gets a seq-0 snapshot of it.
-   * A chat already logged but never imported (a backend event created it
-   * first) gets the history folded in FRONT of its state — messages it already
-   * holds (same id) are skipped — as a snapshot at the current head, the same
-   * mechanism as compaction. Returns 'created' | 'folded' | 'marked' (logged,
-   * nothing new to fold) | false (already imported, or no project to create it).
+   * A chat already logged but never imported (a backend event or a client
+   * command created it first) gets the history folded in FRONT of its state —
+   * messages it already holds (same id) are skipped. The fold appends a
+   * `history_imported` entry (handed to `onFolded` for fan-out), then writes the
+   * folded state as a snapshot AT that entry's seq (temp+rename), then
+   * truncates the log, so a reader resuming from the pre-fold head gets the
+   * snapshot. `imported` is set only once the snapshot is on disk. Returns
+   * 'created' | 'folded' | 'marked' (logged, nothing new to fold) | false
+   * (already imported, or no project to create it).
    */
   importMessages(
     chatId: string,
     init: { projectPath: string; provider: ChatSettings['provider']; title?: string; createdAt: number; updatedAt: number },
     messages: ChatMessage[],
+    onFolded?: (entry: ChatLogEntry) => void,
   ): 'created' | 'folded' | 'marked' | false {
     const meta = this.index[chatId];
     if (meta) {
@@ -243,19 +248,25 @@ export class ChatLogStore {
       this.flushBuffers();
       const have = new Set(l.state.messages.map(m => m.id));
       const prefix = messages.filter(m => m && !have.has(m.id));
-      meta.imported = true;
       if (init.title && !meta.title) meta.title = init.title;
       if (init.createdAt && init.createdAt < meta.createdAt) meta.createdAt = init.createdAt;
-      if (prefix.length === 0) { this.writeIndex(); return 'marked'; }
+      if (prefix.length === 0) {
+        meta.imported = true;
+        this.writeIndex();
+        return 'marked';
+      }
+      const entry = this.append(chatId, { type: 'history_imported' });
       const turn = l.state.turn.startIndex != null
         ? { ...l.state.turn, startIndex: l.state.turn.startIndex + prefix.length } : l.state.turn;
       const state: ChatState = { ...l.state, messages: [...prefix, ...l.state.messages], turn };
-      const snap: ChatSnapshot = { chatId, seq: l.headSeq, state };
+      const snap: ChatSnapshot = { chatId, seq: entry.seq, state };
       this.writeAtomic(this.snapPath(chatId), JSON.stringify(snap));
       fs.writeFileSync(this.logPath(chatId), '');
       l.state = state;
-      meta.snapshotSeq = l.headSeq;
+      meta.snapshotSeq = entry.seq;
+      meta.imported = true;
       this.writeIndex();
+      onFolded?.(entry);
       return 'folded';
     }
     if (!init?.projectPath || fs.existsSync(this.logPath(chatId)) || fs.existsSync(this.snapPath(chatId))) return false;

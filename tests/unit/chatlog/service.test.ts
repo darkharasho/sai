@@ -174,12 +174,21 @@ describe('ChatLogService: logs are created only by transcript events', () => {
     expect(svc.record({ type: 'ready', projectPath: '/p', scope: 'c1' })).toHaveLength(1);
   });
 
-  it('a backend-created log is not imported; a client-created one is', () => {
+  it('neither a backend- nor a client-created log is imported: main cannot see IndexedDB (R15.1)', () => {
     const { svc, store } = mk();
     svc.record({ type: 'streaming_start', projectPath: '/p', scope: 'b1', turnSeq: 1 });
     svc.appendClient('c1', { type: 'user_message', clientId: 'u', text: 'x' }, { projectPath: '/p' });
     expect(store.meta('b1')!.imported).toBeFalsy();
-    expect(store.meta('c1')!.imported).toBe(true);
+    expect(store.meta('c1')!.imported).toBeFalsy();
+  });
+
+  it('a phone-created log still takes the chat\'s older history fold (R15.1)', () => {
+    const { svc, store } = mk();
+    svc.appendClient('c1', { type: 'user_message', clientId: 'u', text: 'from phone' }, { projectPath: '/p' });
+    const res = svc.importMessages('c1', { projectPath: '/p', provider: 'claude', createdAt: 1, updatedAt: 2 },
+      [{ id: 'h1', role: 'user', content: 'old', timestamp: 1 }]);
+    expect(res).toBe('folded');
+    expect(store.state('c1')!.messages.map(m => m.content)).toEqual(['old', 'from phone']);
   });
 });
 
@@ -205,7 +214,8 @@ describe('ChatLogService.importMessages folds history into a log a backend event
     const read = store.read('c1', 0);
     const base = read.snapshot!.state;
     expect(base.messages.map(m => m.content)).toEqual(['old question', 'old answer', 'new reply']);
-    expect(read.entries.map(e => e.ev.type)).toEqual(['history_imported']);
+    expect(read.snapshot!.seq).toBe(sent.at(-1)!.seq);
+    expect(read.entries).toEqual([]);
     // Later events land after the folded history; a second import is refused.
     svc.record({ type: 'done', projectPath: '/p', scope: 'c1', turnSeq: 1 });
     expect(svc.importMessages('c1', init, history)).toBe(false);

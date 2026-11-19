@@ -49,6 +49,7 @@ export function useChatLog(chatId: string | null, fallbackSettings: ChatSettings
     let recoverFails = 0;
     let initialFails = 0;
     let initialFailed = false; // initial open is failing: live entries are dropped (open(0) re-reads them)
+    let epoch = 0;             // bumped by a history_imported reload: older recovery opens are stale
 
     const flush = () => {
       if (raf !== null) { cancelAnimationFrame(raf); raf = null; }
@@ -66,8 +67,9 @@ export function useChatLog(chatId: string | null, fallbackSettings: ChatSettings
       flush();
       recovering = true;
       const after = current ? current.lastSeq : 0;
+      const mine = epoch;
       api.open(chatId, after).then((res) => {
-        if (!alive) return;
+        if (!alive || mine !== epoch) return;
         let applied: ChatLogEntry[];
         if (res.snapshot && res.snapshot.seq > after) {
           current = reduceMany(res.snapshot.state, res.entries);
@@ -84,7 +86,7 @@ export function useChatLog(chatId: string | null, fallbackSettings: ChatSettings
         recoverFails = 0;
         drainBuffer();
       }).catch(() => {
-        if (!alive) return;
+        if (!alive || mine !== epoch) return;
         recovering = false;
         // Keep the gap entry buffered; retry with capped backoff (or sooner via the next in-order entry).
         retryTimer = setTimeout(() => { retryTimer = null; if (alive && !recovering) recover(); }, backoff(recoverFails++));
@@ -97,6 +99,11 @@ export function useChatLog(chatId: string | null, fallbackSettings: ChatSettings
         // Main folded the chat's pre-log history in front of what we hold:
         // reload from seq 0 (history, so no side effects).
         flush();
+        // A pending recovery (or its retry) must not race the reload.
+        epoch++;
+        if (retryTimer !== null) { clearTimeout(retryTimer); retryTimer = null; }
+        recovering = false;
+        recoverFails = 0;
         ready = false;
         buffer = [];
         loadInitial();

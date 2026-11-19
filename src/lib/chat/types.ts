@@ -68,9 +68,10 @@ export interface ChatMeta {
   /** Equals the post-reduce state's queue length; lets startup find persisted queues without reducing logs. */
   queued?: number;
   /**
-   * The chat's pre-log (IndexedDB) history is settled: imported, or the chat
-   * was created by a client (which checks IndexedDB first). False/absent for a
-   * log a backend event created — importMessages folds the history in front.
+   * The chat's pre-log (IndexedDB) history is settled: set only by
+   * importMessages (the renderer, which can see IndexedDB). False/absent for a
+   * log a backend event or a command (desktop or phone) created —
+   * importMessages folds the history in front.
    */
   imported?: boolean;
 }

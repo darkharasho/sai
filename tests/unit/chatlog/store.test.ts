@@ -182,6 +182,44 @@ describe('ChatLogStore', () => {
     expect(s.read('c1', 1).snapshot).toBeNull();
   });
 
+  it('a history fold snapshots at the history_imported seq, so read(after=H) returns it (R15.2)', () => {
+    const { s, dir } = mk();
+    s.append('c1', um('new'), init); // backend-created log, not imported
+    s.append('c1', done);            // H = 2
+    const folded: ChatLogEntry[] = [];
+    const msgs = [{ id: 'h1', role: 'user', content: 'old', timestamp: 1 }] as any;
+    expect(s.importMessages('c1', { ...init, createdAt: 1, updatedAt: 2 }, msgs, (e) => folded.push(e))).toBe('folded');
+    expect(folded.map(e => [e.seq, e.ev.type])).toEqual([[3, 'history_imported']]);
+    expect(s.meta('c1')).toMatchObject({ headSeq: 3, snapshotSeq: 3, imported: true });
+    // A client that held seq 2 recovers with after=2: it must get the folded snapshot.
+    const r = s.read('c1', 2);
+    expect(r.snapshot?.seq).toBe(3);
+    expect(r.snapshot!.state.messages.map(m => m.id)).toEqual(['h1', 'm1']);
+    expect(r.snapshot!.state.lastSeq).toBe(3);
+    expect(r.entries).toEqual([]);
+    expect(s.read('c1', 0).snapshot?.seq).toBe(3);
+    expect(s.read('c1', 3).snapshot).toBeNull();
+    // Survives a restart; the next append continues from the fold seq.
+    s.close();
+    const again = mk(dir).s;
+    expect(again.state('c1')!.messages.map(m => m.id)).toEqual(['h1', 'm1']);
+    expect(again.append('c1', um('later')).seq).toBe(4);
+  });
+
+  it('a fold whose snapshot write fails leaves the chat unimported (R15.3)', () => {
+    const { s, dir } = mk();
+    s.append('c1', um('new'), init);
+    fs.mkdirSync(path.join(dir, 'c1.snap.json')); // the rename onto it fails
+    const msgs = [{ id: 'h1', role: 'user', content: 'old', timestamp: 1 }] as any;
+    expect(() => s.importMessages('c1', { ...init, createdAt: 1, updatedAt: 2 }, msgs)).toThrow();
+    expect(s.meta('c1')!.imported).toBeFalsy();
+    fs.rmSync(path.join(dir, 'c1.snap.json'), { recursive: true });
+    fs.rmSync(path.join(dir, 'c1.snap.json.tmp'), { force: true });
+    expect(s.importMessages('c1', { ...init, createdAt: 1, updatedAt: 2 }, msgs)).toBe('folded');
+    expect(s.meta('c1')!.imported).toBe(true);
+    expect(s.state('c1')!.messages.map(m => m.id)).toEqual(['h1', 'm1']);
+  });
+
   it('list matches projectPath through a symlink', () => {
     const base = tmp();
     const real = path.join(base, 'real');

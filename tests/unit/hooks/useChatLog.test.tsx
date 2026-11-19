@@ -95,6 +95,32 @@ describe('useChatLog', () => {
     expect(result.current.lastApplied.current).toEqual([]);
   });
 
+  it('a history_imported reload cancels a pending recovery retry (R15.4)', async () => {
+    vi.useFakeTimers();
+    try {
+      openMock.mockResolvedValueOnce(res([entry('a', 1)]));
+      const { result } = renderHook(() => useChatLog('a', settings));
+      await flushMicro();
+      // Gap (seq 3 while at 1): the recovery open fails and a retry is scheduled.
+      openMock.mockRejectedValueOnce(new Error('x'));
+      act(() => { listener(entry('a', 3)); });
+      await flushMicro();
+      expect(openMock).toHaveBeenLastCalledWith('a', 1);
+      // Seq 2 is history_imported: reload from 0 (which returns everything).
+      const base = { ...(await import('../../../src/lib/chat/reducer')).emptyChatState(settings) };
+      const folded = { ...base, lastSeq: 2, messages: [{ id: 'old', role: 'user', content: 'old', timestamp: 0 }] };
+      openMock.mockResolvedValue(res([entry('a', 3)], { chatId: 'a', seq: 2, state: folded }));
+      act(() => { listener({ chatId: 'a', seq: 2, ts: 2, ev: { type: 'history_imported' } }); });
+      await flushMicro();
+      const callsAfterReload = openMock.mock.calls.length;
+      expect(openMock).toHaveBeenLastCalledWith('a', 0);
+      await act(async () => { await vi.advanceTimersByTimeAsync(6000); });
+      // The stale recovery retry never fires an open(after>0).
+      expect(openMock.mock.calls.length).toBe(callsAfterReload);
+      expect(result.current.state?.lastSeq).toBe(3);
+    } finally { vi.useRealTimers(); }
+  });
+
   it('batches many deltas into one render per frame', async () => {
     openMock.mockResolvedValue(res([entry('a', 1)]));
     let renders = 0;
