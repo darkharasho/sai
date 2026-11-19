@@ -242,7 +242,11 @@ function initChatLog(): void {
     getRemoteCeiling,
     devlog: (event, data) => devlog('chatlog', event, data),
   });
-  service.setOnTurnEnded((chatId) => commands.onTurnEnded(chatId));
+  service.setTurnHooks({
+    started: (chatId) => commands.onTurnStarted(chatId),
+    ended: (chatId, ev) => commands.onTurnEnded(chatId, ev),
+    idleDone: (chatId) => commands.onIdleDone(chatId),
+  });
   ipcMain.handle('chatlog:command', (_e, cmd: ChatCommand) => commands.run(cmd));
   chatCommands = commands;
   setLogImageReferences(() => service.referencedImageFiles());

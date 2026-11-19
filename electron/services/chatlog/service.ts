@@ -21,6 +21,15 @@ export interface ChatLogServiceOpts {
   devlog: (event: string, data: Record<string, unknown>) => void;
 }
 
+export interface TurnHooks {
+  /** A streaming_start was appended. */
+  started?(chatId: string): void;
+  /** An append flipped the reduced turn from streaming to idle; `ev` is that event. */
+  ended?(chatId: string, ev: ChatEvent): void;
+  /** A done was appended while no turn was open (a turn that never started). */
+  idleDone?(chatId: string): void;
+}
+
 const PROVIDERS: ReadonlyArray<ChatSettings['provider']> = ['claude', 'codex', 'gemini', 'kimi'];
 const CLIENT_TYPES = new Set<string>(CLIENT_EVENT_TYPES);
 const SEEN_IDS_CAP = 2000;
@@ -61,16 +70,16 @@ export class ChatLogService {
   private readonly legacy = new Map<string, string>();
   /** `${chatId}\0${msg.id}` of fanned-out '*' events, so a re-emitted card isn't appended twice. */
   private readonly seenIds = new Set<string>();
-  /** Called after an append flips the chat's turn from streaming to idle (ChatCommands drains its queue). */
-  private onTurnEnded: ((chatId: string) => void) | null = null;
+  /** Turn edges for ChatCommands (queue drain, in-flight tracking). */
+  private turnHooks: TurnHooks = {};
 
   constructor(opts: ChatLogServiceOpts) {
     this.opts = opts;
     this.store = opts.store;
   }
 
-  setOnTurnEnded(fn: ((chatId: string) => void) | null): void {
-    this.onTurnEnded = fn;
+  setTurnHooks(hooks: TurnHooks): void {
+    this.turnHooks = hooks ?? {};
   }
 
   /** The chat id bound to the legacy 'chat' scope for this project, if any. */
@@ -206,10 +215,14 @@ export class ChatLogService {
     try { this.opts.bus()?.publish(`chatlog:${chatId}`, entry as unknown as Record<string, unknown>); } catch (err) {
       this.opts.devlog('chatlog.busError', { chatId, error: errText(err) });
     }
-    if (wasStreaming && this.onTurnEnded && this.store.meta(chatId)?.openTurn === false) {
-      try { this.onTurnEnded(chatId); } catch (err) {
-        this.opts.devlog('chatlog.turnEndedError', { chatId, error: errText(err) });
-      }
+    const isStreaming = this.store.meta(chatId)?.openTurn === true;
+    const h = this.turnHooks;
+    try {
+      if (ev.type === 'streaming_start') h.started?.(chatId);
+      if (wasStreaming && !isStreaming) h.ended?.(chatId, ev);
+      else if (ev.type === 'done' && !wasStreaming) h.idleDone?.(chatId);
+    } catch (err) {
+      this.opts.devlog('chatlog.turnHookError', { chatId, type: ev.type, error: errText(err) });
     }
     return entry;
   }

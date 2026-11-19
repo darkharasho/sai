@@ -118,27 +118,36 @@ describe('ChatLogService.record', () => {
     expect(svc.record({ type: 'user_message', projectPath: '/p', scope: 'c1', text: 'hi' })).toHaveLength(1);
   });
 
-  it('calls onTurnEnded once when an appended event ends the turn', () => {
+  it('turn hooks: started on streaming_start, ended once on the flip, idleDone on a done with no open turn', () => {
     const { svc } = mk();
     const ended: string[] = [];
-    svc.setOnTurnEnded((id) => ended.push(id));
+    const started: string[] = [];
+    const idle: string[] = [];
+    svc.setTurnHooks({
+      started: (id) => started.push(id),
+      ended: (id, ev) => ended.push(`${id}:${ev.type}`),
+      idleDone: (id) => idle.push(id),
+    });
     svc.record({ type: 'done', projectPath: '/p', scope: 'c1', turnSeq: null });
     expect(ended).toEqual([]); // not streaming: no flip
+    expect(idle).toEqual(['c1']);
     svc.record({ type: 'streaming_start', projectPath: '/p', scope: 'c1', turnSeq: 1 });
+    expect(started).toEqual(['c1']);
     svc.record({ type: 'status', projectPath: '/p', scope: 'c1' });
     expect(ended).toEqual([]);
     svc.record({ type: 'done', projectPath: '/p', scope: 'c1', turnSeq: 1 });
-    expect(ended).toEqual(['c1']);
+    expect(ended).toEqual(['c1:done']);
     svc.record({ type: 'done', projectPath: '/p', scope: 'c1', turnSeq: 1 });
-    expect(ended).toEqual(['c1']);
+    expect(ended).toEqual(['c1:done']);
+    expect(idle).toEqual(['c1', 'c1']);
   });
 
-  it('a throwing onTurnEnded never breaks recording', () => {
+  it('a throwing turn hook never breaks recording', () => {
     const { svc, devlog } = mk();
-    svc.setOnTurnEnded(() => { throw new Error('boom'); });
+    svc.setTurnHooks({ ended: () => { throw new Error('boom'); } });
     svc.record({ type: 'streaming_start', projectPath: '/p', scope: 'c1', turnSeq: 1 });
     expect(svc.record({ type: 'done', projectPath: '/p', scope: 'c1', turnSeq: 1 })).toHaveLength(1);
-    expect(devlog).toHaveBeenCalledWith('chatlog.turnEndedError', expect.objectContaining({ chatId: 'c1' }));
+    expect(devlog).toHaveBeenCalledWith('chatlog.turnHookError', expect.objectContaining({ chatId: 'c1' }));
   });
 });
 

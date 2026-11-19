@@ -45,6 +45,8 @@ export function createProviderDispatch(devlog: (event: string, data: Record<stri
               effort: effort as CodexReasoningEffort | undefined,
               model: s.model, scope: a.scope, origin: a.origin,
             });
+          }).catch((err: unknown) => {
+            devlog('chatcmd.codexSendError', { scope: a.scope, error: err instanceof Error ? err.message : String(err) });
           });
           return;
         }
@@ -99,6 +101,13 @@ export function createProviderDispatch(devlog: (event: string, data: Record<stri
       if (getCodexBackend().isScopeBusy?.(projectPath, scope)) return true;
       const ws = getWorkspace(projectPath);
       return !!ws && (ws.gemini.scopeTurns.has(scope) || ws.kimi.scopeTurns.has(scope));
+    },
+
+    canDispatch(p, projectPath) {
+      // The CLI, Antigravity and ACP handlers drop a send for a project with no
+      // workspace (the renderer creates it when the project opens). Codex keeps
+      // its own per-scope sessions.
+      return p === 'codex' || !!getWorkspace(projectPath);
     },
 
     isLoadPaused() {
