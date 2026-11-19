@@ -33,6 +33,7 @@ import { buildOverlayPayload, truncateSnippet, updateRecentDone, type OverlayRow
 import { toolCallDetail } from './lib/toolCallDetail';
 import { findLatestTodos } from './components/Chat/TodoProgress';
 import { dropLegacySwarmData } from './lib/dropLegacySwarmData';
+import { migrateChatsToLog } from './lib/chat/migrateToLog';
 import { dbGetSessions, dbGetAllSessions, dbGetMessages, dbGetMessagesTail, dbPatchSessionMeta, dbPurgeExpired, dbExternalizeStoredImages, dbCollectReferencedImagePaths, dbCollectReferencedModelKeys, migrateFromLocalStorage } from './chatDb';
 import { queueSaveSession } from './lib/sessionSaveQueue';
 import type { ChatSession, ChatMessage, GitFile, OpenFile, WorkspaceContext, QueuedMessage, TerminalTab, PendingApproval, EffortLevel, CodexEffort, CodexModelOption, ModelChoice, ClaudeModelOption, AIProvider } from './types';
@@ -1651,6 +1652,7 @@ export default function App() {
       await migrateFromLocalStorage();
       const retentionDays = await window.sai.settingsGet('historyRetention', 14);
       await dbPurgeExpired(retentionDays);
+      void migrateChatsToLog().catch(e => console.warn('[chatlog] migration failed', e));
       await externalizeStoredImagesOnce();
       void pruneOrphanToolImagesOnce();
       void pruneModelCacheOnce();

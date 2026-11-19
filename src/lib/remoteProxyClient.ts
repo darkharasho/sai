@@ -1,3 +1,4 @@
+import { ensureChatInLog } from './chat/migrateToLog';
 import { dbGetSessions, dbGetMessages } from '../chatDb';
 
 export interface ActiveSessionSnapshot {
@@ -39,6 +40,7 @@ export function installRemoteProxyHandler(deps: RemoteProxyDeps): () => void {
       if (kind === 'listSessions') {
         result = await dbGetSessions(args.projectPath);
       } else if (kind === 'loadHistory') {
+        await ensureChatInLog(args.sessionId).catch(e => console.warn('[chatlog] ensureChatInLog failed', e));
         result = await dbGetMessages(args.sessionId);
       } else if (kind === 'getActiveSession') {
         result = deps.getActiveSession();
