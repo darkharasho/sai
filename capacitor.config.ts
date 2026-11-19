@@ -19,6 +19,10 @@ const config: CapacitorConfig = {
   },
   plugins: {
     Keyboard: { resize: 'native', resizeOnFullScreen: true },
+    // Without this the plugin shows nothing while the app is open. The desktop
+    // already skips the chat the phone has in the foreground, so what still
+    // arrives is about other chats and should show.
+    PushNotifications: { presentationOptions: ['banner', 'list', 'sound'] },
   },
 };
 

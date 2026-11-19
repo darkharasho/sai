@@ -140,7 +140,23 @@ export interface BridgeServerOpts {
   slashCommands?: ChatV2Opts['slashCommands'];
   readChatFile?: ChatV2Opts['readFile'];
   backgroundTasks?: ChatV2Opts['backgroundTasks'];
+  /**
+   * v2 push.register / push.unregister / phone.presence (ChatV2Opts.push).
+   * Liveness of the sending device is checked against `pairing`.
+   */
+  pushNotifications?: Omit<NonNullable<ChatV2Opts['push']>, 'isLiveDevice'>;
+  /** WebSocket heartbeat period (ms); 0 disables. Defaults to BRIDGE_HEARTBEAT_MS. */
+  heartbeatMs?: number;
 }
+
+/**
+ * Every period the bridge pings each socket; a socket that hasn't answered
+ * the previous ping (or sent anything) since is terminated. A phone that
+ * switched networks leaves a half-open socket no close ever fires for; its
+ * state (push presence, subscriptions) would otherwise outlive it for the
+ * kernel's TCP timeout.
+ */
+export const BRIDGE_HEARTBEAT_MS = 30_000;
 
 /** The only paths with CORS (the Capacitor app pairs and probes from its own origin). */
 const CORS_PATHS = new Set(['/pair', '/healthz']);
@@ -173,6 +189,9 @@ export class BridgeServer {
   private readonly latestGithubWatcher = new Map<string, BusEvent>();
   private workspaceStatusUnsub: (() => void) | null = null;
   private readonly chatV2: ChatV2;
+  /** Sockets heard from (pong or any message) since the last heartbeat. */
+  private readonly alive = new WeakSet<WebSocket>();
+  private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(private readonly opts: BridgeServerOpts) {
     this.signer = new ScreenshotUrlSigner(opts.screenshotSecret);
@@ -187,6 +206,10 @@ export class BridgeServer {
       slashCommands: opts.slashCommands,
       readFile: opts.readChatFile,
       backgroundTasks: opts.backgroundTasks,
+      push: opts.pushNotifications ? {
+        ...opts.pushNotifications,
+        isLiveDevice: (deviceId) => opts.pairing.isLive(deviceId),
+      } : undefined,
     });
     // Track the latest workspace.status + github.watcher events so we can
     // replay them when a new phone subscribes mid-flight.
@@ -266,6 +289,11 @@ export class BridgeServer {
     console.log(`[remote] bridge listening on http://${this.opts.tailnetIp}:${port}`);
     this.wss = new WebSocketServer({ server, path: '/ws' });
     this.wss.on('connection', (ws, req) => this.handleWs(ws, req));
+    const beat = this.opts.heartbeatMs ?? BRIDGE_HEARTBEAT_MS;
+    if (beat > 0) {
+      this.heartbeatTimer = setInterval(() => this.heartbeat(), beat);
+      this.heartbeatTimer.unref?.();
+    }
     this.opts.registerActiveSessionBroadcast?.((payload) => {
       if (!this.wss) return;
       for (const client of this.wss.clients) {
@@ -280,6 +308,7 @@ export class BridgeServer {
 
   async stop(): Promise<void> {
     const s = this.server; this.server = null;
+    if (this.heartbeatTimer) { clearInterval(this.heartbeatTimer); this.heartbeatTimer = null; }
     if (this.wss) {
       // Terminate active clients first; server.close() otherwise waits forever
       // for them to drain on their own (the phone WS will hold the process open).
@@ -298,6 +327,19 @@ export class BridgeServer {
     const sAny = s as unknown as { closeAllConnections?: () => void };
     try { sAny.closeAllConnections?.(); } catch { /* method unavailable */ }
     await new Promise<void>((resolve) => s.close(() => resolve()));
+  }
+
+  /** Terminates sockets silent since the last beat (runs their close path), pings the rest. */
+  private heartbeat(): void {
+    if (!this.wss) return;
+    for (const ws of this.wss.clients) {
+      if (!this.alive.has(ws)) {
+        try { ws.terminate(); } catch { /* already gone */ }
+        continue;
+      }
+      this.alive.delete(ws);
+      try { ws.ping(); } catch { /* closing */ }
+    }
   }
 
   /** Close all WS connections for a device (called by RemoteModule on revoke). */
@@ -434,7 +476,10 @@ export class BridgeServer {
 
     const close = (code: number, reason: string) => { try { ws.close(code, reason); } catch { /* already closed */ } };
 
+    this.alive.add(ws);
+    ws.on('pong', () => { this.alive.add(ws); });
     ws.on('message', async (data) => {
+      this.alive.add(ws);
       let msg: { type?: string; [k: string]: unknown };
       try { msg = JSON.parse(data.toString()); } catch { return close(1003, 'bad json'); }
 
@@ -475,7 +520,7 @@ export class BridgeServer {
       // workspace/chat-list pushes and app settings.
       if (isV2FrameType(msg.type)) {
         try {
-          await this.chatV2.handle(ws, msg);
+          await this.chatV2.handle(ws, msg, { deviceId });
         } catch (err) {
           try {
             ws.send(JSON.stringify({ v: 2, type: 'chat.error', code: 'internal', message: err instanceof Error ? err.message : String(err) }));

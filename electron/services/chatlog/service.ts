@@ -32,6 +32,10 @@ export interface TurnHooks {
   opened?(chatId: string): void;
 }
 
+/** How an append moved the chat's reduced turn (openTurn before and after). */
+export interface AppendTurnEdge { wasStreaming: boolean; isStreaming: boolean }
+export type AppendListener = (entry: ChatLogEntry, turn: AppendTurnEdge) => void;
+
 /** Every chatlog:* IPC channel ('chatlog:command' is registered by main alongside ChatCommands). */
 export const CHATLOG_IPC_CHANNELS = [
   'chatlog:open', 'chatlog:appendClient', 'chatlog:importMessages', 'chatlog:list', 'chatlog:delete',
@@ -110,6 +114,8 @@ export class ChatLogService {
   private readonly seenIds = new Set<string>();
   /** Turn edges for ChatCommands (queue drain, in-flight tracking). */
   private turnHooks: TurnHooks = {};
+  /** Observers of every live append (push notifications); never the importMessages fold. */
+  private readonly appendListeners = new Set<AppendListener>();
 
   constructor(opts: ChatLogServiceOpts) {
     this.opts = opts;
@@ -118,6 +124,16 @@ export class ChatLogService {
 
   setTurnHooks(hooks: TurnHooks): void {
     this.turnHooks = hooks ?? {};
+  }
+
+  /**
+   * Observes every appended entry after it is reduced and fanned out, with the
+   * turn edge it caused. A listener must be cheap and must not append; its
+   * errors are logged and never fail the append.
+   */
+  onAppend(cb: AppendListener): () => void {
+    this.appendListeners.add(cb);
+    return () => { this.appendListeners.delete(cb); };
   }
 
   /** The chat id bound to the legacy 'chat' scope for this project, if any. */
@@ -298,6 +314,11 @@ export class ChatLogService {
       else if (ev.type === 'done' && !wasStreaming) h.idleDone?.(chatId);
     } catch (err) {
       this.opts.devlog('chatlog.turnHookError', { chatId, type: ev.type, error: errText(err) });
+    }
+    for (const cb of this.appendListeners) {
+      try { cb(entry, { wasStreaming, isStreaming }); } catch (err) {
+        this.opts.devlog('chatlog.appendListenerError', { chatId, type: ev.type, error: errText(err) });
+      }
     }
     return entry;
   }

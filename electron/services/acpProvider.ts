@@ -848,6 +848,9 @@ export function registerAcpProviderHandlers(win: BrowserWindow, config: AcpProvi
           type: 'result',
           projectPath: ws.projectPath,
           scope,
+          // ACP's stopReason (end_turn, cancelled, max_tokens, …): a Stop that
+          // the agent answers with "cancelled" before onStop's done is not a finish.
+          ...(typeof result?.stopReason === 'string' ? { stopReason: result.stopReason } : {}),
           usage: {
             input_tokens: result?.usage?.input_tokens || 0,
             cache_read_input_tokens: result?.usage?.cached || 0,

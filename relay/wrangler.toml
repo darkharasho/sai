@@ -1,0 +1,33 @@
+# SAI push relay. Forwards sealed push blobs to APNs; never sees chat content.
+# Deploy inputs (the controller fills these; see README.md):
+#   - d1_databases.database_id: the id of the `sai-push` D1 database
+#   - secrets: APNS_KEY_P8, APNS_KEY_ID, APNS_TEAM_ID (wrangler secret put ...)
+name = "sai-push-relay"
+main = "src/index.ts"
+compatibility_date = "2026-11-01"
+workers_dev = true
+
+# No [observability] block on purpose: Workers Logs would persist invocation
+# metadata. The Worker's own log line (route, status, ms) is visible only in
+# `wrangler tail`.
+
+[[d1_databases]]
+binding = "DB"
+database_name = "sai-push"
+database_id = "55c8fd12-6c1e-4d9a-a048-54a0a7989084"
+
+# Rate limits. `[[ratelimits]]` is the GA form of the old
+# `[[unsafe.bindings]] type = "ratelimit"` binding (same fields).
+# namespace_id must be a positive integer, unique within the account.
+
+# 30 pushes per minute per pushId.
+[[ratelimits]]
+name = "PUSH_LIMITER"
+namespace_id = "9601"
+simple = { limit = 30, period = 60 }
+
+# 10 registrations per minute per client IP.
+[[ratelimits]]
+name = "REGISTER_LIMITER"
+namespace_id = "9602"
+simple = { limit = 10, period = 60 }

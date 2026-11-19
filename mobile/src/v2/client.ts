@@ -99,6 +99,7 @@ export class V2Client {
   private readonly listeners = new Map<string, Set<(frame: any) => void>>();
   private readonly stateListeners = new Set<(s: ConnState) => void>();
   private readonly resubListeners = new Set<(chatId: string, after: number) => void>();
+  private readonly authListeners = new Set<() => void>();
 
   private readonly chatSubs = new Map<string, ChatSub>();
   /** projectPath → its chats.subscribe frame (reqId included). */
@@ -178,6 +179,16 @@ export class V2Client {
   onResubscribe(cb: (chatId: string, after: number) => void): () => void {
     this.resubListeners.add(cb);
     return () => { this.resubListeners.delete(cb); };
+  }
+
+  /**
+   * Called after every auth_ok (first connect and each reconnect), once the
+   * replayed subscriptions and queued frames are out: frames sent from it go
+   * out at once. For per-socket state the desktop forgets with the socket.
+   */
+  onAuth(cb: () => void): () => void {
+    this.authListeners.add(cb);
+    return () => { this.authListeners.delete(cb); };
   }
 
   /** True once auth_ok arrived on the current socket. */
@@ -381,6 +392,10 @@ export class V2Client {
       }, PONG_TIMEOUT_MS);
     }, PING_INTERVAL_MS);
     this.setState(this.catchingUp() ? 'catching_up' : 'open');
+    for (const cb of [...this.authListeners]) {
+      if (this.ws !== sock) break;
+      try { cb(); } catch (err) { console.error('[v2] auth listener failed', err); }
+    }
   }
 
   // ─── frames ────────────────────────────────────────────────────────────────

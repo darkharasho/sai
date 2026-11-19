@@ -44,6 +44,7 @@ const codeStyle: React.CSSProperties = {
 export default function RemoteSettings() {
   const [enabled, setEnabled] = useState<boolean>(false);
   const [ceiling, setCeiling] = useState<'auto' | 'auto-read' | 'always-ask' | null>(null);
+  const [pushNotifications, setPushNotifications] = useState<boolean>(true);
   const [status, setStatus] = useState<Status | null>(null);
   const [devices, setDevices] = useState<Device[]>([]);
   const [pairUrl, setPairUrl] = useState<string | null>(null);
@@ -64,6 +65,17 @@ export default function RemoteSettings() {
   useEffect(() => {
     void window.sai.remote.getCeiling().then(setCeiling);
   }, []);
+
+  useEffect(() => {
+    void Promise.resolve(window.sai.settingsGet?.('pushNotifications', true))
+      .then((v: unknown) => setPushNotifications(v !== false));
+  }, []);
+
+  const togglePush = () => {
+    const next = !pushNotifications;
+    setPushNotifications(next);
+    void window.sai.settingsSet('pushNotifications', next);
+  };
 
   const handleCeiling = async (next: 'auto' | 'auto-read' | 'always-ask' | null) => {
     setCeiling(next);
@@ -116,6 +128,22 @@ export default function RemoteSettings() {
           className={`settings-toggle ${enabled ? 'on' : ''}`}
           onClick={toggle}
           aria-label="Toggle Mobile Remote"
+        >
+          <span className="settings-toggle-thumb" />
+        </button>
+      </div>
+
+      <div className="settings-row">
+        <div className="settings-row-info">
+          <div className="settings-row-name">Push notifications</div>
+          <div className="settings-row-desc">Send notifications to paired phones</div>
+        </div>
+        <button
+          className={`settings-toggle ${pushNotifications ? 'on' : ''}`}
+          onClick={togglePush}
+          role="switch"
+          aria-checked={pushNotifications}
+          aria-label="Send notifications to paired phones"
         >
           <span className="settings-toggle-thumb" />
         </button>

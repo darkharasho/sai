@@ -1,0 +1,47 @@
+[
+  {
+    "name": "ascii",
+    "keyB64": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+    "nonceB64": "oKGio6Slpqeoqaqr",
+    "plain": {
+      "v": 1,
+      "kind": "done",
+      "chatId": "chat-1",
+      "projectPath": "/home/u/proj",
+      "title": "Build finished",
+      "body": "All tests passed.",
+      "ts": 1763560000000
+    },
+    "sealedB64": "oKGio6SlpqeoqaqrnToKD3/6Lp0JDOm3JUDiuh/CPDK+lSEE/Xpv4l2RV2K6FzPSngB/Hy/ua6JsGfepJm8ualjyNRYuM25x0V/1wtvWp0MS0Y2UmIfdIq2MudOhb4vCrK/wCYYQWriduC/76/0JkSHv4/e+r2Mj8fvNWEUjEsu6G7kQDbutho5kxXv2JIZP43KwJwdpg5ZAs21a8jnZFCFIBIC0hNo="
+  },
+  {
+    "name": "unicode",
+    "keyB64": "ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8=",
+    "nonceB64": "sLGys7S1tre4ubq7",
+    "plain": {
+      "v": 1,
+      "kind": "question",
+      "chatId": "chat-2",
+      "projectPath": "/home/u/プロジェクト",
+      "title": "質問 🚀 Which branch?",
+      "body": "日本語のテキスト and emoji 😀👍🏽 mixed.",
+      "ts": 1763560001234
+    },
+    "sealedB64": "sLGys7S1tre4ubq7TdhcZagS5CxZZHOeIQe/R+NW0e/jJ/oTzGbMMLRTRLs293OXvZxiC/NGNy+s0/NKspqSL0p5YjpiPkq5PtY6R2f2Q07bN0bb+BE47cPx/graRo+wdJFODLhSpNWK4nbV/Ht0//zNY9SabBIKnr8saFvft3J7i7vLXACJFWjAc3OeWTgYgBzjeo+FvEzzBMB2fxR/bzvIJiVjPHx2Ph70Tk3jD7DM/yL75AuybhM8z9UFc35AkaGt1Ew/oA0Py5xMlMNtsJgi8zLrlbCncm7Tj2xBKk+1AS3fP6OOOw8="
+  },
+  {
+    "name": "long",
+    "keyB64": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8=",
+    "nonceB64": "wMHCw8TFxsfIycrL",
+    "plain": {
+      "v": 1,
+      "kind": "approval",
+      "chatId": "cccccccccccccccccccccccccccccccccccc",
+      "projectPath": "/pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp",
+      "title": "tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt",
+      "body": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "ts": 1763560002345
+    },
+    "sealedB64": "wMHCw8TFxsfIycrLJGZG7ECrEckf0EpSiZmArO+FLD6oT0Iq0JFQBEkOMyKmDHHkksV134lTEXEoXidQDucrVmIfQivU0BwSimuCMmzPvDbzNxUCjCuUDPtJp0eqz/Db9w8RcEjzqlQPropxmcOp3GcBV/aw+s69l3EqQQNoEhKv8Fpl5BtQOOE4Zb14F9FpV4Vu2xjok4Bq789Ydly7ZXBYkWvwXDENnM9L/YZUdu/qJIsBZrplrey+DNw5TDsLi9sq7u9NhwzXmezlv/Dz/BVx8bgIeMuI4HU+N1Jgn1HJJj476s5PKuBQaFu6+AcHoGamkI65eU4hA66xmzoSt5RsHmgAuXuUIlhDOHHhP51hPNRzcs6wWxbrxlKTCAr8/wL7GQVQMZXnVacs90eAyaUua4il4HycNIiZeuRA0vvz3HzUufZYBoB3k59faipiHSlUnme/hS0hx0FUgDl5K+EpUafdHrSOGH81PYT2FBLM/r/jRZnl+9yeJE5PFesao57VC475J5Z34lXY+DxfkosmP3tpoKcpK45hUSyFQHxsdANLvIalVWYDQfECdU8YlReE1Kws6NabvKasAqApGf3sDa3MMIJGTGl86nP1nVFRYjEJNW+Dokfh+RcZVyWRWycAvrC7X3pzl30a6ukr8r/KW3SBPLazEKpD6FnHNZi4cNvhqr+4EEhYWPS3pMosHkLRSA8NWsxa3jc="
+  }
+]

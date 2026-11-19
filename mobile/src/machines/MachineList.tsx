@@ -1,6 +1,13 @@
 import React, { useRef, useState } from 'react';
 import type { Machine } from './store';
 import type { Reach } from './hooks';
+import type { PushPermission } from '../native';
+
+export interface NotificationsRow {
+  permission: PushPermission;
+  /** Opens this app's page in iOS Settings (offered when denied). */
+  onOpenSettings(): void;
+}
 
 export interface MachineListProps {
   machines: Machine[];
@@ -9,7 +16,11 @@ export interface MachineListProps {
   onRename(id: string, label: string): void;
   onRemove(id: string): void;
   onAdd?(): void;
+  /** The push permission row; omitted where push isn't available. */
+  notifications?: NotificationsRow;
 }
+
+const permissionText: Record<PushPermission, string> = { granted: 'On', denied: 'Off', prompt: 'Asked after pairing' };
 
 const dotColor: Record<Reach, string> = { checking: 'var(--text-muted)', online: '#3fb950', offline: '#e5534b' };
 const LONG_PRESS_MS = 500;
@@ -18,7 +29,7 @@ function hostOf(baseUrl: string): string {
   try { return new URL(baseUrl).host; } catch { return baseUrl; }
 }
 
-export function MachineList({ machines, reach, onSelect, onRename, onRemove, onAdd }: MachineListProps) {
+export function MachineList({ machines, reach, onSelect, onRename, onRemove, onAdd, notifications }: MachineListProps) {
   const [menuId, setMenuId] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<{ id: string; value: string } | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -98,6 +109,18 @@ export function MachineList({ machines, reach, onSelect, onRename, onRemove, onA
         >
           Pair a desktop
         </button>
+      )}
+      {notifications && (
+        <div
+          data-testid="notifications-row"
+          style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 12, padding: 14, background: 'var(--surface-2)', borderRadius: 10 }}
+        >
+          <span style={{ flex: 1, fontSize: 'var(--text-lg)' }}>Notifications</span>
+          <span style={{ fontSize: 'var(--text-md)', color: 'var(--text-secondary)' }}>{permissionText[notifications.permission]}</span>
+          {notifications.permission === 'denied' && (
+            <button type="button" onClick={notifications.onOpenSettings}>Open Settings</button>
+          )}
+        </div>
       )}
     </div>
   );
