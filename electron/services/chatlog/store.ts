@@ -154,7 +154,7 @@ export class ChatLogStore {
       this.flushBuffers();
       fs.appendFileSync(this.logPath(chatId), line);
       this.writeIndex();
-      if (ev.type === 'done' && meta.headSeq - meta.snapshotSeq >= this.compactAfter) this.compact(chatId);
+      if (ev.type === 'done' && !l.state.turn.streaming && meta.headSeq - meta.snapshotSeq >= this.compactAfter) this.compact(chatId);
     }
     return entry;
   }
@@ -230,7 +230,8 @@ export class ChatLogStore {
     if (!meta) return;
     const l = this.load(chatId)!;
     this.flushBuffers();
-    const snap: ChatSnapshot = { chatId, seq: l.headSeq, state: persistableState(l.state) };
+    // Exact live state: a snapshot must agree with the entries that follow it.
+    const snap: ChatSnapshot = { chatId, seq: l.headSeq, state: l.state };
     this.writeAtomic(this.snapPath(chatId), JSON.stringify(snap));
     fs.writeFileSync(this.logPath(chatId), '');
     meta.snapshotSeq = l.headSeq;

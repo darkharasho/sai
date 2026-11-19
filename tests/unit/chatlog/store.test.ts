@@ -101,6 +101,42 @@ describe('ChatLogStore', () => {
     const { s: s2 } = mk(dir);
     expect(s2.state('c1')!.lastSeq).toBe(601);
     expect(s2.state('c1')!.messages.length).toBe(s.state('c1')!.messages.length);
+    expect(s2.state('c1')).toEqual(s.state('c1'));
+  });
+
+  it('a stale done during an open turn does not auto-compact and the turn stays open across reopen', () => {
+    const { s, dir } = mk(undefined, { compactAfter: 5, now: () => 5000 });
+    s.append('c1', um('go'), init);
+    s.append('c1', { type: 'streaming_start', turnSeq: 2 });
+    for (let i = 0; i < 10; i++) s.append('c1', um('m' + i));
+    s.append('c1', { type: 'done', turnSeq: 1 }); // stale
+    expect(s.state('c1')!.turn.streaming).toBe(true);
+    expect(s.meta('c1')!.snapshotSeq).toBe(0);
+    expect(fs.existsSync(path.join(dir, 'c1.snap.json'))).toBe(false);
+    expect(s.openTurnChatIds()).toEqual(['c1']);
+    s.close();
+    const { s: s2 } = mk(dir);
+    expect(s2.openTurnChatIds()).toEqual(['c1']);
+    expect(s2.state('c1')!.turn.streaming).toBe(true);
+  });
+
+  it('a manual compact() mid-turn keeps the exact state, including a pending approval, across reopen', () => {
+    const { s, dir } = mk(undefined, { now: () => 5000 });
+    s.append('c1', um('go'), init);
+    s.append('c1', { type: 'streaming_start', turnSeq: 1 });
+    s.append('c1', { type: 'approval_needed', toolName: 'Bash', toolUseId: 't1', command: 'ls', description: 'd', input: {} });
+    expect(s.state('c1')!.pendingApproval).not.toBeNull();
+    s.compact('c1');
+    const live = s.state('c1');
+    s.close();
+    const { s: s2 } = mk(dir);
+    expect(s2.state('c1')).toEqual(live);
+    expect(s2.state('c1')!.pendingApproval?.toolUseId).toBe('t1');
+    expect(s2.meta('c1')!.openTurn).toBe(true);
+    expect(s2.openTurnChatIds()).toEqual(['c1']);
+    const r = s2.read('c1', 0);
+    expect(r.snapshot?.state.turn.streaming).toBe(true);
+    expect(r.snapshot?.state.pendingApproval?.toolUseId).toBe('t1');
   });
 
   it('read returns snapshot when after predates compaction', () => {
