@@ -22,8 +22,13 @@ on:
     paths:
       - 'mobile/**'
       - 'capacitor.config.ts'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'src/types.ts'
+      - 'src/hooks/**'
       - 'src/components/Chat/**'
       - 'src/lib/chat/**'
+      - 'src/lib/clientId.ts'
       - 'src/styles/**'
       - '.github/workflows/ios.yml'
   workflow_dispatch:
@@ -111,6 +116,8 @@ jobs:
           TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           KEY_PATH="$RUNNER_TEMP/AuthKey_$KEY_ID.p8"
+          # Removed however the step ends (a failed archive or export included).
+          trap 'rm -f "$KEY_PATH"' EXIT
           (umask 077; printf '%s' "$KEY" > "$KEY_PATH")
           AUTH=(-allowProvisioningUpdates
             -authenticationKeyPath "$KEY_PATH"
@@ -145,5 +152,4 @@ jobs:
           xcodebuild -exportArchive -archivePath "$ARCHIVE" \
             -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" \
             -exportPath "$RUNNER_TEMP/export" "${AUTH[@]}"
-          rm -f "$KEY_PATH"
           echo "Uploaded $VERSION ($BUILD_NUMBER) to App Store Connect; it reaches TestFlight once processed." >> "$GITHUB_STEP_SUMMARY"

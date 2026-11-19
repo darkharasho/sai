@@ -30,9 +30,12 @@
 	<string>SAI uses the camera to scan the pairing QR code shown on your desktop.</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
-		<!-- Paired desktops are reached over the LAN, by Tailscale MagicDNS name
-		     (*.ts.net) or by raw tailnet IP (100.x.y.z). A raw IP can't be named in
-		     NSExceptionDomains, so plain-HTTP loads are allowed app-wide. -->
+		<!-- Paired desktops are reached over plain HTTP: on the LAN, by Tailscale
+		     MagicDNS name (*.ts.net, the exception domain below) or by raw tailnet
+		     IP (100.x.y.z). NSAllowsLocalNetworking already covers raw IP addresses,
+		     unqualified names and .local names. iOS ignores NSAllowsArbitraryLoads
+		     when NSAllowsLocalNetworking is present, so that key has no effect here
+		     (whether to drop it is left to Part 4). -->
 		<key>NSAllowsArbitraryLoads</key>
 		<true/>
 		<key>NSAllowsLocalNetworking</key>
