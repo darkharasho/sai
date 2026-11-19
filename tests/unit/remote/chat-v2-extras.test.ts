@@ -15,7 +15,7 @@ import { ChatLogStore } from '@electron/services/chatlog/store';
 import { ChatLogService } from '@electron/services/chatlog/service';
 import { ChatCommands, type ProviderDispatch } from '@electron/services/chatlog/commands';
 import { SessionBus } from '@electron/services/remote/session-bus';
-import { ChatV2, MAX_CHAT_LIST_SUBS, isV2FrameType, type ChatV2Opts } from '@electron/services/remote/chat-v2';
+import { ChatV2, MAX_CHAT_LIST_SUBS, MAX_CHAT_SUBS, isV2FrameType, type ChatV2Opts } from '@electron/services/remote/chat-v2';
 import { readRemoteFile, FILE_READ_MAX_BYTES } from '@electron/services/remote/fileRead';
 import { BackgroundTasksFeed } from '@electron/services/backgroundTasksFeed';
 import { listProviderModels } from '@electron/services/providerModels';
@@ -251,5 +251,59 @@ describe('ChatV2 chats.subscribe cap', () => {
     const other: any[] = [];
     await v2.handle({ send: (d: string) => { other.push(JSON.parse(d)); } }, { type: 'chats.subscribe', reqId: 1, projectPath: '/p40' });
     expect(other[0]).toMatchObject({ type: 'chats.list.result' });
+  });
+});
+
+describe('ChatV2 chat.subscribe cap', () => {
+  it('a socket may hold at most 64 chat subscriptions', async () => {
+    const { v2, ws, frames } = mk();
+    expect(MAX_CHAT_SUBS).toBe(64);
+    for (let i = 0; i < MAX_CHAT_SUBS; i++) await v2.handle(ws, { type: 'chat.subscribe', chatId: `c${i}` });
+    expect(frames.some((f) => f.type === 'chat.error')).toBe(false);
+    // Re-subscribing a held chat still works.
+    frames.length = 0;
+    await v2.handle(ws, { type: 'chat.subscribe', chatId: 'c0', after: 0 });
+    expect(frames.map((f) => f.type)).toEqual(['chat.entries']);
+    frames.length = 0;
+    await v2.handle(ws, { type: 'chat.subscribe', reqId: 'x', chatId: 'c64' });
+    // One answer per subscribe, with a code the phone's open settles on (it shifts its catch-up and rejects the open).
+    expect(frames).toEqual([{ v: 2, type: 'chat.error', reqId: 'x', chatId: 'c64', code: 'read_failed', message: 'too many chat subscriptions' }]);
+    // Freeing one makes room; another socket has its own budget.
+    await v2.handle(ws, { type: 'chat.unsubscribe', chatId: 'c1' });
+    frames.length = 0;
+    await v2.handle(ws, { type: 'chat.subscribe', chatId: 'c64' });
+    expect(frames.map((f) => f.type)).toEqual(['chat.entries']);
+    const other: any[] = [];
+    await v2.handle({ send: (d: string) => { other.push(JSON.parse(d)); } }, { type: 'chat.subscribe', chatId: 'c99' });
+    expect(other.map((f) => f.type)).toEqual(['chat.entries']);
+  });
+});
+
+describe('ChatV2 file.read concurrency', () => {
+  it('one file.read in flight per socket: a second gets busy with its reqId', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    const readFile = vi.fn(async () => { await gate; return { dataUrl: 'data:image/png;base64,AA==' }; });
+    const { v2, ws, frames } = mk({ readFile });
+    const first = v2.handle(ws, { type: 'file.read', reqId: 1, kind: 'toolImage', ref: '/a.png' });
+    await v2.handle(ws, { type: 'file.read', reqId: 2, kind: 'toolImage', ref: '/b.png' });
+    expect(frames).toEqual([{ v: 2, type: 'chat.error', reqId: 2, code: 'busy', message: 'a file read is already in flight' }]);
+    // Another socket isn't held up.
+    const other: any[] = [];
+    const otherWs = { send: (d: string) => { other.push(JSON.parse(d)); } };
+    const third = v2.handle(otherWs, { type: 'file.read', reqId: 3, kind: 'toolImage', ref: '/c.png' });
+    release();
+    await Promise.all([first, third]);
+    expect(frames.at(-1)).toMatchObject({ type: 'file.read.result', reqId: 1, dataUrl: 'data:image/png;base64,AA==' });
+    expect(other).toEqual([{ v: 2, type: 'file.read.result', reqId: 3, dataUrl: 'data:image/png;base64,AA==' }]);
+    // Settled (also after a failure): the next read runs.
+    readFile.mockImplementationOnce(async () => { throw new Error('boom'); });
+    await v2.handle(ws, { type: 'file.read', reqId: 4, kind: 'toolImage', ref: '/d.png' });
+    await v2.handle(ws, { type: 'file.read', reqId: 5, kind: 'toolImage', ref: '/e.png' });
+    expect(frames.slice(-2)).toEqual([
+      { v: 2, type: 'file.read.result', reqId: 4, error: 'read_failed' },
+      { v: 2, type: 'file.read.result', reqId: 5, dataUrl: 'data:image/png;base64,AA==' },
+    ]);
+    expect(readFile).toHaveBeenCalledTimes(4);
   });
 });

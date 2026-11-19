@@ -369,8 +369,15 @@ export function createSaiShim(client: V2Client, opts: SaiShimOpts): SaiBridge {
   const models = (provider: Provider) => () =>
     client.request<{ models?: unknown }>({ type: 'models.list', provider }).then((r) => r.models ?? []);
 
-  const readFile = (kind: 'toolImage' | 'model', ref: string) =>
-    client.request<{ dataUrl?: string; error?: string }>({ type: 'file.read', kind, ref }, 30_000);
+  // The desktop allows one file.read in flight per socket (a second gets `busy`): queue them.
+  let readTail: Promise<unknown> | null = null;
+  const readFile = (kind: 'toolImage' | 'model', ref: string) => {
+    const go = () => client.request<{ dataUrl?: string; error?: string }>({ type: 'file.read', kind, ref }, 30_000);
+    const next = readTail ? readTail.then(go) : go();
+    const tail: Promise<unknown> = next.catch(() => {}).then(() => { if (readTail === tail) readTail = null; });
+    readTail = tail;
+    return next;
+  };
 
   const started = () => Promise.resolve({ slashCommands: [] as unknown[] });
 

@@ -50,6 +50,9 @@ export interface ChatV2Opts {
 /** Most chats.subscribe projects one socket may hold. */
 export const MAX_CHAT_LIST_SUBS = 32;
 
+/** Most chat.subscribe chats one socket may hold (each adds a bus and a background-tasks listener). */
+export const MAX_CHAT_SUBS = 64;
+
 /** chats.changed is sent at most once per this window per subscribed project (trailing edge). */
 export const CHATS_THROTTLE_MS = 500;
 
@@ -143,6 +146,8 @@ export class ChatV2 {
   private readonly extras = new Map<V2Socket, SockExtras>();
   /** Sockets detached (closed) while an async subscribe was in flight. */
   private readonly closed = new WeakSet<V2Socket>();
+  /** Sockets with a file.read in flight (a read can be 25 MB, synchronous on the main thread). */
+  private readonly reading = new WeakSet<V2Socket>();
 
   constructor(private readonly opts: ChatV2Opts) {}
 
@@ -167,6 +172,11 @@ export class ChatV2 {
         const chatId = chatIdOf(msg.chatId);
         if (!chatId) return this.error(ws, null, 'bad_request', 'valid chatId required');
         const after = typeof msg.after === 'number' && Number.isInteger(msg.after) && msg.after > 0 ? msg.after : 0;
+        const held = this.socks.get(ws);
+        if (held && !held.has(chatId) && held.size >= MAX_CHAT_SUBS) {
+          // read_failed: one answer per subscribe that the phone settles the open on (like a failed read).
+          return this.error(ws, chatId, 'read_failed', 'too many chat subscriptions', msg.reqId);
+        }
         return this.subscribe(ws, chat, chatId, after);
       }
       case 'chat.unsubscribe': {
@@ -358,10 +368,12 @@ export class ChatV2 {
   }
 
   private async readFile(ws: V2Socket, reqId: unknown, kind: unknown, ref: unknown): Promise<void> {
+    if (this.reading.has(ws)) return this.error(ws, null, 'busy', 'a file read is already in flight', reqId);
     let result: FileReadResult;
     if (!this.opts.readFile) result = { error: 'unavailable' };
     else {
-      try { result = await this.opts.readFile(kind, ref); } catch { result = { error: 'read_failed' }; }
+      this.reading.add(ws);
+      try { result = await this.opts.readFile(kind, ref); } catch { result = { error: 'read_failed' }; } finally { this.reading.delete(ws); }
     }
     this.send(ws, { type: 'file.read.result', reqId, ...result });
   }

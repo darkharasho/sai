@@ -391,6 +391,26 @@ describe('saiShim mappings', () => {
     await expect(missing).resolves.toBeNull();
   });
 
+  it('file reads go one at a time (the desktop allows one in flight per socket)', async () => {
+    const sai = setup();
+    const a = sai.fsReadFileBase64('/u/tool-result-images/a.png');
+    const b = sai.fsReadFileBase64('/u/tool-result-images/b.png');
+    const c = sai.modelReadCached('k1');
+    await Promise.resolve();
+    expect(sentOf('file.read')).toHaveLength(1);
+    last().recv({ type: 'file.read.result', reqId: sentOf('file.read')[0].reqId, dataUrl: 'data:image/png;base64,AAA=' });
+    await expect(a).resolves.toBe('data:image/png;base64,AAA=');
+    await vi.waitFor(() => expect(sentOf('file.read')).toHaveLength(2));
+    expect(sentOf('file.read')[1]).toMatchObject({ ref: '/u/tool-result-images/b.png' });
+    // A failed read still frees the slot.
+    last().recv({ type: 'chat.error', reqId: sentOf('file.read')[1].reqId, code: 'read_failed', message: 'x' });
+    await b.catch(() => {});
+    await vi.waitFor(() => expect(sentOf('file.read')).toHaveLength(3));
+    expect(sentOf('file.read')[2]).toMatchObject({ kind: 'model', ref: 'k1' });
+    last().recv({ type: 'file.read.result', reqId: sentOf('file.read')[2].reqId, error: 'not_found' });
+    await expect(c).resolves.toBeNull();
+  });
+
   it('claudeStopTask sends stopTask; ok:false (already ended) resolves false', async () => {
     const sai = setup();
     const p = sai.claudeStopTask('/p', 'c1', 'task9');
