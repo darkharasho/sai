@@ -135,6 +135,19 @@ describe('ChatPanel renders from the durable log', () => {
     expect(sai.claudeSend).toHaveBeenCalledWith(P, 'new prompt', undefined, 'default', 'high', 'sonnet', 'c1');
   });
 
+  it('send works without crypto.randomUUID (the phone on iOS 15.0-15.3 mounts this panel)', async () => {
+    const real = globalThis.crypto;
+    vi.stubGlobal('crypto', { getRandomValues: (b: Uint8Array) => real.getRandomValues(b), subtle: real.subtle });
+    try {
+      await mount();
+      await act(async () => { await inputProps.onSend('old iphone'); });
+      await flushChatlog();
+      const sends = log.commands('send');
+      expect(sends).toHaveLength(1);
+      expect(sends[0].clientId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    } finally { vi.unstubAllGlobals(); }
+  });
+
   it('a reply that streamed while the panel was unmounted is complete on mount', async () => {
     log.append('c1', { type: 'user_message', clientId: 'u1', text: 'go', origin: 'desktop' }, { projectPath: P });
     log.append('c1', { type: 'streaming_start', turnSeq: 1 });
@@ -167,6 +180,8 @@ describe('ChatPanel renders from the durable log', () => {
     const [, userEv] = sai.chatlog.appendClient.mock.calls[0];
     const [, note] = sai.chatlog.appendClient.mock.calls[1];
     expect(note.noteId).toBe(`help-${userEv.clientId}`);
+    // The /help bubble is local (no backend send): the shape remote clientEvent accepts.
+    expect(userEv.local).toBe(true);
     expect(bubbles().map(b => b.getAttribute('data-msg-id'))).toEqual([userEv.clientId, `help-${userEv.clientId}`]);
     expect(log.commands()).toHaveLength(0);
 

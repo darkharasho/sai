@@ -263,3 +263,117 @@ describe('reduceChat: client events', () => {
     expect(JSON.parse(JSON.stringify(a))).toEqual(a);
   });
 });
+
+describe('reduceChat: waiting, follow-up and question state', () => {
+  const bgWait = { kind: 'background', resumeInSeconds: null, taskCount: 2 };
+
+  it('done with background wait sets waiting and ends streaming', () => {
+    const s = reduceMany(claude(), [
+      e(1, { type: 'streaming_start', turnSeq: 1 }),
+      e(2, { type: 'done', turnSeq: 1, wait: bgWait }),
+    ]);
+    expect(s.turn.streaming).toBe(false);
+    expect(s.waiting).toEqual({ kind: 'background', taskCount: 2, since: 1002 });
+  });
+
+  it('scheduled wait keeps resumeInSeconds; kind none sets nothing', () => {
+    const s = reduceMany(claude(), [
+      e(1, { type: 'streaming_start', turnSeq: 1 }),
+      e(2, { type: 'done', turnSeq: 1, wait: { kind: 'scheduled', resumeInSeconds: 90, taskCount: null } }),
+    ]);
+    expect(s.waiting).toEqual({ kind: 'scheduled', resumeInSeconds: 90, since: 1002 });
+    const none = reduceMany(claude(), [
+      e(1, { type: 'streaming_start', turnSeq: 1 }),
+      e(2, { type: 'done', turnSeq: 1, wait: { kind: 'none', resumeInSeconds: null, taskCount: null } }),
+    ]);
+    expect(none.waiting).toBeNull();
+  });
+
+  it('stale done with wait is ignored', () => {
+    const s = reduceMany(claude(), [
+      e(1, { type: 'streaming_start', turnSeq: 2 }),
+      e(2, { type: 'done', turnSeq: 1, wait: bgWait }),
+    ]);
+    expect(s.waiting).toBeNull();
+    expect(s.turn.streaming).toBe(true);
+  });
+
+  it('done with turnSeq null and a wait is never stale', () => {
+    const s = reduceMany(claude(), [
+      e(1, { type: 'streaming_start', turnSeq: 2 }),
+      e(2, { type: 'done', turnSeq: null, wait: bgWait }),
+    ]);
+    expect(s.waiting).toMatchObject({ kind: 'background' });
+  });
+
+  it('streaming_start clears waiting and followUp', () => {
+    const s = reduceMany(claude(), [
+      e(1, { type: 'streaming_start', turnSeq: 1 }),
+      e(2, { type: 'done', turnSeq: 1, wait: bgWait }),
+      e(3, { type: 'followup', state: 'following', waitingFor: 'CI' }),
+    ]);
+    expect(s.waiting).not.toBeNull();
+    expect(s.followUp).toEqual({ state: 'following', waitingFor: 'CI' });
+    const next = reduceChat(s, e(4, { type: 'streaming_start', turnSeq: 2 }));
+    expect(next.waiting).toBeNull();
+    expect(next.followUp).toBeNull();
+  });
+
+  it('result, a non-wait done, user_message and cleared clear waiting', () => {
+    const waiting = reduceMany(claude(), [
+      e(1, { type: 'streaming_start', turnSeq: 1 }),
+      e(2, { type: 'done', turnSeq: 1, wait: bgWait }),
+    ]);
+    expect(reduceChat(waiting, e(3, { type: 'result', turnSeq: null })).waiting).toBeNull();
+    expect(reduceChat(waiting, e(3, { type: 'done', turnSeq: null })).waiting).toBeNull();
+    expect(reduceChat(waiting, e(3, { type: 'user_message', text: 'hi' })).waiting).toBeNull();
+    expect(reduceChat(waiting, e(3, { type: 'cleared' })).waiting).toBeNull();
+  });
+
+  it('followup none clears followUp', () => {
+    const s = reduceChat(claude(), e(1, { type: 'followup', state: 'stalled' }));
+    expect(s.followUp).toEqual({ state: 'stalled' });
+    expect(reduceChat(s, e(2, { type: 'followup', state: 'none', turnSeq: 0 })).followUp).toBeNull();
+  });
+
+  it('question_needed then question_answered toggles awaitingQuestion', () => {
+    let s = reduceChat(claude(), e(1, { type: 'question_needed', toolUseId: 'q1' }));
+    expect(s.awaitingQuestion).toBe(true);
+    s = reduceChat(s, e(2, { type: 'question_answered', toolUseId: 'q1', answers: {} }));
+    expect(s.awaitingQuestion).toBe(false);
+    s = reduceChat(s, e(3, { type: 'plan_review_needed', toolUseId: 'p1' }));
+    expect(s.awaitingQuestion).toBe(true);
+    s = reduceChat(s, e(4, { type: 'plan_review_answered', toolUseId: 'p1', approved: true }));
+    expect(s.awaitingQuestion).toBe(false);
+    s = reduceChat(s, e(5, { type: 'question_needed', toolUseId: 'q2' }));
+    expect(reduceChat(s, e(6, { type: 'streaming_start', turnSeq: 1 })).awaitingQuestion).toBe(false);
+    expect(reduceChat(s, e(6, { type: 'cleared' })).awaitingQuestion).toBe(false);
+  });
+
+  it('result and done clear awaitingQuestion, even when stale', () => {
+    const asked = reduceMany(claude(), [
+      e(1, { type: 'streaming_start', turnSeq: 2 }),
+      e(2, { type: 'question_needed', toolUseId: 'q1' }),
+    ]);
+    expect(asked.awaitingQuestion).toBe(true);
+    expect(reduceChat(asked, e(3, { type: 'done', turnSeq: 2 })).awaitingQuestion).toBe(false);
+    expect(reduceChat(asked, e(3, { type: 'done', turnSeq: 1 })).awaitingQuestion).toBe(false);
+    expect(reduceChat(asked, e(3, { type: 'done', turnSeq: 1 })).turn.streaming).toBe(true);
+    expect(reduceChat(asked, e(3, { type: 'result', turnSeq: 2 })).awaitingQuestion).toBe(false);
+    expect(reduceChat(asked, e(3, { type: 'result', turnSeq: 1 })).awaitingQuestion).toBe(false);
+  });
+
+  it('a result carrying a wait sets waiting; a plain result clears it; stale ones do nothing to waiting', () => {
+    const s = reduceMany(claude(), [
+      e(1, { type: 'streaming_start', turnSeq: 1 }),
+      e(2, { type: 'result', turnSeq: 1, wait: bgWait }),
+    ]);
+    expect(s.waiting).toEqual({ kind: 'background', taskCount: 2, since: 1002 });
+    expect(reduceChat(s, e(3, { type: 'result', turnSeq: null })).waiting).toBeNull();
+    const stale = reduceMany(claude(), [
+      e(1, { type: 'streaming_start', turnSeq: 2 }),
+      e(2, { type: 'result', turnSeq: 1, wait: bgWait }),
+    ]);
+    expect(stale.waiting).toBeNull();
+  });
+});

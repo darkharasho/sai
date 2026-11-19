@@ -104,6 +104,41 @@ describe('ChatLogStore', () => {
     expect(s2.state('c1')).toEqual(s.state('c1'));
   });
 
+  it('waiting, followUp and awaitingQuestion survive compaction', () => {
+    const { s, dir } = mk(undefined, { compactAfter: 1, now: () => 5000 });
+    s.append('c1', um('go'), init);
+    s.append('c1', { type: 'streaming_start', turnSeq: 1 });
+    s.append('c1', { type: 'done', turnSeq: 1, wait: { kind: 'background', resumeInSeconds: null, taskCount: 1 } });
+    s.append('c1', { type: 'followup', state: 'following', waitingFor: 'CI' });
+    s.append('c1', { type: 'question_needed', toolUseId: 'q1' });
+    s.compact('c1'); // a turn end would clear the question, so compact explicitly
+    expect(s.meta('c1')!.snapshotSeq).toBe(s.meta('c1')!.headSeq);
+    s.close();
+    const { s: s2 } = mk(dir);
+    const st = s2.state('c1')!;
+    expect(st.waiting).toMatchObject({ kind: 'background', taskCount: 1 });
+    expect(st.followUp).toEqual({ state: 'following', waitingFor: 'CI' });
+    expect(st.awaitingQuestion).toBe(true);
+  });
+
+  it('a snapshot written before waiting/followUp/awaitingQuestion existed reads with safe defaults', () => {
+    const { s, dir } = mk(undefined, { compactAfter: 1, now: () => 5000 });
+    s.append('c1', um('go'), init);
+    s.append('c1', done); // compacts
+    s.close();
+    const file = path.join(dir, 'c1.snap.json');
+    const snap = JSON.parse(fs.readFileSync(file, 'utf8'));
+    delete snap.state.waiting; delete snap.state.followUp; delete snap.state.awaitingQuestion;
+    fs.writeFileSync(file, JSON.stringify(snap));
+    const { s: s2 } = mk(dir);
+    const st = s2.state('c1')!;
+    expect(st.waiting).toBeNull();
+    expect(st.followUp).toBeNull();
+    expect(st.awaitingQuestion).toBe(false);
+    const r = s2.read('c1', 0);
+    expect(r.snapshot?.state.waiting).toBeNull();
+  });
+
   it('a stale done during an open turn does not auto-compact and the turn stays open across reopen', () => {
     const { s, dir } = mk(undefined, { compactAfter: 5, now: () => 5000 });
     s.append('c1', um('go'), init);

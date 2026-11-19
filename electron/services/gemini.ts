@@ -210,11 +210,14 @@ export async function promptAntigravityOneShot(cwd: string, prompt: string, mode
   return promptAntigravityText({ isDestroyed: () => true } as BrowserWindow, ws, { scope: 'commit', prompt, model, approvalMode: 'plan' });
 }
 
+/** gemini:models (also remote v2 models.list). */
+export async function listGeminiModels(cwd?: string) {
+  const models = await listModels(cwd || process.cwd());
+  return { models, defaultModel: models[0]?.id || '' };
+}
+
 export function registerGeminiHandlers(win: BrowserWindow) {
-  ipcMain.handle('gemini:models', async (_event, cwd?: string) => {
-    const models = await listModels(cwd || process.cwd());
-    return { models, defaultModel: models[0]?.id || '' };
-  });
+  ipcMain.handle('gemini:models', (_event, cwd?: string) => listGeminiModels(cwd));
   ipcMain.handle('gemini:start', async (_event, cwd: string, ...tail: unknown[]) => {
     if (!cwd) return;
     const ws = getOrCreate(cwd);

@@ -59,6 +59,11 @@ export function __setCodexTelemetryForTests(service: CodexTelemetryService): voi
   codexTelemetry = service;
 }
 
+/** codex:models (also remote v2 models.list). */
+export function listCodexModels(forceRefresh?: boolean) {
+  return getCodexBackend().getModels(Boolean(forceRefresh));
+}
+
 /** Register the Codex IPC surface. Transport behavior lives in codexBackend. */
 export function registerCodexHandlers(): void {
   ipcMain.handle('codex:backendMode:get', () => getCodexBackendMode());
@@ -122,8 +127,7 @@ export function registerCodexHandlers(): void {
     },
   );
 
-  ipcMain.handle('codex:models', (_event, forceRefresh?: boolean) =>
-    getCodexBackend().getModels(Boolean(forceRefresh)));
+  ipcMain.handle('codex:models', (_event, forceRefresh?: boolean) => listCodexModels(forceRefresh));
 
   ipcMain.handle(
     'codex:start',

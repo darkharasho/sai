@@ -66,15 +66,27 @@ export function snapshotModel(opts: {
   return { ok: true, versionKey, ext, absPath, bytes: buf.length };
 }
 
-export function readCachedModel(versionKey: string, dir: string): Buffer | null {
+/** The cached file for a versionKey (`<dir>/<key>.<ext>`), or null. */
+export function cachedModelPath(versionKey: string, dir: string): string | null {
   if (!isVersionKey(versionKey)) return null;
   try {
     for (const name of fs.readdirSync(dir)) {
       const m = FILE_RE.exec(name);
-      if (m && m[1] === versionKey && modelExt(name)) return fs.readFileSync(path.join(dir, name));
+      if (m && m[1] === versionKey && modelExt(name)) return path.join(dir, name);
     }
   } catch {
-    // missing dir / unreadable file
+    // missing dir
+  }
+  return null;
+}
+
+export function readCachedModel(versionKey: string, dir: string): Buffer | null {
+  const file = cachedModelPath(versionKey, dir);
+  if (!file) return null;
+  try {
+    return fs.readFileSync(file);
+  } catch {
+    // unreadable file
   }
   return null;
 }

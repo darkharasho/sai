@@ -40,7 +40,7 @@
   font-size: 12px;
   cursor: pointer;
 }
-.sai-render-card__codebtn:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+@media (hover: hover) { .sai-render-card__codebtn:hover { background: var(--accent-hover); border-color: var(--accent-hover); } }
 /* Beefy render area */
 .sai-render-card__render {
   display: flex;
@@ -94,13 +94,13 @@
   color: #1a1110;
   border: 1px solid var(--accent);
 }
-.sai-render-appaccess__allow:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+@media (hover: hover) { .sai-render-appaccess__allow:hover { background: var(--accent-hover); border-color: var(--accent-hover); } }
 .sai-render-appaccess__deny {
   background: transparent;
   color: var(--text-muted);
   border: 1px solid var(--border-subtle);
 }
-.sai-render-appaccess__deny:hover { color: var(--text); border-color: var(--border-strong); }
+@media (hover: hover) { .sai-render-appaccess__deny:hover { color: var(--text); border-color: var(--border-strong); } }
 
 /* ── RenderToolCallCard — tight right-aligned card with animated code pane ─ */
 .sai-rc-wrap { display: flex; justify-content: flex-start; width: 100%; }
@@ -151,14 +151,14 @@
   color: var(--accent);
   border: 1px solid rgba(var(--accent-rgb), 0.45);
 }
-.sai-rc__codebtn:hover { background: var(--surface-3); border-color: var(--accent); }
+@media (hover: hover) { .sai-rc__codebtn:hover { background: var(--surface-3); border-color: var(--accent); } }
 .sai-rc[data-expanded="true"] .sai-rc__codebtn { background: var(--surface-4); border-color: var(--accent); }
 .sai-rc__openbtn {
   background: transparent;
   color: var(--text-muted);
   border: 1px solid var(--border-subtle);
 }
-.sai-rc__openbtn:hover { color: var(--text); border-color: var(--border-strong); background: var(--surface-2); }
+@media (hover: hover) { .sai-rc__openbtn:hover { color: var(--text); border-color: var(--border-strong); background: var(--surface-2); } }
 
 /* Render pane — hugs the mock's natural width; razor-thin frame on all sides.
    The mock's own width drives the card width (capped to the message list), so

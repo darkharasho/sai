@@ -213,6 +213,22 @@ describe('useChatLog', () => {
     expect(result.current.state?.lastSeq).toBe(6);
   });
 
+  it('a resync from the chat source re-reads from lastSeq and takes the newer snapshot', async () => {
+    const { emptyChatState } = await import('../../../src/lib/chat/reducer');
+    let resync: (chatId: string) => void = () => {};
+    (window as any).sai.chatlog.onResync = (cb: (id: string) => void) => { resync = cb; return () => { resync = () => {}; }; };
+    openMock.mockResolvedValueOnce(res([entry('a', 1), entry('a', 2)]));
+    const { result } = renderHook(() => useChatLog('a', settings));
+    await flushMicro();
+    openMock.mockResolvedValueOnce(res([], { chatId: 'a', seq: 9, state: { ...emptyChatState(settings), lastSeq: 9 } }));
+    act(() => { resync('b'); }); // another chat: ignored
+    expect(openMock).toHaveBeenCalledTimes(1);
+    act(() => { resync('a'); });
+    await flushMicro();
+    expect(openMock).toHaveBeenLastCalledWith('a', 2);
+    expect(result.current.state?.lastSeq).toBe(9);
+  });
+
   it('live entry during pending recovery is buffered; lastApplied accumulates', async () => {
     openMock.mockResolvedValueOnce(res([entry('a', 1)]));
     const { result } = renderHook(() => useChatLog('a', settings));

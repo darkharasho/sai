@@ -59,7 +59,7 @@ import { handleSaiNativeToolRequest, type PickFileOpts } from './render/saiNativ
 import { buildChartHtml, buildDiffHtml, type ChartInput, type DiffInput } from './render/builtinRenderers';
 import { registerPendingForm } from './render/formBridge';
 import { formTimeoutMs } from './render/formTimeout';
-import { RenderToolCallCard } from './components/Chat/RenderToolCallCard';
+import { renderToolCallFor } from './components/Chat/renderToolCallFor';
 import { installRemoteProxyHandler } from './lib/remoteProxyClient';
 import { applyQuestionEvent, mergeAttentionScopes, questionWorkspaces, questionSessionIdsFor, scopeKeyProjectPath } from './lib/awaitingQuestionTracker';
 import { mergeSessionRefresh } from './lib/sessionRefresh';
@@ -496,88 +496,95 @@ export default function App() {
   // Always-current snapshot of the active workspace+session for the proxy.
   const activeSessionRef = useRef<{ projectPath: string; scope: string; sessionId: string } | null>(null);
 
+  // The workspace rows a paired device sees: the proxied v1 workspaces.list and
+  // the v2 push (remoteReportWorkspaces) both build them here. `withSessions`
+  // gives each row the full status the workspace.status emitter last sent
+  // (per-session id arrays included) instead of the v1 summary.
+  const buildRemoteWorkspaces = useCallback(async (withSessions: boolean) => {
+    type Row = {
+      projectPath: string;
+      name: string;
+      kind: 'project' | 'meta';
+      members?: { projectPath: string; name: string }[];
+      status?: { busy?: boolean; streaming?: boolean; completed?: boolean; approval?: boolean; awaitingQuestion?: boolean };
+      state?: 'active' | 'open' | 'suspended' | 'recent';
+    };
+    const sai = (window as any).sai;
+    const metaByPath = new Map<string, MetaWorkspaceListItem>();
+    for (const m of metaWorkspaces) {
+      if (m.syntheticRoot) metaByPath.set(m.syntheticRoot, m);
+    }
+    const statusFor = (projectPath: string) => {
+      if (withSessions) return lastEmittedWorkspaceStatusRef.current.get(projectPath);
+      const busy = workspaceStatusRef.current.busy.has(projectPath);
+      const streaming = workspaceStatusRef.current.streaming.has(projectPath);
+      const completed = workspaceStatusRef.current.completed.has(projectPath);
+      const approval = workspaceStatusRef.current.approval.has(projectPath);
+      const awaitingQuestion = workspaceStatusRef.current.awaitingQuestion.has(projectPath);
+      if (!busy && !streaming && !completed && !approval && !awaitingQuestion) return undefined;
+      return { busy, streaming, completed, approval, awaitingQuestion };
+    };
+    const out: Row[] = [];
+    const seen = new Set<string>();
+
+    // 1. Active + suspended workspaces from the SAI workspace registry
+    const allWorkspaces: Array<{ projectPath: string; status: 'active' | 'suspended' | 'recent' }> =
+      (await sai?.workspaceGetAll?.()) ?? [];
+    const activePath = activeProjectPathRef.current;
+    for (const w of allWorkspaces) {
+      if (seen.has(w.projectPath)) continue;
+      seen.add(w.projectPath);
+      const meta = metaByPath.get(w.projectPath);
+      const state: Row['state'] = w.projectPath === activePath
+        ? 'active'
+        : w.status === 'suspended'
+        ? 'suspended'
+        : w.status === 'recent'
+        ? 'recent'
+        : 'open';
+      if (meta) {
+        out.push({
+          projectPath: w.projectPath,
+          name: meta.name,
+          kind: 'meta',
+          members: meta.projects.map((p) => ({ projectPath: p.path, name: p.linkName })),
+          status: statusFor(w.projectPath),
+          state,
+        });
+      } else {
+        const base = w.projectPath.split('/').filter(Boolean).pop() ?? w.projectPath;
+        out.push({ projectPath: w.projectPath, name: base, kind: 'project', status: statusFor(w.projectPath), state });
+      }
+    }
+
+    // 2. Recent projects (paths only) not already represented
+    const recentPaths: string[] = (await sai?.getRecentProjects?.()) ?? [];
+    for (const p of recentPaths) {
+      if (seen.has(p)) continue;
+      seen.add(p);
+      const meta = metaByPath.get(p);
+      if (meta) {
+        out.push({
+          projectPath: p,
+          name: meta.name,
+          kind: 'meta',
+          members: meta.projects.map((mp) => ({ projectPath: mp.path, name: mp.linkName })),
+          state: 'recent',
+        });
+      } else {
+        const base = p.split('/').filter(Boolean).pop() ?? p;
+        out.push({ projectPath: p, name: base, kind: 'project', state: 'recent' });
+      }
+    }
+
+    return out;
+  }, [metaWorkspaces]);
+
   // Remote proxy: handle chatDb read requests forwarded from paired devices
   useEffect(() => {
     const off = installRemoteProxyHandler({
       getActiveSession: () => activeSessionRef.current,
-      listWorkspaces: async () => {
-        type Row = {
-          projectPath: string;
-          name: string;
-          kind: 'project' | 'meta';
-          members?: { projectPath: string; name: string }[];
-          status?: { busy?: boolean; streaming?: boolean; completed?: boolean; approval?: boolean; awaitingQuestion?: boolean };
-          state?: 'active' | 'open' | 'suspended' | 'recent';
-        };
-        const sai = (window as any).sai;
-        const metaByPath = new Map<string, MetaWorkspaceListItem>();
-        for (const m of metaWorkspaces) {
-          if (m.syntheticRoot) metaByPath.set(m.syntheticRoot, m);
-        }
-        const statusFor = (projectPath: string) => {
-          const busy = workspaceStatusRef.current.busy.has(projectPath);
-          const streaming = workspaceStatusRef.current.streaming.has(projectPath);
-          const completed = workspaceStatusRef.current.completed.has(projectPath);
-          const approval = workspaceStatusRef.current.approval.has(projectPath);
-          const awaitingQuestion = workspaceStatusRef.current.awaitingQuestion.has(projectPath);
-          if (!busy && !streaming && !completed && !approval && !awaitingQuestion) return undefined;
-          return { busy, streaming, completed, approval, awaitingQuestion };
-        };
-        const out: Row[] = [];
-        const seen = new Set<string>();
-
-        // 1. Active + suspended workspaces from the SAI workspace registry
-        const allWorkspaces: Array<{ projectPath: string; status: 'active' | 'suspended' | 'recent' }> =
-          (await sai?.workspaceGetAll?.()) ?? [];
-        const activePath = activeProjectPathRef.current;
-        for (const w of allWorkspaces) {
-          if (seen.has(w.projectPath)) continue;
-          seen.add(w.projectPath);
-          const meta = metaByPath.get(w.projectPath);
-          const state: Row['state'] = w.projectPath === activePath
-            ? 'active'
-            : w.status === 'suspended'
-            ? 'suspended'
-            : w.status === 'recent'
-            ? 'recent'
-            : 'open';
-          if (meta) {
-            out.push({
-              projectPath: w.projectPath,
-              name: meta.name,
-              kind: 'meta',
-              members: meta.projects.map((p) => ({ projectPath: p.path, name: p.linkName })),
-              status: statusFor(w.projectPath),
-              state,
-            });
-          } else {
-            const base = w.projectPath.split('/').filter(Boolean).pop() ?? w.projectPath;
-            out.push({ projectPath: w.projectPath, name: base, kind: 'project', status: statusFor(w.projectPath), state });
-          }
-        }
-
-        // 2. Recent projects (paths only) not already represented
-        const recentPaths: string[] = (await sai?.getRecentProjects?.()) ?? [];
-        for (const p of recentPaths) {
-          if (seen.has(p)) continue;
-          seen.add(p);
-          const meta = metaByPath.get(p);
-          if (meta) {
-            out.push({
-              projectPath: p,
-              name: meta.name,
-              kind: 'meta',
-              members: meta.projects.map((mp) => ({ projectPath: mp.path, name: mp.linkName })),
-              state: 'recent',
-            });
-          } else {
-            const base = p.split('/').filter(Boolean).pop() ?? p;
-            out.push({ projectPath: p, name: base, kind: 'project', state: 'recent' });
-          }
-        }
-
-        return out;
-      },
+      listWorkspaces: () => buildRemoteWorkspaces(false),
       setActiveWorkspace: (path) => {
         setActiveProjectPath(path);
         setCompletedWorkspaces(prev => {
@@ -595,7 +602,7 @@ export default function App() {
       },
     });
     return off;
-  }, [metaWorkspaces]);
+  }, [buildRemoteWorkspaces]);
 
   useEffect(() => { workspacesRef.current = workspaces; }, [workspaces]);
   aiProviderRef.current = aiProvider;
@@ -661,6 +668,20 @@ export default function App() {
       }
     }
   }, [busyWorkspaces, chatStreamingWorkspaces, completedWorkspaces, approvalSessions, awaitingQuestionWorkspaces, streamingScopes, suspendedScopes]);
+
+  // Push the workspace list to main (v2 workspaces.subscribe) whenever the list
+  // or a status changes, debounced to 250ms. Runs after the status emitter
+  // above, so lastEmittedWorkspaceStatusRef is current.
+  useEffect(() => {
+    const sai = window.sai as any;
+    if (!sai?.remoteReportWorkspaces) return;
+    const t = setTimeout(() => {
+      buildRemoteWorkspaces(true)
+        .then((list) => sai.remoteReportWorkspaces(list))
+        .catch(() => { /* best effort: the next change re-reports */ });
+    }, 250);
+    return () => clearTimeout(t);
+  }, [buildRemoteWorkspaces, workspaces, activeProjectPath, busyWorkspaces, chatStreamingWorkspaces, completedWorkspaces, approvalSessions, awaitingQuestionWorkspaces, streamingScopes, suspendedScopes]);
 
   // Main asks before quitting: persist chat state, then let the window close —
   // beforeunload alone can't guarantee the IndexedDB writes flush in time.
@@ -3233,24 +3254,7 @@ export default function App() {
                     globalEffort: effortLevel,
                   }}
                   availableModels={claudeModels}
-                  renderToolCall={(tc, _defaultExpanded, seedGrow, ctx) => {
-                    const n = tc.name || '';
-                    if (
-                      n.endsWith('sai_render_html') ||
-                      n.endsWith('sai_render_component') ||
-                      n.endsWith('sai_render_chart') ||
-                      n.endsWith('sai_render_diff') ||
-                      n.endsWith('sai_render_mermaid') ||
-                      n.endsWith('sai_render_model') ||
-                      n.endsWith('sai_render_theme') ||
-                      n.endsWith('sai_render_form') ||
-                      n.endsWith('sai_confirm') ||
-                      n.endsWith('sai_choose')
-                    ) {
-                      return <RenderToolCallCard tc={tc} cwd={projectPath} seedGrow={seedGrow} isNewestModel={ctx?.isNewestModel ?? true} onOpenFile={(p) => { void handleFileOpenRef.current?.(p); }} />;
-                    }
-                    return null;
-                  }}
+                  renderToolCall={renderToolCallFor(projectPath, (p) => { void handleFileOpenRef.current?.(p); })}
                   aiProvider={aiProvider}
                   codexModel={codexModel}
                   onCodexModelChange={handleCodexModelChange}

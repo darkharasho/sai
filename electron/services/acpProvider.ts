@@ -647,13 +647,15 @@ export async function promptAcpText(
   }
 }
 
+/** `<key>:models` (also remote v2 models.list): the provider's fixed model list. */
+export function acpModels(config: AcpProviderConfig) {
+  return { models: config.models, defaultModel: config.defaultModel };
+}
+
 export function registerAcpProviderHandlers(win: BrowserWindow, config: AcpProviderConfig) {
   const state = (ws: Workspace) => ws[config.key];
 
-  ipcMain.handle(`${config.key}:models`, () => ({
-    models: config.models,
-    defaultModel: config.defaultModel,
-  }));
+  ipcMain.handle(`${config.key}:models`, () => acpModels(config));
 
   ipcMain.handle(`${config.key}:start`, async (_event, cwd: string, metaPreamble?: string) => {
     if (!cwd) return;

@@ -7,6 +7,12 @@ export interface RemoteWorkspaceStatus {
   streaming?: boolean;   // chat turn currently streaming
   completed?: boolean;   // recently completed turn waiting to be acknowledged
   approval?: boolean;    // pending tool-approval banner
+  awaitingQuestion?: boolean;
+  /** The v2 push (remoteReportWorkspaces) also carries the workspace.status per-session fields. */
+  streamingSessionId?: string | null;
+  streamingSessionIds?: string[];
+  suspendedSessionIds?: string[];
+  awaitingSessionIds?: string[];
 }
 
 export interface RemoteWorkspace {

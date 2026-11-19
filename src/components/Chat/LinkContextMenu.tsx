@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { isPhone } from '../../lib/platform';
 import { Copy, ExternalLink } from 'lucide-react';
 
 // Right-click a link in a chat message → "Copy link address" / "Open link".
@@ -32,7 +33,13 @@ interface MenuState { x: number; y: number; href: string }
 
 export function useLinkContextMenu(onOpen?: (href: string) => void) {
   const [menu, setMenu] = useState<MenuState | null>(null);
-  const close = useCallback(() => setMenu(null), []);
+  const longPressFired = useRef(false);
+  const clearTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearFired = useCallback(() => {
+    longPressFired.current = false;
+    if (clearTimer.current) { clearTimeout(clearTimer.current); clearTimer.current = null; }
+  }, []);
+  const close = useCallback(() => { clearFired(); setMenu(null); }, [clearFired]);
 
   const onContextMenu = useCallback((e: React.MouseEvent) => {
     const href = linkHrefAt(e.target);
@@ -42,6 +49,52 @@ export function useLinkContextMenu(onOpen?: (href: string) => void) {
     setMenu({ x: e.clientX, y: e.clientY, href });
   }, []);
 
+  // Phone: long-press (500ms, cancelled by move/end) stands in for right-click,
+  // replacing the iOS link callout.
+  const pressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cancelPress = useCallback(() => {
+    if (pressTimer.current) { clearTimeout(pressTimer.current); pressTimer.current = null; }
+  }, []);
+  useEffect(() => () => { cancelPress(); clearFired(); }, [cancelPress, clearFired]);
+
+  const onTouchStart = useCallback((e: React.TouchEvent) => {
+    if (!isPhone()) return;
+    const href = linkHrefAt(e.target);
+    if (!href) return;
+    const t = e.touches[0];
+    const x = t?.clientX ?? 0;
+    const y = t?.clientY ?? 0;
+    cancelPress();
+    clearFired();
+    pressTimer.current = setTimeout(() => {
+      pressTimer.current = null;
+      longPressFired.current = true;
+      setMenu({ x, y, href });
+    }, 500);
+  }, [cancelPress, clearFired]);
+
+  // After a fired long-press the synthesized click (if any) arrives right after
+  // touchend; the guard expires shortly after so it can never stick.
+  const onTouchEnd = useCallback(() => {
+    cancelPress();
+    if (longPressFired.current) {
+      if (clearTimer.current) clearTimeout(clearTimer.current);
+      clearTimer.current = setTimeout(clearFired, 400);
+    }
+  }, [cancelPress, clearFired]);
+
+  // The touchend after a long-press synthesizes a click on the link; swallow it
+  // (capture phase, so the <a> onClick never runs) and reset.
+  const onClickCapture = useCallback((e: React.MouseEvent) => {
+    if (!longPressFired.current) return;
+    // Only the link itself; never the (portaled) menu's own buttons.
+    const t = e.target as Element | null;
+    if (!(t instanceof Element) || t.closest('.link-ctx') || !linkHrefAt(t)) return;
+    clearFired();
+    e.preventDefault();
+    e.stopPropagation();
+  }, [clearFired]);
+
   const element = menu ? (
     <LinkContextMenu
       {...menu}
@@ -50,7 +103,7 @@ export function useLinkContextMenu(onOpen?: (href: string) => void) {
     />
   ) : null;
 
-  return { onContextMenu, element };
+  return { onContextMenu, onTouchStart, onTouchMove: cancelPress, onTouchEnd, onTouchCancel: cancelPress, onClickCapture, element };
 }
 
 function LinkContextMenu({ x, y, href, onClose, onOpen }: MenuState & { onClose: () => void; onOpen?: () => void }) {

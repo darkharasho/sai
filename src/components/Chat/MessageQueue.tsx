@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import type { QueuedMessage } from '../../types';
 import { ArrowUp, ChevronsUp, FileText, Image, ListOrdered, Terminal, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { isPhone } from '../../lib/platform';
 import { SPRING, useReducedMotionTransition } from './motion';
 
 interface MessageQueueProps {
@@ -113,7 +114,7 @@ export default function MessageQueue({ queue, onRemove, onPromote, onSendNow }: 
                         </span>
                       )}
                       <span className="queue-text">{msg.text}</span>
-                      <span className="queue-actions">
+                      <span className={isPhone() ? 'queue-actions queue-actions--always' : 'queue-actions'}>
                         {i > 0 && (
                           <button
                             type="button"
@@ -258,7 +259,8 @@ export default function MessageQueue({ queue, onRemove, onPromote, onSendNow }: 
             opacity: 0;
             transition: opacity 0.15s;
           }
-          .queue-item:hover .queue-actions { opacity: 1; }
+          .queue-item:hover .queue-actions,
+          .queue-actions--always { opacity: 1; }
           .queue-action {
             background: none;
             border: none;

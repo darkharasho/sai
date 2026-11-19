@@ -36,7 +36,7 @@ import { getSudoAskpassHelperPath, getSudoBroker, getSudoSession, lockSudo } fro
 import { readCachedSlashCommands, writeCachedSlashCommands, type SlashCommandInfo } from './slashCommands';
 import { withScopeTag } from './loadGuard/scopeTag';
 import { withLoadNote } from './loadGuard/hook';
-import type { BackgroundTaskDetail } from './claudeBackend/backgroundTasks';
+import { backgroundTasksFeed, type BackgroundTasksPayload } from './backgroundTasksFeed';
 import { readSubagentTranscript, isValidTranscriptRequest } from './claudeBackend/subagentTranscripts';
 export { CHAT_RENDER_NUDGE, CHAT_GITHUB_WATCH_NUDGE };
 
@@ -104,16 +104,14 @@ function safeSend(win: BrowserWindow, channel: string, ...args: unknown[]) {
   }
 }
 
-export interface BackgroundTasksPayload {
-  projectPath: string;
-  scope: string;
-  tasks: BackgroundTaskDetail[];
-}
+export type { BackgroundTasksPayload };
 
 /** Background-task snapshots for the sidebar. A separate channel so they never
- *  enter ChatPanel's message pipeline. */
+ *  enter ChatPanel's message pipeline. Main-process listeners (remote v2
+ *  chat.background) get the same snapshots through backgroundTasksFeed. */
 export function emitBackgroundTasks(payload: BackgroundTasksPayload): void {
   if (mainWin) safeSend(mainWin, 'claude:backgroundTasks', payload);
+  backgroundTasksFeed.publish(payload);
 }
 
 /** The durable chat log (ChatLogService); set by main.ts. */
@@ -1576,11 +1574,21 @@ export async function generateTitleImpl(cwd: string, userMessage: string, aiProv
   });
 }
 
+/** claude:models (also remote v2 models.list). */
+export function listClaudeModels() {
+  return getClaudeBackend().getModels();
+}
+
+/** claude:refreshSlashCommands (also remote v2 slash.list). */
+export function refreshClaudeSlashCommands(projectPath: string, scope?: string) {
+  return getClaudeBackend().refreshSlashCommands(projectPath, scope);
+}
+
 export function registerClaudeHandlers(win: BrowserWindow) {
   mainWin = win;
   // claude:models — which models this account/org can actually use (org allow-lists
   // and 1M gating vary), derived from the CLI cache rather than hardcoded.
-  ipcMain.handle('claude:models', () => getClaudeBackend().getModels());
+  ipcMain.handle('claude:models', () => listClaudeModels());
   // claude:start — no longer spawns a probe. Just signals ready.
   // Sends cached slash commands immediately so they're available before the process init.
   ipcMain.handle('claude:start', (_event, projectPath: string, scope?: string, scopeCwd?: string, metaPreamble?: string) =>
@@ -1591,7 +1599,7 @@ export function registerClaudeHandlers(win: BrowserWindow) {
   // The renderer calls this when the slash menu opens, so a command added while
   // the app was running shows up without a restart or a wasted turn.
   ipcMain.handle('claude:refreshSlashCommands', (_event, projectPath: string, scope?: string) =>
-    getClaudeBackend().refreshSlashCommands(projectPath, scope)
+    refreshClaudeSlashCommands(projectPath, scope)
   );
 
   // claude:stop — kill the persistent process for a scope

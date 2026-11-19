@@ -7,7 +7,7 @@
 // rows, `c<seq>` compaction notes) or a client-supplied id.
 import type { ChatMessage, GitHubWatcherSnapshot, LoadGuardChatEvent, ToolCall } from '../../types';
 import { parseAiError } from '../../components/Chat/parseAiError';
-import type { ChatLogEntry, ChatSettings, ChatState, QueuedItem, TurnState } from './types';
+import type { ChatFollowUp, ChatWaiting, ChatLogEntry, ChatSettings, ChatState, QueuedItem, TurnState } from './types';
 import {
   finalizeReasoning,
   reduceAssistant,
@@ -52,7 +52,21 @@ export function stateFromMessages(messages: ChatMessage[], settings: ChatSetting
     promptSuggestion: null,
     settings: { ...settings },
     queue: [],
+    waiting: null,
+    followUp: null,
+    awaitingQuestion: false,
     lastSeq: 0,
+  };
+}
+
+/** Fills fields that snapshots written before they existed lack. */
+export function normalizeChatState(state: ChatState): ChatState {
+  if (state.waiting !== undefined && state.followUp !== undefined && state.awaitingQuestion !== undefined) return state;
+  return {
+    ...state,
+    waiting: state.waiting ?? null,
+    followUp: state.followUp ?? null,
+    awaitingQuestion: state.awaitingQuestion ?? false,
   };
 }
 
@@ -111,14 +125,31 @@ function closeTurn(s: ChatState, ts: number): ChatState {
   };
 }
 
+/** The wait a turn-end frame carries (kind background/scheduled), else null. */
+function waitingFrom(ev: Record<string, unknown>, ts: number): ChatWaiting | null {
+  const wait = ev.wait as { kind?: unknown; resumeInSeconds?: unknown; taskCount?: unknown } | undefined;
+  return wait && (wait.kind === 'background' || wait.kind === 'scheduled')
+    ? {
+        kind: wait.kind,
+        ...(typeof wait.resumeInSeconds === 'number' ? { resumeInSeconds: wait.resumeInSeconds } : {}),
+        ...(typeof wait.taskCount === 'number' ? { taskCount: wait.taskCount } : {}),
+        since: ts,
+      }
+    : null;
+}
+
 function reduceDone(s: ChatState, ev: Record<string, unknown>, ts: number): ChatState {
+  // Like App's applyQuestionEvent, a turn end retires the question even when stale.
+  if (s.awaitingQuestion) s = { ...s, awaitingQuestion: false };
   if (isStale(ev.turnSeq, s)) return s;
   // A normal parent completion can precede child terminal activity; only a
   // forced termination or a physical EOF proves no child event can follow.
   const clearSubagents = ev.subagentsAborted === true || ev.subagentsSettled === true;
   s = closeTurn(s, ts);
+  const waiting = waitingFrom(ev, ts);
   return {
     ...s,
+    waiting,
     activeSubagents: clearSubagents ? {} : s.activeSubagents,
     turn: { ...s.turn, turnSeq: -1 },
   };
@@ -218,6 +249,9 @@ function apply(s: ChatState, entry: ChatLogEntry): ChatState {
         activeSubagents: {},
         streamHint: null,
         promptSuggestion: null,
+        waiting: null,
+        followUp: null,
+        awaitingQuestion: false,
         turn: {
           ...s.turn,
           streaming: true,
@@ -262,7 +296,7 @@ function apply(s: ChatState, entry: ChatLogEntry): ChatState {
       if (s.turn.loadGuardQuietUntil != null) {
         s = { ...s, turn: { ...s.turn, loadGuardQuietUntil: null, loadGuardEnded: false } };
       }
-      return appendMessage(s, {
+      return appendMessage({ ...s, waiting: null }, {
         id,
         role: 'user',
         content: typeof ev.text === 'string' ? ev.text : '',
@@ -273,10 +307,11 @@ function apply(s: ChatState, entry: ChatLogEntry): ChatState {
     }
 
     case 'result':
+      if (s.awaitingQuestion) s = { ...s, awaitingQuestion: false };
       if (isStale(ev.turnSeq, s)) return s;
       // App treats result as the turn end (busy clears here), so durations
       // are stamped now; done still ends streaming and retires turnSeq.
-      return stampTurnDurations(reduceResultText({ ...s, pendingApproval: null }, entry), ts);
+      return stampTurnDurations(reduceResultText({ ...s, pendingApproval: null, waiting: waitingFrom(ev, ts) }, entry), ts);
 
     case 'done':
       return reduceDone(s, ev, ts);
@@ -309,7 +344,23 @@ function apply(s: ChatState, entry: ChatLogEntry): ChatState {
       return typeof ev.suggestion === 'string' && ev.suggestion.trim()
         ? { ...s, promptSuggestion: ev.suggestion.trim() } : s;
 
+    case 'followup': {
+      // Not turnSeq-guarded (like App): 'none' carries the judged, older turn's seq.
+      if (ev.state === 'none') return s.followUp ? { ...s, followUp: null } : s;
+      if (ev.state !== 'following' && ev.state !== 'resuming' && ev.state !== 'stalled') return s;
+      const followUp: ChatFollowUp = {
+        state: ev.state,
+        ...(typeof ev.waitingFor === 'string' && ev.waitingFor ? { waitingFor: ev.waitingFor } : {}),
+      };
+      return { ...s, followUp };
+    }
+
+    case 'question_needed':
+    case 'plan_review_needed':
+      return { ...s, awaitingQuestion: true };
+
     case 'question_answered':
+      s = { ...s, awaitingQuestion: false };
       return mapToolCalls(s, ev.toolUseId, tc => {
         try {
           const parsed = JSON.parse(tc.input || '{}');
@@ -320,6 +371,7 @@ function apply(s: ChatState, entry: ChatLogEntry): ChatState {
       });
 
     case 'plan_review_answered':
+      s = { ...s, awaitingQuestion: false };
       return mapToolCalls(s, ev.toolUseId, tc => ({ ...tc, output: ev.approved ? 'Plan approved' : 'Plan rejected' }));
 
     // Codex App Server requests are capability-gated to Codex chats.
@@ -412,7 +464,7 @@ function apply(s: ChatState, entry: ChatLogEntry): ChatState {
       });
 
     case 'cleared':
-      return { ...s, messages: [] };
+      return { ...s, messages: [], waiting: null, awaitingQuestion: false };
 
     case 'watcher_snapshot': {
       const snapshot = ev.snapshot as GitHubWatcherSnapshot | undefined;

@@ -37,7 +37,24 @@ export type ChatCommand =
   | { kind: 'queueRemove'; chatId: string; clientId: string; target: string }
   /** Moves a queued item to the front (it drains next). */
   | { kind: 'queuePromote'; chatId: string; clientId: string; target: string }
-  | { kind: 'queueClear'; chatId: string; clientId: string };
+  | { kind: 'queueClear'; chatId: string; clientId: string }
+  /** Clears the chat's transcript (appends `cleared`, like the composer's /clear). */
+  | { kind: 'clear'; chatId: string; clientId: string }
+  /**
+   * Compacts the chat's context with its settings (Claude only; the same call
+   * as claude:compact). Like the desktop composer's /compact, it waits in the
+   * queue as a `/compact` send while the load guard is paused, or — with
+   * `queue` (palette, Ctrl+Enter) — while a turn runs or items wait.
+   */
+  | { kind: 'compact'; chatId: string; clientId: string; origin?: Origin; queue?: boolean }
+  /**
+   * Appends a client-side event that has no backend effect: a `local_note`, a
+   * `watcher_snapshot`, or a `user_message` marked `local: true` (the /help
+   * bubble). Anything else is rejected. projectPath only to create the chat.
+   */
+  | { kind: 'clientEvent'; chatId: string; clientId: string; ev: ChatEvent; origin?: Origin; projectPath?: string; provider?: Provider }
+  /** Stops one background task of the chat's backend (SDK Claude only). */
+  | { kind: 'stopTask'; chatId: string; clientId: string; taskId: string };
 
 export interface CommandResult { clientId: string; ok: boolean; duplicate: boolean; seq?: number; error?: string }
 
@@ -47,6 +64,10 @@ export interface ProviderDispatch {
   approve(p: Provider, a: { projectPath: string; scope: string; toolUseId: string; approved: boolean; modifiedCommand?: string }): Promise<void>;
   answer(a: { projectPath: string; scope: string; toolUseId: string; answers: Record<string, string | string[]> }): Promise<void>;
   planReview(a: { projectPath: string; scope: string; toolUseId: string; approved: boolean }): Promise<void>;
+  /** claude:compact for the chat (throws for a provider that can't compact). Absent = unsupported. */
+  compact?(p: Provider, a: { projectPath: string; scope: string; settings: ChatSettings }): void;
+  /** claude:stopTask for the chat; false when nothing was stopped. Absent = unsupported. */
+  stopTask?(p: Provider, a: { projectPath: string; scope: string; taskId: string }): Promise<boolean>;
   isBusy(projectPath: string, scope: string): boolean;
   isLoadPaused(): boolean;
   /** False when the provider can't take a send for this chat yet (e.g. no workspace); sends wait in the queue. Default true. */
@@ -89,6 +110,112 @@ export interface ChatCommandsOpts {
  */
 function settledBy(cmd: { origin?: Origin; settled?: boolean }): { imported?: true } {
   return cmd.settled === true && cmd.origin !== 'remote' ? { imported: true } : {};
+}
+
+/** Client event types a clientEvent command may append (see the ChatCommand doc). */
+const CLIENT_COMMAND_EVENTS = new Set(['local_note', 'watcher_snapshot', 'user_message']);
+
+/**
+ * The event a clientEvent command appends: only the fields the reducer reads
+ * for that type, so a client can't smuggle `queued`, `logged` or other flags.
+ */
+function clientEventOf(ev: unknown, origin: Origin): ChatEvent {
+  const src = ev && typeof ev === 'object' && !Array.isArray(ev) ? ev as Record<string, unknown> : null;
+  const type = src && typeof src.type === 'string' ? src.type : '';
+  if (!src || !CLIENT_COMMAND_EVENTS.has(type)) throw new Error(`clientEvent: ${type || 'missing type'} is not allowed`);
+  const s = (k: string): string | undefined => (typeof src[k] === 'string' ? src[k] as string : undefined);
+  switch (type) {
+    case 'user_message':
+      // Only the local bubble (/help): a real send goes through `send`, which dispatches it.
+      if (src.local !== true) throw new Error('clientEvent: user_message must be local');
+      return {
+        type, local: true, origin, text: s('text') ?? '',
+        ...(s('clientId') ? { clientId: s('clientId') } : {}),
+      };
+    case 'local_note':
+      return {
+        type, content: s('content') ?? '',
+        ...(s('noteId') ? { noteId: s('noteId') } : {}),
+        ...(src.error !== undefined && src.error !== null ? { error: noteErrorOf(src.error) } : {}),
+      };
+    default: { // watcher_snapshot
+      if (!s('messageId')) throw new Error('clientEvent: watcher_snapshot needs messageId and snapshot');
+      return { type, messageId: s('messageId'), snapshot: watcherSnapshotOf(src.snapshot) };
+    }
+  }
+}
+
+// ─── clientEvent payload shapes ─────────────────────────────────────────────
+// A phone's clientEvent lands in the desktop transcript, so its nested payload
+// is rebuilt from typed fields: a malformed one is rejected, unknown keys drop.
+
+type Rec = Record<string, unknown>;
+type FieldKind = 'string' | 'number' | 'boolean' | 'string?null' | 'strings';
+const isRec = (v: unknown): v is Rec => !!v && typeof v === 'object' && !Array.isArray(v);
+function fieldOk(v: unknown, k: FieldKind): boolean {
+  switch (k) {
+    case 'string': return typeof v === 'string';
+    case 'number': return typeof v === 'number' && Number.isFinite(v);
+    case 'boolean': return typeof v === 'boolean';
+    case 'string?null': return v === null || typeof v === 'string';
+    case 'strings': return Array.isArray(v) && v.every((x) => typeof x === 'string');
+  }
+}
+/** Copies the listed fields; a required one must be present, an optional one is checked when present. */
+function pick(src: unknown, what: string, required: Record<string, FieldKind>, optional: Record<string, FieldKind> = {}): Rec {
+  if (!isRec(src)) throw new Error(`clientEvent: ${what} must be an object`);
+  const out: Rec = {};
+  for (const [k, kind] of Object.entries(required)) {
+    if (!fieldOk(src[k], kind)) throw new Error(`clientEvent: ${what}.${k} is invalid`);
+    out[k] = src[k];
+  }
+  for (const [k, kind] of Object.entries(optional)) {
+    if (src[k] === undefined) continue;
+    if (!fieldOk(src[k], kind)) throw new Error(`clientEvent: ${what}.${k} is invalid`);
+    out[k] = src[k];
+  }
+  return out;
+}
+
+/** local_note.error: the ChatMessage error card's fields (message required). */
+function noteErrorOf(v: unknown): Rec {
+  return pick(v, 'error', { message: 'string' }, {
+    title: 'string', status: 'number', requestId: 'string', details: 'string', errorType: 'string',
+  });
+}
+
+const WATCHER_PHASES = new Set(['pending', 'queued', 'in_progress', 'success', 'failure', 'cancelled', 'neutral', 'error']);
+const RUN_FIELDS: Record<string, FieldKind> = {
+  status: 'string', conclusion: 'string?null', name: 'string', displayTitle: 'string', runNumber: 'number',
+  runAttempt: 'number', headBranch: 'string', headSha: 'string', event: 'string', actor: 'string',
+  actorAvatar: 'string', htmlUrl: 'string', startedAt: 'string', updatedAt: 'string',
+};
+const JOB_FIELDS: Record<string, FieldKind> = {
+  conclusion: 'string?null', startedAt: 'string', completedAt: 'string', needs: 'strings',
+  synthetic: 'boolean', level: 'number', defKey: 'string', defIndex: 'number',
+};
+const STEP_FIELDS: Record<string, FieldKind> = { conclusion: 'string?null', number: 'number' };
+
+/** watcher_snapshot.snapshot: GitHubWatcherSnapshot with the RunState (+ __jobs) GitHubWatcherCard renders from `data`. */
+function watcherSnapshotOf(v: unknown): Rec {
+  const snap = pick(v, 'snapshot', { url: 'string', phase: 'string', capturedAt: 'number' }, { kind: 'string' });
+  if (!WATCHER_PHASES.has(snap.phase as string)) throw new Error('clientEvent: snapshot.phase is invalid');
+  if (snap.kind !== undefined && snap.kind !== 'run') throw new Error('clientEvent: snapshot.kind is invalid');
+  const rawData = (v as Rec).data;
+  const data = pick(rawData, 'snapshot.data', {}, RUN_FIELDS);
+  const rawJobs = isRec(rawData) ? rawData.__jobs : undefined;
+  if (rawJobs !== undefined) {
+    if (!Array.isArray(rawJobs)) throw new Error('clientEvent: snapshot.data.__jobs must be an array');
+    data.__jobs = rawJobs.map((j) => {
+      const job = pick(j, 'job', { name: 'string', status: 'string' }, JOB_FIELDS);
+      const id = (j as Rec).id;
+      if (typeof id !== 'number' && typeof id !== 'string') throw new Error('clientEvent: job.id is invalid');
+      const steps = (j as Rec).steps;
+      if (!Array.isArray(steps)) throw new Error('clientEvent: job.steps must be an array');
+      return { id, ...job, steps: steps.map((st) => pick(st, 'step', { name: 'string', status: 'string' }, STEP_FIELDS)) };
+    });
+  }
+  return { ...snap, kind: 'run', data };
 }
 
 const defaultTimers: Timers = {
@@ -142,17 +269,41 @@ export class ChatCommands {
       this.ledger.set(clientId, prior);
       return prior.then((r) => ({ ...r, duplicate: true }));
     }
+    // The ledger is memory-only: after a desktop restart a phone resending an
+    // un-acked send must still not run it twice. The log remembers it.
+    if (this.sendIsLogged(cmd)) {
+      const dup = Promise.resolve<CommandResult>({ clientId, ok: true, duplicate: true });
+      this.remember(clientId, dup);
+      return dup;
+    }
     const result = this.exec(cmd).then(
       (r): CommandResult => ({ clientId, ok: true, duplicate: false, ...r }),
       (err): CommandResult => ({ clientId, ok: false, duplicate: false, error: err instanceof Error ? err.message : String(err) }),
     );
+    this.remember(clientId, result);
+    return result;
+  }
+
+  private remember(clientId: string, result: Promise<CommandResult>): void {
     this.ledger.set(clientId, result);
     while (this.ledger.size > this.ledgerSize) {
       const oldest = this.ledger.keys().next().value;
       if (oldest === undefined) break;
       this.ledger.delete(oldest);
     }
-    return result;
+  }
+
+  /**
+   * A send (or a compact, which can wait in the queue as a /compact send) whose
+   * clientId the chat's log already holds: as the user bubble (the reducer keys
+   * it by clientId, also once a queued item drains) or as a waiting queue item.
+   */
+  private sendIsLogged(cmd: ChatCommand): boolean {
+    if (cmd.kind !== 'send' && cmd.kind !== 'compact') return false;
+    if (!this.store.meta(cmd.chatId)) return false;
+    const state = this.store.state(cmd.chatId);
+    if (!state) return false;
+    return state.messages.some((m) => m.id === cmd.clientId) || state.queue.some((q) => q.clientId === cmd.clientId);
   }
 
   // ─── log hooks (ChatLogService.setTurnHooks) ───────────────────────────────
@@ -247,6 +398,43 @@ export class ChatCommands {
       case 'queueClear': {
         this.chat(cmd.chatId);
         return { seq: this.log.appendClient(cmd.chatId, { type: 'queue_cleared' }).seq };
+      }
+      case 'clear': {
+        this.chat(cmd.chatId);
+        return { seq: this.log.appendClient(cmd.chatId, { type: 'cleared' }).seq };
+      }
+      case 'compact': {
+        const { provider, projectPath, state } = this.chat(cmd.chatId);
+        if (provider !== 'claude' || !this.dispatch.compact) throw new Error(`compact is not supported for ${provider}`);
+        // ChatPanel's compactWaits: paused, or a queued compact while the turn
+        // is live (backend busy or the log's turn open) or items wait. A
+        // compact spawns a session, so it must never bypass the pause.
+        const turnLive = this.isBusy(projectPath, cmd.chatId) || state.turn.streaming;
+        if (this.dispatch.isLoadPaused() || (cmd.queue === true && (turnLive || state.queue.length > 0))) {
+          return this.send({
+            kind: 'send', chatId: cmd.chatId, clientId: cmd.clientId, text: '/compact',
+            origin: cmd.origin === 'remote' ? 'remote' : 'desktop', projectPath,
+          });
+        }
+        const settings = cmd.origin === 'remote' ? capSettings(state.settings, provider, this.getRemoteCeiling()) : state.settings;
+        this.dispatch.compact(provider, { projectPath, scope: cmd.chatId, settings });
+        return {};
+      }
+      case 'clientEvent': {
+        const ev = clientEventOf(cmd.ev, cmd.origin === 'remote' ? 'remote' : 'desktop');
+        let init: { projectPath: string; provider?: Provider; imported?: true } | undefined;
+        if (!this.store.meta(cmd.chatId)) {
+          if (!cmd.projectPath) throw new Error(`unknown chat ${cmd.chatId} and no projectPath`);
+          init = { projectPath: cmd.projectPath, ...(cmd.provider ? { provider: cmd.provider } : {}) };
+        }
+        return { seq: this.log.appendClient(cmd.chatId, ev, init).seq };
+      }
+      case 'stopTask': {
+        const { provider, projectPath } = this.chat(cmd.chatId);
+        if (typeof cmd.taskId !== 'string' || !cmd.taskId) throw new Error('taskId required');
+        const stopped = (await this.dispatch.stopTask?.(provider, { projectPath, scope: cmd.chatId, taskId: cmd.taskId })) ?? false;
+        if (!stopped) throw new Error(`task not stopped: ${cmd.taskId}`);
+        return {};
       }
       default:
         throw new Error(`unknown command ${(cmd as { kind?: unknown }).kind as string}`);

@@ -1,6 +1,8 @@
 import { Fragment, useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
+import { isPhone } from '../../lib/platform';
 import { createPortal } from 'react-dom';
 import { ChevronDown, CornerLeftUp } from 'lucide-react';
+import { newClientId } from '../../lib/clientId';
 import { stampTaskTags } from './tasks/taskTags';
 import { motion, AnimatePresence, LayoutGroup } from 'motion/react';
 import { setFlipRect } from './flipRegistry';
@@ -30,28 +32,49 @@ import McpElicitationPanel from './McpElicitationPanel';
 // re-probe (and log a noisy ENOENT) on every re-run.
 const consumedBrainstormSeeds = new Set<string>();
 
-function tweenScrollToBottom(container: HTMLElement, durationMs = 280) {
-  if (typeof window === 'undefined') return;
+/** Run a scrollTop write the user didn't make. The browser delivers its scroll event no later than the next
+ *  frame's rendering step, which runs before that frame's rAF callbacks, so the flag clears one frame later. */
+function programmaticWrite(flag: { current: boolean } | undefined, write: () => void) {
+  if (!flag) { write(); return; }
+  flag.current = true;
+  write();
+  if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => { flag.current = false; });
+  else flag.current = false;
+}
+
+/** Returns a cancel function (null when no tween started). Each step also bails once follow is released. */
+function tweenScrollToBottom(container: HTMLElement, durationMs = 280, flag?: { current: boolean }, stillFollowing?: () => boolean): (() => boolean) | null {
+  if (typeof window === 'undefined') return null;
   if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
-    container.scrollTop = container.scrollHeight;
-    return;
+    programmaticWrite(flag, () => { container.scrollTop = container.scrollHeight; });
+    return null;
   }
   const start = container.scrollTop;
   const initialTarget = container.scrollHeight - container.clientHeight;
-  if (initialTarget <= start) return;
+  if (initialTarget <= start) return null;
+  let cancelled = false;
+  let finished = false;
   const t0 = performance.now();
   // Approximate ease-out cubic-bezier with a power curve: 1 - (1-t)^p
   const p = 1 / (EASING.out[3] || 1);
   const ease = (t: number) => 1 - Math.pow(1 - t, p);
   const step = (t: number) => {
+    if (cancelled || (stillFollowing && !stillFollowing())) return;
     const k = Math.min(1, (t - t0) / durationMs);
     // Recompute target each frame so we follow content that grows mid-tween
     // (e.g. tool output cards expanding via a height animation).
     const target = container.scrollHeight - container.clientHeight;
-    container.scrollTop = start + (target - start) * ease(k);
-    if (k < 1) requestAnimationFrame(step);
+    programmaticWrite(flag, () => { container.scrollTop = start + (target - start) * ease(k); });
+    if (k < 1) requestAnimationFrame(step); else finished = true;
   };
   requestAnimationFrame(step);
+  /** Cancels a running tween; false when it had already ended. */
+  return () => {
+    if (cancelled || finished) return false;
+    cancelled = true;
+    if (flag) flag.current = false;
+    return true;
+  };
 }
 
 function ContextMeter({ used, total }: { used: number; total: number }) {
@@ -123,10 +146,6 @@ function recordTaskStamps(messages: ChatMessageType[], stamps: Map<string, strin
       if (tc.taskId !== undefined) stamps.set(itemKey(m.id, tc.id, i), tc.taskId);
     });
   }
-}
-
-function newClientId(): string {
-  return crypto.randomUUID();
 }
 
 /** Text-only assistant output (not an API-error envelope): the stream-idle gate's activity signal. */
@@ -515,7 +534,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode:
   // the session main binds it to (bindLegacyScope below).
   const chatId = claudeScope !== 'chat' ? claudeScope : (sessionId ?? null);
   const fallbackSettings = useMemo<ChatSettings>(() => ({ provider: aiProvider }), [aiProvider]);
-  const { state: logState, lastApplied, error: logError } = useChatLog(chatId, fallbackSettings);
+  const { state: logState, lastApplied, error: logError, olderCount, loadOlder } = useChatLog(chatId, fallbackSettings);
 
   // Composer settings are the chat's own (state.settings in main's log, shared
   // with the phone). The parent's values are the workspace defaults: they fill
@@ -795,6 +814,13 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode:
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const userMsgRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const isAtBottomRef = useRef(true);
+  // True while a scrollTop write came from us (tween / ResizeObserver pin), so handleScroll doesn't read it as the user.
+  const programmaticScroll = useRef(false);
+  const tweenCancelRef = useRef<(() => boolean) | null>(null);
+  const lastScrollTopRef = useRef(0);
+  const lastScrollMaxRef = useRef(0);
+  // Set by "Load earlier": the layout effect below keeps the viewport on the same message after the prepend.
+  const prependAnchorRef = useRef<{ height: number; top: number; firstId: string | undefined } | null>(null);
   const [pinnedUserMessage, setPinnedUserMessage] = useState<ChatMessageType | null>(null);
   const [followOn, setFollowOn] = useState(true);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -1306,8 +1332,19 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode:
         setFollowOn(false);
       }
     };
+    // A finger down takes over: it releases any in-flight jump guard, and during the
+    // follow tween it stops the tween and releases follow.
+    const onTouchStart = () => {
+      jumpingRef.current = false;
+      const cancel = tweenCancelRef.current;
+      tweenCancelRef.current = null;
+      if (!cancel || !cancel()) return;
+      isAtBottomRef.current = false;
+      setFollowOn(false);
+    };
     el.addEventListener('wheel', onWheel, { passive: true });
-    return () => el.removeEventListener('wheel', onWheel);
+    el.addEventListener('touchstart', onTouchStart, { passive: true });
+    return () => { el.removeEventListener('wheel', onWheel); el.removeEventListener('touchstart', onTouchStart); };
   }, []);
 
   // Scroll to bottom on mount (session switch remounts via key change)
@@ -1347,7 +1384,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode:
       const client = el.clientHeight;
       const scroll = el.scrollHeight;
       if (isAtBottomRef.current && (client < lastClient || scroll > lastScroll)) {
-        el.scrollTop = el.scrollHeight;
+        programmaticWrite(programmaticScroll, () => { el.scrollTop = el.scrollHeight; });
       }
       lastClient = client;
       lastScroll = scroll;
@@ -1374,9 +1411,10 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode:
       const el = chatContainerRef.current;
       if (el) {
         if (lastTweenProjectRef.current !== projectPath) {
-          el.scrollTop = el.scrollHeight;
+          programmaticWrite(programmaticScroll, () => { el.scrollTop = el.scrollHeight; });
         } else {
-          tweenScrollToBottom(el);
+          tweenCancelRef.current?.();
+          tweenCancelRef.current = tweenScrollToBottom(el, 280, programmaticScroll, () => isAtBottomRef.current);
         }
       }
     } else if (messages[messages.length - 1]?.role === 'assistant') {
@@ -1389,7 +1427,10 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode:
     isAtBottomRef.current = true;
     setFollowOn(true);
     setUnreadCount(0);
-    if (chatContainerRef.current) tweenScrollToBottom(chatContainerRef.current);
+    if (chatContainerRef.current) {
+      tweenCancelRef.current?.();
+      tweenCancelRef.current = tweenScrollToBottom(chatContainerRef.current, 280, programmaticScroll, () => isAtBottomRef.current);
+    }
   };
 
   // Smooth-scroll a mounted message into view, holding the jump guard until the
@@ -1473,11 +1514,47 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode:
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userMessages[userMessages.length - 1]?.id, renderStart]);
 
+  const handleLoadOlder = () => {
+    const el = chatContainerRef.current;
+    if (el) {
+      // Let the prepended page mount instead of re-windowing to the tail.
+      isAtBottomRef.current = false;
+      setFollowOn(false);
+      prependAnchorRef.current = { height: el.scrollHeight, top: el.scrollTop, firstId: messages[0]?.id };
+    }
+    // If nothing got prepended (no-op, error) the layout effect never consumes the anchor: drop it.
+    void loadOlder().finally(() => { setTimeout(() => { prependAnchorRef.current = null; }, 500); });
+  };
+  useLayoutEffect(() => {
+    const a = prependAnchorRef.current;
+    const el = chatContainerRef.current;
+    if (!a || !el || messages[0]?.id === a.firstId) return;
+    prependAnchorRef.current = null;
+    programmaticWrite(programmaticScroll, () => { el.scrollTop = a.top + (el.scrollHeight - a.height); });
+  }, [messages]);
+
   const handleScroll = () => {
     const el = chatContainerRef.current;
     if (!el) return;
+    // Any upward move the user makes (touch drag, momentum, keyboard) releases follow, not only the wheel.
+    // Our own writes don't count, and neither does the browser clamping scrollTop when content shrinks.
+    const top = el.scrollTop;
+    const max = el.scrollHeight - el.clientHeight;
+    const dropped = lastScrollTopRef.current - top;
+    const clamped = max < lastScrollMaxRef.current;
+    lastScrollTopRef.current = top;
+    lastScrollMaxRef.current = max;
+    let released = false;
+    // A jump's own smooth scroll moves up too; leave its guard alone (wheel/touchstart release it).
+    if (dropped > 4 && !programmaticScroll.current && !clamped && !jumpingRef.current) {
+      isAtBottomRef.current = false;
+      setFollowOn(false);
+      released = true;
+    }
     const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 60;
-    if (atBottom) {
+    // Once released, only a downward move (or the true bottom) re-pins: small upward events and momentum
+    // tails inside the threshold must not undo the release.
+    if (atBottom && !released && (dropped < 0 || max - top <= 2)) {
       isAtBottomRef.current = true;
       setFollowOn(true);
       setUnreadCount(0);
@@ -1957,7 +2034,8 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode:
 
     if (text === '/help') {
       keepFlipRect();
-      await appendToLog({ type: 'user_message', clientId, text, origin: 'desktop' });
+      // local: a bubble with no backend send (remote clientEvent accepts only local user_messages).
+      await appendToLog({ type: 'user_message', clientId, text, origin: 'desktop', local: true });
       await appendToLog({ type: 'local_note', noteId: `help-${clientId}`, content: buildHelpMessage(aiProvider, slashCommands) });
       return;
     }
@@ -2154,7 +2232,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode:
                       {projectPath ? emptyPrompt : 'Select a project to get started'}
                     </div>
                   )}
-                  {projectPath && !logError && <CyclingHints />}
+                  {projectPath && !logError && !isPhone() && <CyclingHints />}
                 </motion.div>
               </AnimatePresence>
             </div>
@@ -2170,6 +2248,11 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode:
         {messages.length > 0 && (
           <>
             <div className="chat-messages-spacer" aria-hidden="true" />
+            {olderCount > 0 && !hasHiddenMessages && (
+              <button type="button" className="chat-load-earlier" onClick={handleLoadOlder}>
+                Load {olderCount} earlier messages
+              </button>
+            )}
             {hasHiddenMessages && (
               <div ref={sentinelRef} className="chat-load-sentinel">
                 <span className="chat-load-sentinel-text">Loading earlier messages...</span>
@@ -2618,6 +2701,19 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode:
           justify-content: center;
           padding: 12px 0;
         }
+        .chat-load-earlier {
+          display: block;
+          margin: 8px auto;
+          padding: 6px 12px;
+          background: none;
+          border: none;
+          font-size: 11px;
+          color: var(--text-muted);
+          opacity: 0.7;
+          font-family: 'Geist Mono', 'JetBrains Mono', monospace;
+          cursor: pointer;
+        }
+        .chat-load-earlier:hover { opacity: 1; }
         .chat-load-sentinel-text {
           font-size: 11px;
           color: var(--text-muted);

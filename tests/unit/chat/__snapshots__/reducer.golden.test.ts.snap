@@ -3,6 +3,8 @@
 exports[`golden: 'claude-background-wait' > reduces to the reviewed snapshot 1`] = `
 {
   "activeSubagents": {},
+  "awaitingQuestion": false,
+  "followUp": null,
   "lastSeq": 42,
   "messages": [
     {
@@ -90,12 +92,15 @@ The agent is working in the background. You will be notified automatically when 
     "streaming": false,
     "turnSeq": -1,
   },
+  "waiting": null,
 }
 `;
 
 exports[`golden: 'claude-interrupt-superseded' > reduces to the reviewed snapshot 1`] = `
 {
   "activeSubagents": {},
+  "awaitingQuestion": false,
+  "followUp": null,
   "lastSeq": 25,
   "messages": [
     {
@@ -155,12 +160,15 @@ exports[`golden: 'claude-interrupt-superseded' > reduces to the reviewed snapsho
     "streaming": false,
     "turnSeq": -1,
   },
+  "waiting": null,
 }
 `;
 
 exports[`golden: 'claude-tools-reasoning' > reduces to the reviewed snapshot 1`] = `
 {
   "activeSubagents": {},
+  "awaitingQuestion": false,
+  "followUp": null,
   "lastSeq": 46,
   "messages": [
     {
@@ -279,12 +287,15 @@ exports[`golden: 'claude-tools-reasoning' > reduces to the reviewed snapshot 1`]
     "streaming": false,
     "turnSeq": -1,
   },
+  "waiting": null,
 }
 `;
 
 exports[`golden: 'codex-two-turns' > reduces to the reviewed snapshot 1`] = `
 {
   "activeSubagents": {},
+  "awaitingQuestion": false,
+  "followUp": null,
   "lastSeq": 19,
   "messages": [
     {
@@ -416,5 +427,6 @@ Run the lint script and report the result.",
     "streaming": false,
     "turnSeq": -1,
   },
+  "waiting": null,
 }
 `;

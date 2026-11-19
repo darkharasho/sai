@@ -222,7 +222,9 @@ export default function TodoProgress({ messages, isStreaming, todos: todosOverri
           transition: background 0.15s;
           color: var(--green);
         }
-        .todo-ring-wrap:hover { background: color-mix(in srgb, var(--green) 8%, transparent); }
+        @media (hover: hover) {
+          .todo-ring-wrap:hover { background: color-mix(in srgb, var(--green) 8%, transparent); }
+        }
         .todo-ring-svg { display: block; flex-shrink: 0; }
         .todo-ring-count {
           font-variant-numeric: tabular-nums;

@@ -199,12 +199,14 @@ describe('golden: hand-reviewed properties', () => {
     const agent = s.messages.flatMap((m) => m.toolCalls ?? [])[0];
     expect(agent.output).toContain('Async agent launched successfully.');
 
-    // At the wait (done with wait.kind background) the turn is idle: the
-    // waiting pill rides the done event, not ChatState.
+    // At the wait (done with wait.kind background) the turn is idle and
+    // ChatState.waiting is set; the resumed turn's end closes it.
+    expect(s.waiting).toBeNull();
     const waitDone = entries.find((e) => e.ev.type === 'done')!;
     expect((waitDone.ev as any).wait).toMatchObject({ kind: 'background', taskCount: 1 });
     const waiting = reduceAll('claude', entries.slice(0, waitDone.seq));
     expect(waiting.turn.streaming).toBe(false);
+    expect(waiting.waiting).toMatchObject({ kind: 'background', taskCount: 1, since: waitDone.ts });
 
     // Task progress during the wait shows as the stream hint; the resume clears it.
     const progress = entries.find((e) => (e.ev as any).subtype === 'task_progress')!;
