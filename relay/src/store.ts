@@ -24,6 +24,11 @@ export interface Store {
   updateRegistration(pushId: string, apnsToken: string, env: ApnsEnv, now: number): Promise<void>;
   /** Deletes the registration and all of its send secrets. */
   deleteRegistration(pushId: string): Promise<void>;
+  /**
+   * Deletes the registration (and its secrets) only if it still points at
+   * `apnsToken`. A phone that re-registered to a new token mid-push survives.
+   */
+  deleteRegistrationIfToken(pushId: string, apnsToken: string): Promise<boolean>;
   listSecrets(pushId: string): Promise<Pick<SecretRow, 'secretId' | 'secretHash'>[]>;
   addSecret(s: SecretRow): Promise<void>;
   deleteSecret(pushId: string, secretId: string): Promise<boolean>;
@@ -78,6 +83,20 @@ export class D1Store implements Store {
       this.db.prepare('DELETE FROM send_secrets WHERE push_id = ?').bind(pushId),
       this.db.prepare('DELETE FROM registrations WHERE push_id = ?').bind(pushId),
     ]);
+  }
+
+  async deleteRegistrationIfToken(pushId: string, apnsToken: string): Promise<boolean> {
+    // One batch = one transaction. The secrets delete runs only if the
+    // registration row is gone after the first statement.
+    const [regDel] = await this.db.batch([
+      this.db.prepare('DELETE FROM registrations WHERE push_id = ? AND apns_token = ?').bind(pushId, apnsToken),
+      this.db
+        .prepare(
+          'DELETE FROM send_secrets WHERE push_id = ? AND NOT EXISTS (SELECT 1 FROM registrations WHERE push_id = ?)',
+        )
+        .bind(pushId, pushId),
+    ]);
+    return (regDel?.meta.changes ?? 0) > 0;
   }
 
   async listSecrets(pushId: string): Promise<Pick<SecretRow, 'secretId' | 'secretHash'>[]> {

@@ -4,6 +4,8 @@ import type { ApnsEnv } from './store';
 export const APNS_TOPIC = 'com.project96.sai';
 export const FALLBACK_ALERT = { title: 'SAI', body: 'New activity in a chat' } as const;
 export const JWT_TTL_MS = 50 * 60_000;
+/** APNs answers TooManyProviderTokenUpdates if a key is re-signed more often than this. */
+export const JWT_MIN_RESIGN_MS = 20 * 60_000;
 
 export interface ApnsConfig {
   APNS_KEY_P8: string;
@@ -17,16 +19,24 @@ export function apnsHost(env: ApnsEnv): string {
 
 // Module-scope cache: one isolate signs at most one token per 50 minutes.
 // APNs rejects tokens refreshed more often than every 20 minutes or older than an hour.
-let cache: { keyId: string; teamId: string; p8: string; jwt: string; issuedAt: number } | null = null;
+let cache: { keyId: string; teamId: string; p8: string; jwt: string; issuedAt: number; stale: boolean } | null =
+  null;
 
+/** Test-only: forget the cached token entirely. */
 export function _resetJwtCache(): void {
   cache = null;
+}
+
+/** Mark the cached token stale: the next call re-signs, but not within 20 minutes of the last signing. */
+export function invalidateApnsJwt(): void {
+  if (cache) cache.stale = true;
 }
 
 function pemToDer(pem: string): Uint8Array {
   const body = pem
     .replace(/-----BEGIN [A-Z ]+-----/, '')
     .replace(/-----END [A-Z ]+-----/, '')
+    .replace(/\\[nr]/g, '') // a .p8 pasted with literal "\n" escapes
     .replace(/\s+/g, '');
   return Uint8Array.from(atob(body), (c) => c.charCodeAt(0));
 }
@@ -38,10 +48,10 @@ export async function getApnsJwt(cfg: ApnsConfig, nowMs: number): Promise<string
     cache.keyId === cfg.APNS_KEY_ID &&
     cache.teamId === cfg.APNS_TEAM_ID &&
     cache.p8 === cfg.APNS_KEY_P8 &&
-    nowMs - cache.issuedAt < JWT_TTL_MS &&
     nowMs >= cache.issuedAt
   ) {
-    return cache.jwt;
+    const age = nowMs - cache.issuedAt;
+    if (age < JWT_MIN_RESIGN_MS || (!cache.stale && age < JWT_TTL_MS)) return cache.jwt;
   }
   const key = await crypto.subtle.importKey(
     'pkcs8',
@@ -58,7 +68,7 @@ export async function getApnsJwt(cfg: ApnsConfig, nowMs: number): Promise<string
     await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, key, new TextEncoder().encode(input)),
   );
   const jwt = `${input}.${bytesToB64url(sig)}`;
-  cache = { keyId: cfg.APNS_KEY_ID, teamId: cfg.APNS_TEAM_ID, p8: cfg.APNS_KEY_P8, jwt, issuedAt: nowMs };
+  cache = { keyId: cfg.APNS_KEY_ID, teamId: cfg.APNS_TEAM_ID, p8: cfg.APNS_KEY_P8, jwt, issuedAt: nowMs, stale: false };
   return jwt;
 }
 
@@ -122,8 +132,7 @@ export async function sendApns(opts: {
   if (res.status === 400 && (reason === 'BadDeviceToken' || reason === 'DeviceTokenNotForTopic')) {
     return { kind: 'gone', reason };
   }
-  if (res.status === 403 && (reason === 'ExpiredProviderToken' || reason === 'InvalidProviderToken')) {
-    _resetJwtCache();
-  }
+  // Re-signing cannot fix InvalidProviderToken (wrong key/team): keep the token and report it.
+  if (res.status === 403 && reason === 'ExpiredProviderToken') invalidateApnsJwt();
   return { kind: 'error', status: res.status, reason };
 }

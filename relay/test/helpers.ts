@@ -47,6 +47,10 @@ export interface Harness {
   apnsCalls: Captured[];
   /** Next APNs response; default 200. */
   apnsReply: { status: number; body?: string };
+  /** Runs inside the fake APNs fetch, before it replies. */
+  onApns?: () => Promise<void>;
+  /** Unix ms returned by deps.now. */
+  clock: number;
   call(method: string, path: string, body?: unknown, headers?: Record<string, string>): Promise<Response>;
 }
 
@@ -71,6 +75,7 @@ export async function makeHarness(opts: {
     env: relayEnv,
     apnsCalls,
     apnsReply: { status: 200 },
+    clock: 1_800_000_000_000,
     deps: undefined as unknown as Deps,
     async call(method, path, body, headers = {}) {
       const init: RequestInit = { method, headers: { 'content-type': 'application/json', ...headers } };
@@ -80,7 +85,7 @@ export async function makeHarness(opts: {
   };
   h.deps = {
     store: new D1Store(env.DB),
-    now: () => 1_800_000_000_000,
+    now: () => h.clock,
     pushLimiter: opts.pushLimiter ?? allowAll(),
     registerLimiter: opts.registerLimiter ?? allowAll(),
     fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -88,6 +93,7 @@ export async function makeHarness(opts: {
       const hdrs: Record<string, string> = {};
       req.headers.forEach((v, k) => (hdrs[k] = v));
       apnsCalls.push({ url: req.url, method: req.method, headers: hdrs, body: await req.text() });
+      if (h.onApns) await h.onApns();
       return new Response(h.apnsReply.body ?? '', { status: h.apnsReply.status });
     },
   };

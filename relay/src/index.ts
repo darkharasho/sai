@@ -117,12 +117,17 @@ function label(body: Record<string, unknown>): string {
   return v;
 }
 
+/** Fail open (a limiter outage must not take pushes down), but say so. The log line never includes the key. */
 async function limited(limiter: Limiter | undefined, key: string): Promise<boolean> {
-  if (!limiter) return false;
+  if (!limiter) {
+    console.log(JSON.stringify({ route: 'limiter', status: 'missing' }));
+    return false;
+  }
   try {
     return !(await limiter.limit({ key })).success;
   } catch {
-    return false; // fail open: a limiter outage must not take pushes down
+    console.log(JSON.stringify({ route: 'limiter', status: 'error' }));
+    return false;
   }
 }
 
@@ -252,7 +257,8 @@ async function pushRoute(req: Request, env: Env, deps: Deps): Promise<Response> 
     case 'ok':
       return jsonResponse(202, { ok: true });
     case 'gone':
-      await deps.store.deleteRegistration(pushId);
+      // Only if the row still holds the token APNs rejected: the phone may have re-registered meanwhile.
+      await deps.store.deleteRegistrationIfToken(pushId, reg.apnsToken);
       return jsonResponse(410, { error: 'unregistered', reason: outcome.reason });
     case 'error':
       return jsonResponse(502, { error: 'apns_error', reason: outcome.reason });

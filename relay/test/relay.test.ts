@@ -1,5 +1,5 @@
 import { env } from 'cloudflare:workers';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { APNS_TOKEN, APNS_TOKEN_2, fakeSealed, json, makeHarness, resetDb, type Harness } from './helpers';
 
 type Reg = { pushId: string; ownerToken: string };
@@ -292,5 +292,83 @@ describe('misc', () => {
   it('unknown routes are 404', async () => {
     const h = await makeHarness();
     expect((await h.call('GET', '/v1/nope')).status).toBe(404);
+  });
+});
+
+describe('fix round 1', () => {
+  it('APNs 410 for an old token does not delete a registration re-registered mid-push', async () => {
+    const h = await makeHarness();
+    const reg = await register(h);
+    const sec = await mintSecret(h, reg);
+    h.apnsReply = { status: 410, body: JSON.stringify({ reason: 'Unregistered' }) };
+    // The phone re-registers to T2 while the push for T1 is in flight.
+    h.onApns = async () => {
+      h.onApns = undefined;
+      await register(h, { ...reg, apnsToken: APNS_TOKEN_2 });
+    };
+    expect((await push(h, reg, sec)).status).toBe(410);
+    expect(h.apnsCalls[0]!.url).toContain(APNS_TOKEN);
+
+    expect((await regRow(reg.pushId))?.apns_token).toBe(APNS_TOKEN_2);
+    const n = await env.DB.prepare('SELECT COUNT(*) AS n FROM send_secrets WHERE push_id = ?').bind(reg.pushId).first<{ n: number }>();
+    expect(n?.n).toBe(1);
+    h.apnsReply = { status: 200 };
+    expect((await push(h, reg, sec)).status).toBe(202);
+  });
+
+  it('a throwing or missing limiter fails open and logs one fixed line', async () => {
+    const lines: string[] = [];
+    const spy = vi.spyOn(console, 'log').mockImplementation((l: unknown) => void lines.push(String(l)));
+    try {
+      const h = await makeHarness({
+        pushLimiter: {
+          limit: async () => {
+            throw new Error('binding down');
+          },
+        },
+      });
+      h.deps.registerLimiter = undefined;
+      const reg = await register(h);
+      const sec = await mintSecret(h, reg);
+      expect((await push(h, reg, sec)).status).toBe(202);
+      const limiterLines = lines.filter((l) => l.includes('"limiter"'));
+      expect(limiterLines).toEqual([
+        JSON.stringify({ route: 'limiter', status: 'missing' }),
+        JSON.stringify({ route: 'limiter', status: 'error' }),
+      ]);
+      for (const l of lines) {
+        expect(l).not.toContain(reg.pushId);
+        expect(l).not.toContain(reg.ownerToken);
+        expect(l).not.toContain(sec.sendSecret);
+      }
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('InvalidProviderToken keeps the cached JWT and returns 502', async () => {
+    const h = await makeHarness();
+    const reg = await register(h);
+    const sec = await mintSecret(h, reg);
+    h.apnsReply = { status: 403, body: JSON.stringify({ reason: 'InvalidProviderToken' }) };
+    expect((await push(h, reg, sec)).status).toBe(502);
+    h.clock += 60_000;
+    expect((await push(h, reg, sec)).status).toBe(502);
+    expect(h.apnsCalls[1]!.headers.authorization).toBe(h.apnsCalls[0]!.headers.authorization);
+  });
+
+  it('ExpiredProviderToken re-signs, but not more often than every 20 minutes', async () => {
+    const h = await makeHarness();
+    const reg = await register(h);
+    const sec = await mintSecret(h, reg);
+    h.apnsReply = { status: 403, body: JSON.stringify({ reason: 'ExpiredProviderToken' }) };
+    expect((await push(h, reg, sec)).status).toBe(502);
+    h.clock += 60_000;
+    await push(h, reg, sec); // within 20 minutes of signing: same token
+    h.clock += 20 * 60_000;
+    await push(h, reg, sec); // 21 minutes after signing and invalidated: new token
+    const auth = h.apnsCalls.map((c) => c.headers.authorization);
+    expect(auth[1]).toBe(auth[0]);
+    expect(auth[2]).not.toBe(auth[0]);
   });
 });

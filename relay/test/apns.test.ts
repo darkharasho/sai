@@ -42,6 +42,22 @@ describe('APNs JWT', () => {
     expect(c).not.toBe(a);
   });
 
+  it('accepts a .p8 pasted with literal \\n escapes', async () => {
+    _resetJwtCache();
+    const { pem, publicKey } = await makeP8();
+    const escaped = pem.replace(/\n/g, '\\n');
+    expect(escaped).not.toContain('\n');
+    const jwt = await getApnsJwt(cfg(escaped), 0);
+    const [h, p, s] = jwt.split('.');
+    const ok = await crypto.subtle.verify(
+      { name: 'ECDSA', hash: 'SHA-256' },
+      publicKey,
+      b64urlDecode(s!),
+      new TextEncoder().encode(`${h}.${p}`),
+    );
+    expect(ok).toBe(true);
+  });
+
   it('a different key id is not served from the cache', async () => {
     _resetJwtCache();
     const { pem } = await makeP8();
