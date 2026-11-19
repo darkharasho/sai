@@ -177,6 +177,14 @@ export function useChatLog(chatId: string | null, fallbackSettings: ChatSettings
       handle(entry);
     });
 
+    // Phone: a reconnect caught up through a snapshot — re-open from lastSeq
+    // (a pending initial open or recovery already reads the latest).
+    const offResync = api.onResync?.((id) => {
+      if (!alive || id !== chatId || !ready || recovering) return;
+      if (retryTimer !== null) { clearTimeout(retryTimer); retryTimer = null; }
+      recover();
+    }) ?? null;
+
     const loadInitial = () => {
       initialFailed = false;
       (async () => {
@@ -238,6 +246,7 @@ export function useChatLog(chatId: string | null, fallbackSettings: ChatSettings
     return () => {
       alive = false;
       off();
+      offResync?.();
       if (raf !== null) cancelAnimationFrame(raf);
       if (fallback !== null) clearTimeout(fallback);
       if (retryTimer !== null) clearTimeout(retryTimer);

@@ -439,6 +439,12 @@ export interface SaiChatLogApi {
   /** Phone shim only: messages [beforeIndex-limit, beforeIndex) of the chat. Desktop main returns full state and leaves this unimplemented. */
   page?(chatId: string, beforeIndex: number, limit: number): Promise<{ messages: ChatMessage[]; olderCount: number }>;
   onEvent(cb: (entry: import('./lib/chat/types').ChatLogEntry) => void): () => void;
+  /**
+   * Phone shim only: the chat moved on in a way entries can't express (a
+   * reconnect caught up through a snapshot). The reader re-opens from its
+   * lastSeq. Desktop main never fires it.
+   */
+  onResync?(cb: (chatId: string) => void): () => void;
   /** Client event types only (CLIENT_EVENT_TYPES); `init` creates a chat that isn't logged yet. */
   appendClient(
     chatId: string,
