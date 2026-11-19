@@ -549,6 +549,7 @@ export class ChatV2 {
           ...(images ? { images } : {}),
           ...(imagePaths.length ? { imagePaths } : {}),
           ...(raw.now === true ? { now: true } : {}),
+          ...(raw.queue === true ? { queue: true } : {}),
           ...(provider ? { provider } : {}),
           ...(typeof raw.label === 'string' && raw.label ? { label: raw.label } : {}),
         };

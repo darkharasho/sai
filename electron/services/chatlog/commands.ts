@@ -16,6 +16,8 @@ export type ChatCommand =
   | {
     kind: 'send'; chatId: string; clientId: string; text: string; images?: string[]; imagePaths?: string[];
     origin: Origin; projectPath: string; now?: boolean; taskId?: string; promptOverride?: string;
+    /** Explicitly queued (Ctrl+Enter, palette): waits behind a running turn instead of joining it. */
+    queue?: boolean;
     /** The chat's provider: creates a new chat with it, or switches an existing chat before this message. */
     provider?: Provider;
     /** Short text the queue strip shows while this send waits (text can carry pasted context). */
@@ -413,7 +415,7 @@ export class ChatCommands {
         if (this.dispatch.isLoadPaused() || (cmd.queue === true && (turnLive || state.queue.length > 0))) {
           return this.send({
             kind: 'send', chatId: cmd.chatId, clientId: cmd.clientId, text: '/compact',
-            origin: cmd.origin === 'remote' ? 'remote' : 'desktop', projectPath,
+            origin: cmd.origin === 'remote' ? 'remote' : 'desktop', projectPath, queue: true,
           });
         }
         const settings = cmd.origin === 'remote' ? capSettings(state.settings, provider, this.getRemoteCeiling()) : state.settings;
@@ -482,9 +484,16 @@ export class ChatCommands {
     const paused = this.dispatch.isLoadPaused();
     const ready = this.canDispatch(pre.provider, pre.projectPath, cmd.chatId);
     const busy = this.isBusy(pre.projectPath, cmd.chatId);
+    const waiting = (pre.state?.queue.length ?? 0) > 0;
+    // Mid-turn: a plain send to a busy Claude chat goes straight to the backend,
+    // which folds it into the running turn (as Enter did before the log). Not
+    // while our own dispatch is still landing (no streaming_start yet), and not
+    // past items already waiting: those keep their order.
+    const midTurn = busy && !cmd.now && cmd.queue !== true && pre.provider === 'claude'
+      && !this.inFlight.has(cmd.chatId) && !waiting;
     // Paused holds every send (send-now too, like the desktop composer). A busy
-    // chat, or one with items already waiting, queues unless this is send-now.
-    const queue = paused || !ready || (!cmd.now && (busy || (pre.state?.queue.length ?? 0) > 0));
+    // chat, or one with items already waiting, queues unless this is send-now or mid-turn.
+    const queue = paused || !ready || (!cmd.now && !midTurn && (busy || waiting));
 
     const entry = this.log.appendClient(cmd.chatId, {
       type: 'user_message', clientId: cmd.clientId, text, origin,

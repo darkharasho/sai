@@ -66,8 +66,9 @@ function mk(opts: { ceiling?: 'auto' | 'auto-read' | 'always-ask' | null; provid
   return { store, log, d, calls, cmds, dir };
 }
 
+// Queue sends (Ctrl+Enter) by default: a plain send to a busy Claude chat joins the turn (see midTurn tests).
 const send = (clientId: string, text: string, extra: Record<string, unknown> = {}) => ({
-  kind: 'send' as const, chatId: 'c1', clientId, text, origin: 'desktop' as const, projectPath: P, ...extra,
+  kind: 'send' as const, chatId: 'c1', clientId, text, origin: 'desktop' as const, projectPath: P, queue: true, ...extra,
 });
 
 /** Simulate a backend turn in the log: streaming_start then done. */
@@ -135,6 +136,49 @@ describe('ChatCommands', () => {
     // The bubble is logged at queue time, then held in the queue (not the transcript) until it drains.
     expect(store.read('c1', 0).entries.some((e) => e.ev.type === 'user_message' && e.ev.clientId === 'u2')).toBe(true);
     expect(st.messages.map((m) => m.id)).not.toContain('u2');
+  });
+
+  it('a plain send to a busy Claude chat joins the running turn (mid-turn), not the queue', async () => {
+    const { store, log, d, cmds } = mk();
+    await cmds.run(send('u1', 'first'));
+    startTurn(log);
+    d.setBusy(true);
+    await cmds.run(send('u2', 'also this', { queue: false }));
+    expect(d.send).toHaveBeenCalledTimes(2);
+    expect((d.send as any).mock.calls[1][1].prompt).toBe('also this');
+    expect(d.stop).not.toHaveBeenCalled();
+    const st = store.state('c1')!;
+    expect(st.queue).toEqual([]);
+    expect(st.messages.map((m) => m.id)).toContain('u2'); // the bubble shows now
+  });
+
+  it('a plain busy send still queues behind waiting items, while its own dispatch lands, and for other providers', async () => {
+    // Behind waiting items: keeps their order.
+    const a = mk();
+    await a.cmds.run(send('u1', 'first'));
+    startTurn(a.log);
+    a.d.setBusy(true);
+    await a.cmds.run(send('u2', 'queued'));
+    await a.cmds.run(send('u3', 'plain', { queue: false }));
+    expect(a.d.send).toHaveBeenCalledTimes(1);
+    expect(a.store.state('c1')!.queue.map((q) => q.clientId)).toEqual(['u2', 'u3']);
+
+    // Dispatched but no streaming_start yet: a second dispatch would race the first.
+    const b = mk();
+    await b.cmds.run(send('u1', 'first'));
+    b.d.setBusy(true);
+    await b.cmds.run(send('u2', 'plain', { queue: false }));
+    expect(b.d.send).toHaveBeenCalledTimes(1);
+    expect(b.store.state('c1')!.queue.map((q) => q.clientId)).toEqual(['u2']);
+
+    // Codex has no mid-turn input.
+    const c = mk();
+    await c.cmds.run(send('u1', 'first', { provider: 'codex' }));
+    startTurn(c.log);
+    c.d.setBusy(true);
+    await c.cmds.run(send('u2', 'plain', { queue: false }));
+    expect(c.d.send).toHaveBeenCalledTimes(1);
+    expect(c.store.state('c1')!.queue.map((q) => q.clientId)).toEqual(['u2']);
   });
 
   it('turn end drains exactly one queued item in order', async () => {

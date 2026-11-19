@@ -1849,7 +1849,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode:
    * another provider) is seeded from the workspace defaults first, so the
    * dispatch runs with what the composer shows.
    */
-  const sendToLog = async (text: string, opts: { clientId: string; images?: string[]; imagePaths?: string[]; prompt?: string; taskId?: string; now?: boolean; label?: string }): Promise<boolean> => {
+  const sendToLog = async (text: string, opts: { clientId: string; images?: string[]; imagePaths?: string[]; prompt?: string; taskId?: string; now?: boolean; queue?: boolean; label?: string }): Promise<boolean> => {
     if (!chatId || !projectPath) return false;
     const seed = settingsSeedRef.current();
     try {
@@ -1867,6 +1867,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode:
         ...(opts.prompt !== undefined && opts.prompt !== text ? { promptOverride: opts.prompt } : {}),
         ...(opts.taskId ? { taskId: opts.taskId } : {}),
         ...(opts.now ? { now: true } : {}),
+        ...(opts.queue ? { queue: true } : {}),
         ...(opts.label && opts.label !== text ? { label: opts.label } : {}),
       });
       return true;
@@ -2064,8 +2065,9 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode:
       return;
     }
 
-    // Everything below goes through main's send command, which queues it while
-    // the chat is busy, items are waiting or the load guard is paused.
+    // Everything below goes through main's send command. A plain send to a busy
+    // Claude chat joins the running turn; explicit queue sends (Ctrl+Enter), other
+    // providers' busy sends, sends behind waiting items and paused sends queue.
     // Bypass-queue-on-enter: when streaming AND the queue has items, plain
     // Enter signals "send this now" — main interrupts the current turn first
     // (its end doesn't drain), then dispatches immediately. The queue stays
@@ -2074,7 +2076,8 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode:
 
     isAtBottomRef.current = true;
     // A send that will wait in the queue has no bubble to fly into yet.
-    if (!now && (turnLive || loadPausedRef.current || messageQueue.length > 0)) pendingComposerRectRef.current = null;
+    const joinsTurn = turnLive && !opts?.queue && aiProvider === 'claude';
+    if (!now && ((turnLive && !joinsTurn) || loadPausedRef.current || messageQueue.length > 0)) pendingComposerRectRef.current = null;
     keepFlipRect();
 
     // Save images to temp files and get paths
@@ -2088,7 +2091,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode:
     const builtPrompt = activeFilePath && fileContextEnabled ? `[File: ${activeFilePath}]\n\n${text}` : text;
     const prompt = directCard ? directAtTask(builtPrompt, directCard.title) : builtPrompt;
     const sent = await sendToLog(text, {
-      clientId, images, imagePaths, prompt, now, label: opts?.label,
+      clientId, images, imagePaths, prompt, now, queue: opts?.queue, label: opts?.label,
       // A message typed on a task tab belongs to that task; stamping keeps an explicit tag.
       ...(directCard ? { taskId: directCard.tag } : {}),
     });

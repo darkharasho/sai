@@ -1638,13 +1638,13 @@ export default function ChatInput({ projectPath, onSend, overlayControl, onBefor
               <Square size={16} fill="currentColor" />
             </button>
           )}
-          {/* Phone: no Enter-to-send, so Send stays beside Stop while there's text (main queues it, like the desktop's Enter). */}
+          {/* Phone: no Enter-to-send, so Send stays beside Stop while there's text. Like the desktop's Enter, Claude takes it mid-turn; other providers queue it. */}
           {(!(isStreaming || waiting) || (isPhone() && value.trim())) && (
             <button
               className="send-btn"
               onClick={sendFromButton}
               disabled={disabled || !value.trim()}
-              title={(isStreaming || waiting) ? 'Send (queued)' : 'Send'}
+              title={(isStreaming || waiting) && aiProvider !== 'claude' ? 'Send (queued)' : 'Send'}
             >
               <Send size={16} />
             </button>
