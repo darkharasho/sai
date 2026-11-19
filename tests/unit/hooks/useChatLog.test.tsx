@@ -1,8 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 
-vi.mock('../../../src/lib/chat/migrateToLog', () => ({ ensureChatInLog: vi.fn(async () => {}) }));
-import { useChatLog, HIDDEN_FLUSH_MS } from '../../../src/hooks/useChatLog';
+vi.mock('../../../src/lib/chat/migrateToLog', () => ({
+  ensureChatInLog: vi.fn(async () => {}),
+  isChatImported: vi.fn(() => false),
+  forgetChatImported: vi.fn(),
+}));
+import { useChatLog, HIDDEN_FLUSH_MS, _resetUnavailableToastForTests } from '../../../src/hooks/useChatLog';
+import * as migrate from '../../../src/lib/chat/migrateToLog';
 
 const settings = { provider: 'claude' } as any;
 const ev = (text: string) => ({ type: 'user_message', clientId: text, text } as any);
@@ -23,7 +28,7 @@ beforeEach(() => {
   openMock = vi.fn();
   (window as any).sai = { chatlog: { open: openMock, onEvent: (cb: any) => { listener = cb; return () => { listener = () => {}; }; } } };
 });
-afterEach(() => { delete (window as any).sai; vi.unstubAllGlobals(); });
+afterEach(() => { delete (window as any).sai; vi.unstubAllGlobals(); _resetUnavailableToastForTests(); vi.mocked(migrate.isChatImported).mockReturnValue(false); vi.mocked(migrate.forgetChatImported).mockClear(); vi.mocked(migrate.ensureChatInLog).mockClear(); });
 
 describe('useChatLog', () => {
   it('applies snapshot then entries', async () => {
@@ -88,7 +93,7 @@ describe('useChatLog', () => {
     openMock.mockResolvedValueOnce(res([{ chatId: 'a', seq: 2, ts: 2, ev: { type: 'history_imported' } }], { chatId: 'a', seq: 1, state: folded }));
     act(() => { listener({ chatId: 'a', seq: 2, ts: 2, ev: { type: 'history_imported' } }); });
     await flushMicro();
-    expect(openMock).toHaveBeenLastCalledWith('a', 0);
+    expect(openMock).toHaveBeenLastCalledWith('a', 0, { panel: true });
     expect(result.current.state?.messages.map((m: any) => m.id)).toEqual(['old', 'm1']);
     expect(result.current.state?.lastSeq).toBe(2);
     // History, not live activity: no side-effect entries.
@@ -113,7 +118,7 @@ describe('useChatLog', () => {
       act(() => { listener({ chatId: 'a', seq: 2, ts: 2, ev: { type: 'history_imported' } }); });
       await flushMicro();
       const callsAfterReload = openMock.mock.calls.length;
-      expect(openMock).toHaveBeenLastCalledWith('a', 0);
+      expect(openMock).toHaveBeenLastCalledWith('a', 0, { panel: true });
       await act(async () => { await vi.advanceTimersByTimeAsync(6000); });
       // The stale recovery retry never fires an open(after>0).
       expect(openMock.mock.calls.length).toBe(callsAfterReload);
@@ -233,5 +238,69 @@ describe('useChatLog', () => {
     seen.length = 0;
     rerender({ id: 'b' });
     expect(seen[0]).toBeUndefined();
+  });
+
+  it('the initial open is a panel open (kicks the queue drain); recovery opens are not', async () => {
+    openMock.mockResolvedValueOnce(res([entry('a', 1)]));
+    renderHook(() => useChatLog('a', settings));
+    await flushMicro();
+    expect(openMock).toHaveBeenCalledWith('a', 0, { panel: true });
+    openMock.mockResolvedValueOnce(res([entry('a', 2)]));
+    act(() => { listener(entry('a', 3)); });
+    await flushMicro();
+    expect(openMock).toHaveBeenLastCalledWith('a', 1);
+  });
+
+  it('chat storage unavailable: stops retrying, exposes the error and toasts once', async () => {
+    vi.useFakeTimers();
+    const toasts: string[] = [];
+    const onErr = (e: Event) => toasts.push((e as CustomEvent).detail?.message);
+    window.addEventListener('sai-chat-error', onErr);
+    try {
+      openMock.mockRejectedValue(new Error("Error invoking remote method 'chatlog:open': Error: Chat storage unavailable: EACCES"));
+      const a = renderHook(() => useChatLog('a', settings));
+      const b = renderHook(() => useChatLog('b', settings));
+      await flushMicro();
+      await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+      expect(openMock).toHaveBeenCalledTimes(2); // one per hook, no retries
+      expect(a.result.current.state).toBeNull();
+      expect(a.result.current.error).toMatch(/Chat storage unavailable: EACCES/);
+      expect(b.result.current.error).toMatch(/Chat storage unavailable/);
+      expect(toasts).toHaveLength(1);
+      expect(toasts[0]).toMatch(/Chat storage unavailable/);
+    } finally { window.removeEventListener('sai-chat-error', onErr); vi.useRealTimers(); }
+  });
+
+  it('other initial-open errors still retry and expose no error', async () => {
+    vi.useFakeTimers();
+    try {
+      openMock.mockRejectedValueOnce(new Error('timeout')).mockResolvedValue(res([entry('a', 1)]));
+      const { result } = renderHook(() => useChatLog('a', settings));
+      await flushMicro();
+      expect(result.current.error).toBeNull();
+      await act(async () => { await vi.advanceTimersByTimeAsync(300); });
+      expect(result.current.state?.lastSeq).toBe(1);
+      expect(result.current.error).toBeNull();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('a chat main reports unimported after this session settled it (lost snapshot) is re-folded', async () => {
+    vi.mocked(migrate.isChatImported).mockReturnValue(true);
+    openMock.mockResolvedValue({ ...res([entry('a', 5)]), meta: { chatId: 'a', imported: false } });
+    renderHook(() => useChatLog('a', settings));
+    await flushMicro();
+    await flushMicro();
+    expect(migrate.forgetChatImported).toHaveBeenCalledWith('a');
+    expect(migrate.ensureChatInLog).toHaveBeenCalledTimes(2);
+  });
+
+  it('an imported chat is not re-folded', async () => {
+    vi.mocked(migrate.isChatImported).mockReturnValue(true);
+    openMock.mockResolvedValue({ ...res([entry('a', 5)]), meta: { chatId: 'a', imported: true } });
+    renderHook(() => useChatLog('a', settings));
+    await flushMicro();
+    await flushMicro();
+    expect(migrate.forgetChatImported).not.toHaveBeenCalled();
+    expect(migrate.ensureChatInLog).toHaveBeenCalledTimes(1);
   });
 });

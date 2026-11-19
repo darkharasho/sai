@@ -515,7 +515,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode:
   // the session main binds it to (bindLegacyScope below).
   const chatId = claudeScope !== 'chat' ? claudeScope : (sessionId ?? null);
   const fallbackSettings = useMemo<ChatSettings>(() => ({ provider: aiProvider }), [aiProvider]);
-  const { state: logState, lastApplied } = useChatLog(chatId, fallbackSettings);
+  const { state: logState, lastApplied, error: logError } = useChatLog(chatId, fallbackSettings);
 
   // Composer settings are the chat's own (state.settings in main's log, shared
   // with the phone). The parent's values are the workspace defaults: they fill
@@ -2145,10 +2145,16 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode:
                   exit={{ opacity: 0 }}
                   transition={{ duration: 0.25 }}
                 >
-                  <div className="chat-empty-subtitle">
-                    {projectPath ? emptyPrompt : 'Select a project to get started'}
-                  </div>
-                  {projectPath && <CyclingHints />}
+                  {logError ? (
+                    <div className="chat-empty-subtitle chat-log-error" role="alert">
+                      {logError}. Chats can't be loaded or sent until SAI restarts.
+                    </div>
+                  ) : (
+                    <div className="chat-empty-subtitle">
+                      {projectPath ? emptyPrompt : 'Select a project to get started'}
+                    </div>
+                  )}
+                  {projectPath && !logError && <CyclingHints />}
                 </motion.div>
               </AnimatePresence>
             </div>

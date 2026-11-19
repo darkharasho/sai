@@ -9,7 +9,7 @@ import type { ComponentProps } from 'react';
 import { installMockSai } from '../../../helpers/ipc-mock';
 import { installMockChatlog, emitChat, flushChatlog, type MockChatlog } from '../../../helpers/chatlogMock';
 
-vi.mock('../../../../src/lib/chat/migrateToLog', () => ({ ensureChatInLog: vi.fn(async () => {}), isChatImported: () => true }));
+vi.mock('../../../../src/lib/chat/migrateToLog', () => ({ ensureChatInLog: vi.fn(async () => {}), isChatImported: () => true, forgetChatImported: vi.fn() }));
 
 const messageProps = new Map<string, any>();
 vi.mock('../../../../src/components/Chat/ChatMessage', () => ({
@@ -91,6 +91,18 @@ beforeEach(() => {
 });
 
 describe('ChatPanel renders from the durable log', () => {
+  it('chat storage unavailable: shows the error instead of the empty prompt, and stops retrying', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      log.open.mockRejectedValue(new Error("Error invoking remote method 'chatlog:open': Error: Chat storage unavailable: EACCES: permission denied"));
+      await mount();
+      await act(async () => { await vi.advanceTimersByTimeAsync(20_000); });
+      const alert = screen.getByRole('alert');
+      expect(alert.textContent).toMatch(/^Chat storage unavailable: EACCES: permission denied/);
+      expect(log.open).toHaveBeenCalledTimes(1);
+    } finally { vi.useRealTimers(); }
+  });
+
   it('renders messages from the log snapshot and live entries', async () => {
     log.seed('c1', [
       { id: 'u1', role: 'user', content: 'hello', timestamp: 1 },

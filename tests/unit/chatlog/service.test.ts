@@ -4,7 +4,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { ChatLogStore } from '../../../electron/services/chatlog/store';
-import { ChatLogService, liveChatIds, type ChatLogServiceOpts } from '../../../electron/services/chatlog/service';
+import { ChatLogService, liveChatIds, registerUnavailableChatLogIpc, CHATLOG_IPC_CHANNELS, type ChatLogServiceOpts } from '../../../electron/services/chatlog/service';
+import { pruneOrphanImages, setLogImageReferences } from '../../../electron/services/toolResultImageStore';
+import { pruneModelCache, setLogModelKeyReferences } from '../../../electron/services/modelCache';
+import { CHATLOG_UNAVAILABLE, isChatLogUnavailable } from '../../../src/lib/chat/types';
 import { SessionBus } from '../../../electron/services/remote/session-bus';
 import type { ChatLogEntry } from '../../../src/lib/chat/types';
 import { assistant, toolUse, toolResult } from '../chat/helpers';
@@ -321,6 +324,93 @@ describe('ChatLogService GC references', () => {
     expect(fs.readFileSync(path.join(store['dir'], 'c2.jsonl'), 'utf8')).toBe('');
     expect(svc.referencedImageFiles()).toEqual([img]);
     expect(svc.referencedModelKeys()).toEqual([key]);
+  });
+});
+
+describe('ChatLogService GC aborts on an unreadable log', () => {
+  it('a non-ENOENT read error throws from the references and no image or model is deleted', () => {
+    const { svc, store, dir } = mk();
+    const img = 'a'.repeat(32) + '.png';
+    svc.record({ type: 'user', projectPath: '/p', scope: 'c1', text: `see ${img}` });
+    svc.record({ type: 'user', projectPath: '/p', scope: 'c2', text: 'other' });
+    store.flush();
+    fs.rmSync(path.join(dir, 'c2.jsonl'));
+    fs.mkdirSync(path.join(dir, 'c2.jsonl')); // EISDIR on read
+    expect(() => svc.referencedImageFiles()).toThrow();
+    const imgDir = tmp();
+    fs.writeFileSync(path.join(imgDir, img), 'x');
+    fs.writeFileSync(path.join(imgDir, 'b'.repeat(32) + '.png'), 'x');
+    const modelDir = tmp();
+    const key = 'c'.repeat(32);
+    fs.writeFileSync(path.join(modelDir, `${key}.glb`), 'x');
+    setLogImageReferences(() => svc.referencedImageFiles());
+    setLogModelKeyReferences(() => svc.referencedModelKeys());
+    try {
+      expect(pruneOrphanImages([], imgDir)).toEqual({ deleted: 0, freedBytes: 0 });
+      expect(fs.readdirSync(imgDir).length).toBe(2);
+      expect(pruneModelCache([], modelDir)).toEqual({ deleted: 0, freedBytes: 0 });
+      expect(fs.readdirSync(modelDir)).toEqual([`${key}.glb`]);
+    } finally {
+      setLogImageReferences(null);
+      setLogModelKeyReferences(null);
+    }
+  });
+});
+
+function fakeIpc() {
+  const handlers = new Map<string, (...args: any[]) => unknown>();
+  return { handlers, ipcMain: { handle: (ch: string, fn: (...args: any[]) => unknown) => { handlers.set(ch, fn); } } as any };
+}
+
+describe('chatlog:open drain trigger', () => {
+  it('only a panel open notifies the turn hooks; reads (search, mirror) and recoveries do not', async () => {
+    const { svc } = mk();
+    svc.record({ type: 'user_message', projectPath: '/p', scope: 'c1', text: 'hi' });
+    const opened = vi.fn();
+    svc.setTurnHooks({ opened });
+    const { handlers, ipcMain } = fakeIpc();
+    svc.registerIpc(ipcMain);
+    const open = handlers.get('chatlog:open')!;
+    await open({}, 'c1', 0);
+    await open({}, 'c1', 0, {});
+    await open({}, 'c1', 1, { panel: true });
+    expect(opened).not.toHaveBeenCalled();
+    const res = await open({}, 'c1', 0, { panel: true }) as any;
+    expect(res.headSeq).toBe(1);
+    expect(opened).toHaveBeenCalledTimes(1);
+    expect(opened).toHaveBeenCalledWith('c1');
+    // bindLegacyScope still kicks the drain (the legacy-scope panel's open).
+    await handlers.get('chatlog:bindLegacyScope')!({}, '/p', 'c1');
+    expect(opened).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('registerUnavailableChatLogIpc', () => {
+  it('registers every chatlog channel (command included) and each rejects with the unavailable error', async () => {
+    const { handlers, ipcMain } = fakeIpc();
+    registerUnavailableChatLogIpc(ipcMain, 'EACCES: permission denied');
+    expect([...handlers.keys()].sort()).toEqual([...CHATLOG_IPC_CHANNELS].sort());
+    expect(CHATLOG_IPC_CHANNELS).toContain('chatlog:command');
+    expect(CHATLOG_IPC_CHANNELS).toContain('chatlog:open');
+    for (const fn of handlers.values()) {
+      const err = await Promise.resolve().then(() => fn({}, 'c1', 0)).then(() => null, (e) => e);
+      expect(err).toBeInstanceOf(Error);
+      expect(err.message).toBe(`${CHATLOG_UNAVAILABLE}: EACCES: permission denied`);
+      expect(isChatLogUnavailable(err)).toBe(true);
+    }
+  });
+
+  it('a real service registers the same channels the stubs cover (minus command, which main adds)', () => {
+    const { svc } = mk();
+    const { handlers, ipcMain } = fakeIpc();
+    svc.registerIpc(ipcMain);
+    expect([...handlers.keys(), 'chatlog:command'].sort()).toEqual([...CHATLOG_IPC_CHANNELS].sort());
+  });
+
+  it('isChatLogUnavailable matches the error as Electron wraps it across invoke', () => {
+    expect(isChatLogUnavailable(new Error(`Error invoking remote method 'chatlog:open': Error: ${CHATLOG_UNAVAILABLE}: EIO`))).toBe(true);
+    expect(isChatLogUnavailable(new Error('timeout'))).toBe(false);
+    expect(isChatLogUnavailable(undefined)).toBe(false);
   });
 });
 

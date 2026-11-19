@@ -138,3 +138,16 @@ export const CLIENT_EVENT_TYPES = [
   'settings_changed', 'queue_added', 'queue_removed', 'queue_cleared', 'queue_promoted',
 ] as const;
 export type ClientEventType = (typeof CLIENT_EVENT_TYPES)[number];
+
+/**
+ * Message prefix main rejects every chatlog:* call with when the log failed to
+ * initialize (see registerUnavailableChatLogIpc). Not retryable: it lasts for
+ * the life of the process.
+ */
+export const CHATLOG_UNAVAILABLE = 'Chat storage unavailable';
+
+/** True for the "chat storage unavailable" error, including as Electron wraps it across ipcRenderer.invoke. */
+export function isChatLogUnavailable(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : typeof err === 'string' ? err : '';
+  return msg.includes(CHATLOG_UNAVAILABLE);
+}

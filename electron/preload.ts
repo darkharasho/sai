@@ -510,7 +510,7 @@ contextBridge.exposeInMainWorld('sai', {
   },
   // Durable per-chat log (chat sync). See electron/services/chatlog/service.ts.
   chatlog: {
-    open: (chatId: string, after: number) => ipcRenderer.invoke('chatlog:open', chatId, after),
+    open: (chatId: string, after: number, opts?: { panel?: boolean }) => ipcRenderer.invoke('chatlog:open', chatId, after, opts),
     onEvent: (callback: (entry: unknown) => void) => {
       const listener = (_event: Electron.IpcRendererEvent, entry: unknown) => callback(entry);
       ipcRenderer.on('chatlog:event', listener);

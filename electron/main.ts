@@ -78,7 +78,7 @@ import { registerClaudeHandlers, destroyClaude, setRemoteCeiling, getRemoteCeili
 import { initSudoService, lockSudo } from './services/sudo';
 import { getClaudeBackend, listClaudeLiveScopes } from './services/claudeBackend';
 import { ChatLogStore } from './services/chatlog/store';
-import { ChatLogService, liveChatIds, realPath } from './services/chatlog/service';
+import { ChatLogService, liveChatIds, realPath, registerUnavailableChatLogIpc } from './services/chatlog/service';
 import { ChatCommands, type ChatCommand } from './services/chatlog/commands';
 import { createProviderDispatch } from './services/chatlog/providerDispatch';
 import { getChatSync, setChatSync } from './services/chatlog/holder';
@@ -184,6 +184,8 @@ let loadGuardWasPaused = false;
 let chatLogStore: ChatLogStore | null = null;
 let chatLog: ChatLogService | null = null;
 let chatLogRepaired = false;
+/** Set when the log failed to start: stub chatlog:* handlers are registered instead (once). */
+let chatLogUnavailable = false;
 // The one command path into chats (send/approve/queue/settings); the phone
 // bridge reads it (with the store) from chatlog/holder.ts.
 let chatCommands: ChatCommands | null = null;
@@ -200,7 +202,7 @@ function liveScopesOf(provider: string): Array<{ projectPath: string; scope: str
 }
 
 function initChatLog(): void {
-  if (chatLog) return;
+  if (chatLog || chatLogUnavailable) return;
   const dir = process.env.SAI_CHATLOG_DIR || path.join(app.getPath('userData'), 'chatlog');
   try {
     chatLogStore = new ChatLogStore({
@@ -208,9 +210,19 @@ function initChatLog(): void {
       onError: (err) => devlog('chatlog', 'chatlog.flushError', { error: err instanceof Error ? err.message : String(err) }),
     });
   } catch (err) {
-    // The app must keep working without the log (v1 IPC is untouched).
+    // Chats can't work without the log: the panel reads and sends only through
+    // chatlog:*. Register handlers that reject with a clear, non-retryable error
+    // so the renderer shows it (and toasts once) instead of retrying forever
+    // against unregistered channels.
+    const reason = err instanceof Error ? err.message : String(err);
     console.error('[chatlog] store init failed:', err);
-    devlog('chatlog', 'chatlog.initError', { dir, error: err instanceof Error ? err.message : String(err) });
+    devlog('chatlog', 'chatlog.initError', { dir, error: reason });
+    chatLogUnavailable = true;
+    registerUnavailableChatLogIpc(ipcMain, reason);
+    // The image/model GCs must not delete files only the (unreadable) log references.
+    const unreadable = (): never => { throw new Error(`chat log unavailable: ${reason}`); };
+    setLogImageReferences(unreadable);
+    setLogModelKeyReferences(unreadable);
     return;
   }
   const service: ChatLogService = new ChatLogService({

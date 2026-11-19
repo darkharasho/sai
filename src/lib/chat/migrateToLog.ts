@@ -17,6 +17,11 @@ export function isChatImported(chatId: string): boolean {
   return knownInLog.has(chatId);
 }
 
+/** Main lost the chat's imported history (snapshot gone): the next ensureChatInLog re-checks and re-folds it. */
+export function forgetChatImported(chatId: string): void {
+  knownInLog.delete(chatId);
+}
+
 async function importSession(s: ChatSession): Promise<boolean> {
   const chatlog = (window as any).sai?.chatlog;
   if (!chatlog || !s.projectPath) return false;

@@ -15,6 +15,7 @@ const verified = vi.hoisted(() => new Set<string>());
 vi.mock('../../../../src/lib/chat/migrateToLog', () => ({
   ensureChatInLog: vi.fn(async () => {}),
   isChatImported: (id: string) => verified.has(id),
+  forgetChatImported: (id: string) => { verified.delete(id); },
 }));
 
 vi.mock('../../../../src/components/Chat/ChatMessage', () => ({

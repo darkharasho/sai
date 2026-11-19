@@ -6,7 +6,7 @@ import path from 'node:path';
 import type { IpcMain } from 'electron';
 import type { ChatMessage } from '../../../src/types';
 import type { ChatEvent, ChatLogEntry, ChatMeta, ChatSettings } from '../../../src/lib/chat/types';
-import { CLIENT_EVENT_TYPES } from '../../../src/lib/chat/types';
+import { CLIENT_EVENT_TYPES, CHATLOG_UNAVAILABLE } from '../../../src/lib/chat/types';
 import { TOOL_IMAGE_REF_RE, MODEL_KEY_REF_RE, modelKeyFromRef } from '../../../src/lib/chat/gcRefs';
 import type { SessionBus } from '../remote/session-bus';
 import type { ChatLogStore } from './store';
@@ -30,6 +30,24 @@ export interface TurnHooks {
   idleDone?(chatId: string): void;
   /** A client opened the chat (cold open or legacy-scope bind). */
   opened?(chatId: string): void;
+}
+
+/** Every chatlog:* IPC channel ('chatlog:command' is registered by main alongside ChatCommands). */
+export const CHATLOG_IPC_CHANNELS = [
+  'chatlog:open', 'chatlog:appendClient', 'chatlog:importMessages', 'chatlog:list', 'chatlog:delete',
+  'chatlog:bindLegacyScope', 'chatlog:patchMeta', 'chatlog:command',
+] as const;
+
+/**
+ * The log failed to initialize: every chatlog:* call rejects with a clear,
+ * non-retryable error instead of hanging unregistered (the renderer shows it
+ * and stops retrying — see isChatLogUnavailable).
+ */
+export function registerUnavailableChatLogIpc(ipcMain: Pick<IpcMain, 'handle'>, reason: string): void {
+  const message = `${CHATLOG_UNAVAILABLE}: ${reason}`;
+  for (const channel of CHATLOG_IPC_CHANNELS) {
+    ipcMain.handle(channel, () => { throw new Error(message); });
+  }
 }
 
 const PROVIDERS: ReadonlyArray<ChatSettings['provider']> = ['claude', 'codex', 'gemini', 'kimi'];
@@ -233,10 +251,12 @@ export class ChatLogService {
   }
 
   registerIpc(ipcMain: IpcMain): void {
-    ipcMain.handle('chatlog:open', (_e, chatId: string, after: number) => {
+    // Only the chat panel's own open (opts.panel) kicks the queue drain: sidebar
+    // search and the IndexedDB mirror read chats too, and a read must not send.
+    ipcMain.handle('chatlog:open', (_e, chatId: string, after: number, opts?: { panel?: boolean }) => {
       const from = Number.isFinite(after) ? Number(after) : 0;
       const res = this.store.read(String(chatId), from);
-      if (from === 0) this.notifyOpened(String(chatId));
+      if (from === 0 && opts?.panel === true) this.notifyOpened(String(chatId));
       return res;
     });
     ipcMain.handle('chatlog:appendClient', (_e, chatId: string, ev: ChatEvent, init?: { projectPath: string; provider?: ChatSettings['provider'] }) =>

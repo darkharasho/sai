@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ChatLogEntry, ChatMeta, ChatSettings, ChatState } from '../lib/chat/types';
+import { isChatLogUnavailable } from '../lib/chat/types';
 import { emptyChatState, reduceMany } from '../lib/chat/reducer';
-import { ensureChatInLog } from '../lib/chat/migrateToLog';
+import { ensureChatInLog, forgetChatImported, isChatImported } from '../lib/chat/migrateToLog';
 
 export interface UseChatLog {
   /** null until the first open resolves */
@@ -13,6 +14,17 @@ export interface UseChatLog {
    * history is never added (loading history must not trigger side effects). Reset on chatId change.
    */
   lastApplied: React.MutableRefObject<ChatLogEntry[]>;
+  /** Set when main's chat storage failed to start ("Chat storage unavailable: …"); the hook stops retrying. */
+  error: string | null;
+}
+
+/** The unavailable-storage toast shows once per renderer, however many panels hit it. */
+let unavailableToastShown = false;
+/** Test hook. */
+export function _resetUnavailableToastForTests(): void { unavailableToastShown = false; }
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
 }
 
 /**
@@ -25,6 +37,7 @@ export const HIDDEN_FLUSH_MS = 250;
 
 export function useChatLog(chatId: string | null, fallbackSettings: ChatSettings): UseChatLog {
   const [held, setHeld] = useState<{ chatId: string; state: ChatState | null; meta: ChatMeta | null } | null>(null);
+  const [failure, setFailure] = useState<{ chatId: string; message: string } | null>(null);
   const setState = (st: ChatState | null) => setHeld((h) => ({ chatId: chatId as string, meta: null, ...(h && h.chatId === chatId ? h : {}), state: st }));
   const setMeta = (m: ChatMeta | null) => setHeld((h) => ({ chatId: chatId as string, state: null, ...(h && h.chatId === chatId ? h : {}), meta: m }));
   const lastApplied = useRef<ChatLogEntry[]>([]);
@@ -139,8 +152,16 @@ export function useChatLog(chatId: string | null, fallbackSettings: ChatSettings
       initialFailed = false;
       (async () => {
         try { await ensureChatInLog(chatId); } catch { /* open anyway */ }
-        const res = await api.open(chatId, 0);
+        // The panel's open: main kicks this chat's queue drain (reads elsewhere don't).
+        const res = await api.open(chatId, 0, { panel: true });
         if (!alive) return;
+        if (res.meta && !res.meta.imported && isChatImported(chatId)) {
+          // Main lost the history this session already settled (its snapshot
+          // went missing): re-fold it from the IndexedDB mirror. The fold's
+          // history_imported entry reloads this hook.
+          forgetChatImported(chatId);
+          void ensureChatInLog(chatId).catch(() => { /* retried on the next open */ });
+        }
         const base = res.snapshot ? res.snapshot.state : emptyChatState(settingsRef.current);
         current = reduceMany(base, res.entries);
         head = current.lastSeq;
@@ -148,8 +169,18 @@ export function useChatLog(chatId: string | null, fallbackSettings: ChatSettings
         setState(current);
         setMeta(res.meta ?? null);
         drainBuffer();
-      })().catch(() => {
+      })().catch((err) => {
         if (!alive) return;
+        if (isChatLogUnavailable(err)) {
+          // Main's chat storage never started: retrying can't help. Show it.
+          const message = errorMessage(err).replace(/^.*?(Chat storage unavailable)/, '$1');
+          setFailure({ chatId, message });
+          if (!unavailableToastShown) {
+            unavailableToastShown = true;
+            window.dispatchEvent(new CustomEvent('sai-chat-error', { detail: { message: `${message}. Chats can't be loaded or sent until SAI restarts.` } }));
+          }
+          return;
+        }
         initialFailed = true;
         buffer = []; // "need full reload": the next successful open(chatId, 0) re-reads everything
         retryTimer = setTimeout(() => { retryTimer = null; if (alive) loadInitial(); }, backoff(initialFails++));
@@ -167,5 +198,6 @@ export function useChatLog(chatId: string | null, fallbackSettings: ChatSettings
   }, [chatId]);
 
   const cur = held && held.chatId === chatId ? held : null;
-  return { state: cur?.state ?? null, meta: cur?.meta ?? null, lastApplied };
+  const error = failure && failure.chatId === chatId ? failure.message : null;
+  return { state: cur?.state ?? null, meta: cur?.meta ?? null, lastApplied, error };
 }
