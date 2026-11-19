@@ -9,15 +9,16 @@ import { isTerminalDetail, type BackgroundTaskDetail } from '../../../electron/s
 import type { WaitMeta } from '../../../electron/services/waitClassifier';
 import type { ChatSettings, ChatState } from '../../../src/lib/chat/types';
 import type { ChatMirror } from './chatMirror';
+import { defaultProviderOf, type Connection } from './connection';
 
 type Provider = ChatSettings['provider'];
-const PROVIDERS: Provider[] = ['claude', 'codex', 'gemini', 'kimi'];
 
 export interface ChatHostProps {
   chatId: string;
   projectPath: string;
-  mirror: ChatMirror;
-  /** The desktop's phone-visible settings (provider defaults: aiProvider, modelChoice, …, codex/gemini/kimi). */
+  /** The connection this chat is read through (closed through it, whatever window.sai points at later). */
+  conn: Pick<Connection, 'sai' | 'mirror'>;
+  /** The desktop's phone-visible settings (defaults: aiProvider and the nested claude/codex/gemini/kimi objects; per-workspace claude overrides don't cross). */
   appSettings: Record<string, unknown>;
 }
 
@@ -28,7 +29,7 @@ export function useMirroredState(mirror: ChatMirror, chatId: string | null): Cha
 }
 
 const str = (v: unknown, fallback: string): string => (typeof v === 'string' && v ? v : fallback);
-/** A nested provider-defaults object from app.settings (`codex`, `gemini`, `kimi`). */
+/** A nested provider-defaults object from app.settings (`claude`, `codex`, `gemini`, `kimi`). */
 const nested = (v: unknown): Record<string, unknown> => (v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : {});
 const noop = () => {};
 const EMPTY_TABS: never[] = [];
@@ -56,14 +57,17 @@ export function followUpProp(state: ChatState | null): { state: 'following' | 'r
   return f ? { state: f.state, waitingFor: f.waitingFor ?? null } : null;
 }
 
-export function ChatHost({ chatId, projectPath, mirror, appSettings }: ChatHostProps) {
-  const state = useMirroredState(mirror, chatId);
-  const defaultProvider = PROVIDERS.find((p) => p === appSettings.aiProvider) ?? 'claude';
-  const provider: Provider = state?.settings.provider ?? defaultProvider;
+export function ChatHost({ chatId, projectPath, conn, appSettings }: ChatHostProps) {
+  const state = useMirroredState(conn.mirror, chatId);
+  // A chat with no log yet: the mirror reduced it from the same default provider.
+  const provider: Provider = state?.settings.provider ?? defaultProviderOf(appSettings);
 
-  // Stop following the chat when it's switched away or the host unmounts.
-  // chatlog.close settles the shim's pending opens (a raw unsubscribe would not).
-  useEffect(() => () => { window.sai?.chatlog?.close?.(chatId); }, [chatId]);
+  // Stop following the chat when it's switched away or the host unmounts,
+  // on this chat's own connection (after a machine switch window.sai reaches
+  // the new one). chatlog.close settles the shim's pending opens and drops
+  // the mirror; a raw unsubscribe would do neither.
+  const chatlog = conn.sai.chatlog;
+  useEffect(() => () => { chatlog?.close?.(chatId); }, [chatlog, chatId]);
 
   // Model lists, per provider, fetched once the provider is known.
   const [models, setModels] = useState<Partial<Record<Provider, any[]>>>({});
@@ -105,11 +109,11 @@ export function ChatHost({ chatId, projectPath, mirror, appSettings }: ChatHostP
         claudeScope={chatId}
         sessionId={chatId}
         aiProvider={provider}
-        permissionMode={(s.permissionMode === 'bypass' ? 'bypass' : 'default')}
+        permissionMode={(nested(s.claude).permission === 'bypass' ? 'bypass' : 'default')}
         onPermissionChange={noop}
-        effortLevel={str(s.effortLevel, 'high') as 'high'}
+        effortLevel={str(nested(s.claude).effort, 'high') as 'high'}
         onEffortChange={noop}
-        modelChoice={str(s.modelChoice, 'sonnet')}
+        modelChoice={str(nested(s.claude).model, 'sonnet')}
         onModelChange={noop}
         availableModels={models.claude}
         renderToolCall={renderToolCall}

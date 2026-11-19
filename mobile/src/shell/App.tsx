@@ -25,7 +25,7 @@ import { ChatHost, useMirroredState } from './ChatHost';
 import { Drawer, chatTitleOf } from './Drawer';
 import { Header, chatStatus } from './Header';
 import { startLifecycle, syncStatusBar, trackViewport, useConnState } from './lifecycle';
-import { Toasts, showToast, useConnectionToasts } from './Toasts';
+import { Toasts, showRepairToast, showToast, useConnectionToasts } from './Toasts';
 
 const ACTIVE_MACHINE_KEY = 'sai.activeMachine.v1';
 const SELECTION_KEY = 'sai.selection.v1';
@@ -95,10 +95,16 @@ export function PhoneApp() {
   const connState = useConnState(conn?.client ?? null);
 
   const openMachine = useCallback(async (m: Machine) => {
+    // Already connected: keep its connection, subscriptions and selection.
+    if (getActive()?.machineId === m.id) {
+      setDrawerOpen(false);
+      setView('chat');
+      return;
+    }
     const token = await getToken(m.id).catch(() => null);
     if (!token) {
-      showToast(`Re-pair ${m.label}`);
-      setView('pair');
+      showRepairToast(m.label, () => setView('pair'));
+      setView('machines');
       return;
     }
     connectTo(m, token, { native: native() });
@@ -232,7 +238,7 @@ export function PhoneApp() {
             key={`${conn.machineId}:${sel.chatId}`}
             chatId={sel.chatId}
             projectPath={meta?.projectPath ?? sel.projectPath}
-            mirror={conn.mirror}
+            conn={conn}
             appSettings={settings}
           />
         ) : (

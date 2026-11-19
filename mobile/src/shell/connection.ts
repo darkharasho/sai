@@ -14,6 +14,7 @@ import { V2Client } from '../v2/client';
 import { createSaiShim, type SaiShimOpts } from '../v2/saiShim';
 import type { ConnState } from '../v2/types';
 import type { SaiChatLogApi } from '../../../src/types';
+import type { ChatSettings } from '../../../src/lib/chat/types';
 import { createChatMirror, type ChatMirror } from './chatMirror';
 
 export interface Connection {
@@ -23,10 +24,21 @@ export interface Connection {
   mirror: ChatMirror;
 }
 
+const PROVIDERS: ReadonlyArray<ChatSettings['provider']> = ['claude', 'codex', 'gemini', 'kimi'];
+
+/** The desktop's default provider from app.settings (`claude` when unset or unknown). */
+export function defaultProviderOf(settings: Record<string, unknown>): ChatSettings['provider'] {
+  return PROVIDERS.find((p) => p === settings.aiProvider) ?? 'claude';
+}
+
 /** A shim over `client` whose chat reads also feed a ChatMirror. */
 export function createConnection(client: V2Client, opts: SaiShimOpts): Connection {
   const shim = createSaiShim(client, opts);
-  const mirror = createChatMirror();
+  const mirror = createChatMirror(() => {
+    let s: Record<string, unknown> = {};
+    try { s = opts.settings() ?? {}; } catch { /* no settings yet */ }
+    return { provider: defaultProviderOf(s) };
+  });
   const raw = shim.chatlog as SaiChatLogApi;
   raw.onEvent((e) => mirror.ingest(e));
   const chatlog: SaiChatLogApi = {

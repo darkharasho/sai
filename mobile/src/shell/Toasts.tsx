@@ -49,6 +49,14 @@ export function dismissToast(id: string): void {
   emit();
 }
 
+/** "Re-pair <machine>" with a Re-pair button (an unpaired desktop, or a machine with no stored token). */
+export function showRepairToast(machineLabel: string, onRepair: () => void): void {
+  showToast(`Re-pair ${machineLabel}`, {
+    id: 'conn-unpaired', sticky: true,
+    action: { label: 'Re-pair', onClick: () => { dismissToast('conn-unpaired'); onRepair(); } },
+  });
+}
+
 /** The connection toasts for one machine: "Can't reach" after 5s offline, "Re-pair" when unpaired. */
 export function useConnectionToasts(client: V2Client | null, machineLabel: string, onRepair: () => void): void {
   const repair = useRef(onRepair);
@@ -63,8 +71,9 @@ export function useConnectionToasts(client: V2Client | null, machineLabel: strin
     };
     const on = (s: ConnState) => {
       if (s === 'offline' || s === 'connecting') {
-        // A reconnect cycles connecting/offline: the 5s clock keeps running.
-        if (!offlineTimer && s === 'offline') {
+        // Not live since the last live state (or ever, on a cold boot): one 5s
+        // clock covers the whole connecting/offline cycle; only going live stops it.
+        if (!offlineTimer) {
           offlineTimer = setTimeout(() => {
             showToast(`Can't reach ${machineLabel}`, { id: 'conn-offline', sticky: true });
           }, OFFLINE_TOAST_MS);
@@ -73,10 +82,7 @@ export function useConnectionToasts(client: V2Client | null, machineLabel: strin
       }
       clearOffline();
       if (s === 'unpaired') {
-        showToast(`Re-pair ${machineLabel}`, {
-          id: 'conn-unpaired', sticky: true,
-          action: { label: 'Re-pair', onClick: () => { dismissToast('conn-unpaired'); repair.current(); } },
-        });
+        showRepairToast(machineLabel, () => repair.current());
       } else {
         dismissToast('conn-unpaired');
       }

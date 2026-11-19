@@ -7,12 +7,17 @@ import type { PermMode } from './clamp';
 export const REMOTE_APP_SETTING_KEYS = [
   'theme', 'accent', 'highlightTheme', 'messageStampMode', 'toolCallsExpanded',
   'tagMessagesWithTask', 'saiAnimationEnabled', 'autoCompactThreshold',
-  // The desktop's chat defaults: a chat started on the phone uses them.
-  'aiProvider', 'modelChoice', 'effortLevel', 'permissionMode',
+  // The desktop's default provider: a chat started on the phone uses it.
+  'aiProvider',
 ] as const;
 
-/** Nested per-provider defaults in settings.json: only these string fields cross. */
+/**
+ * Nested per-provider defaults in settings.json: only these string fields
+ * cross. (`claude.workspaceOverrides`, per-workspace model/effort, stays on
+ * the desktop.)
+ */
 export const REMOTE_PROVIDER_FIELDS = {
+  claude: ['model', 'effort', 'permission'],
   codex: ['model', 'permission', 'effort'],
   gemini: ['model', 'approvalMode', 'conversationMode'],
   kimi: ['model', 'approvalMode'],

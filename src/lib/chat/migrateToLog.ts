@@ -1,5 +1,6 @@
 import { dbGetAllSessions, dbGetMessages, dbGetSession } from '../../chatDb';
 import type { ChatSession } from '../../types';
+import { isPhone } from '../platform';
 
 export const MIGRATED_FLAG = 'sai.chatlog.migrated.v1';
 const FLAG = MIGRATED_FLAG;
@@ -73,6 +74,9 @@ async function runMigration(opts: { batch?: number }): Promise<{ imported: numbe
  */
 export async function ensureChatInLog(chatId: string): Promise<void> {
   if (knownInLog.has(chatId)) return;
+  // The phone's only history is the desktop's log: it has no IndexedDB mirror
+  // to fold in, and must never open one.
+  if (isPhone()) { knownInLog.add(chatId); return; }
   const chatlog = (window as any).sai?.chatlog;
   if (!chatlog) return;
   const s = await dbGetSession(chatId);

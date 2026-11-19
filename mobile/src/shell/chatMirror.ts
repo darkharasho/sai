@@ -34,9 +34,12 @@ export interface ChatMirror {
   forget(chatId: string): void;
 }
 
-const DEFAULT_SETTINGS: ChatSettings = { provider: 'claude' };
-
-export function createChatMirror(): ChatMirror {
+/**
+ * `fallback` is the settings a chat with no log yet reduces from: the same
+ * `{ provider }` ChatPanel hands its useChatLog (the desktop's default
+ * provider), so the mirror and the reader agree on a new chat's provider.
+ */
+export function createChatMirror(fallback: () => ChatSettings = () => ({ provider: 'claude' })): ChatMirror {
   const recs = new Map<string, Rec>();
 
   const rec = (chatId: string): Rec => {
@@ -82,7 +85,7 @@ export function createChatMirror(): ChatMirror {
         r.pending--;
         // Same rule as useChatLog: a full open (after 0) or a newer snapshot replaces the state.
         if (!(after > 0) || !r.state) {
-          r.state = reduceMany(res.snapshot ? res.snapshot.state : emptyChatState(DEFAULT_SETTINGS), res.entries);
+          r.state = reduceMany(res.snapshot ? res.snapshot.state : emptyChatState(fallback()), res.entries);
         } else if (res.snapshot && res.snapshot.seq > after) {
           r.state = reduceMany(res.snapshot.state, res.entries);
         } else {

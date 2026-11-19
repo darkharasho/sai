@@ -60,3 +60,26 @@ html[data-sai-phone] .chat-msg [data-link-href] {
   -webkit-user-select: none;
   user-select: none;
 }
+
+/* Composer approvals toggle: icon only (the label wraps at phone widths; the
+   button's title still names the mode). */
+html[data-sai-phone] .permission-btn .permission-label {
+  display: none;
+}
+
+/* The SAI brand above a conversation: small, so it doesn't take the first screen. */
+html[data-sai-phone] .chat-conversation-header {
+  flex-direction: row;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 0 4px;
+}
+html[data-sai-phone] .chat-conversation-header .chat-empty-logo {
+  width: 24px;
+  height: 24px;
+  margin-bottom: 0;
+}
+html[data-sai-phone] .chat-conversation-header .chat-empty-title {
+  font-size: 15px;
+  letter-spacing: 2px;
+}

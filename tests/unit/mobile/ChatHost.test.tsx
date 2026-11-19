@@ -36,9 +36,10 @@ function stateWith(patch: Partial<ChatState>): ChatState {
 let client: V2Client;
 let conn: Connection;
 
-function setup() {
+/** `settings` is the desktop's app.settings, as both the shim and ChatHost see it. */
+function setup(settings: Record<string, unknown> = {}) {
   client = new V2Client({ url: 'ws://desk/ws', token: 't', WebSocketImpl: FakeSocket as any, random: () => 0.5 });
-  conn = createConnection(client, { native: { openUrl() {}, copyText() {}, toast() {} }, settings: () => ({}) });
+  conn = createConnection(client, { native: { openUrl() {}, copyText() {}, toast() {} }, settings: () => settings });
   (window as any).sai = conn.sai;
   client.connect();
   last().open();
@@ -72,7 +73,7 @@ afterEach(() => {
 describe('ChatHost', () => {
   it('ChatHost renders log messages through the real ChatPanel', async () => {
     setup();
-    render(<ChatHost chatId="c1" projectPath="/proj" mirror={conn.mirror} appSettings={{}} />);
+    render(<ChatHost chatId="c1" projectPath="/proj" conn={conn} appSettings={{}} />);
     await serve('c1', stateWith({
       lastSeq: 2,
       messages: [
@@ -86,7 +87,7 @@ describe('ChatHost', () => {
 
   it('waiting state shows the waiting row', async () => {
     setup();
-    const { container } = render(<ChatHost chatId="c2" projectPath="/proj" mirror={conn.mirror} appSettings={{}} />);
+    const { container } = render(<ChatHost chatId="c2" projectPath="/proj" conn={conn} appSettings={{}} />);
     await serve('c2', stateWith({
       lastSeq: 3,
       messages: [{ id: 'm1', role: 'assistant', content: 'started the build', timestamp: 1 }] as any,
@@ -97,7 +98,7 @@ describe('ChatHost', () => {
 
   it('send from the composer issues one chat.command', async () => {
     setup();
-    render(<ChatHost chatId="c3" projectPath="/proj" mirror={conn.mirror} appSettings={{}} />);
+    render(<ChatHost chatId="c3" projectPath="/proj" conn={conn} appSettings={{}} />);
     await serve('c3', stateWith({ lastSeq: 1, messages: [{ id: 'm1', role: 'assistant', content: 'ready', timestamp: 1 }] as any }));
     await screen.findByText('ready');
     const box = screen.getByRole('textbox') as HTMLTextAreaElement;
@@ -115,7 +116,7 @@ describe('ChatHost', () => {
   it('foreground resubscribes from lastSeq', async () => {
     setup();
     const stop = startLifecycle(() => client);
-    render(<ChatHost chatId="c4" projectPath="/proj" mirror={conn.mirror} appSettings={{}} />);
+    render(<ChatHost chatId="c4" projectPath="/proj" conn={conn} appSettings={{}} />);
     await serve('c4', stateWith({ lastSeq: 5, messages: [{ id: 'm1', role: 'assistant', content: 'before sleep', timestamp: 1 }] as any }), [
       { chatId: 'c4', seq: 6, ts: 2, ev: { type: 'local_note', content: 'note six' } },
     ]);
@@ -135,5 +136,82 @@ describe('ChatHost', () => {
     // The last state stays on screen while catching up.
     expect(screen.getByText('before sleep')).toBeTruthy();
     stop();
+  });
+});
+
+/** Acks every chat.command the phone has sent so far. */
+function ackAll() {
+  act(() => {
+    for (const f of sentOf('chat.command')) {
+      last().recv({ type: 'chat.ack', result: { clientId: f.command.clientId, ok: true, duplicate: false, seq: 1 } });
+    }
+  });
+}
+
+/** A new chat: the server has no log, so it answers with no snapshot and no entries. */
+async function serveNew(chatId: string) {
+  await waitFor(() => expect(sentOf('chat.subscribe').some((f) => f.chatId === chatId)).toBe(true));
+  act(() => { last().recv({ type: 'chat.entries', chatId, entries: [] }); });
+}
+
+async function sendFromComposer(text: string) {
+  const box = screen.getByRole('textbox') as HTMLTextAreaElement;
+  await waitFor(() => expect(box.disabled).toBe(false));
+  fireEvent.change(box, { target: { value: text } });
+  fireEvent.click(screen.getByTitle('Send'));
+}
+
+describe('ChatHost new chats use the desktop defaults', () => {
+  it('a new chat uses the desktop aiProvider (codex) and its nested codex model', async () => {
+    const desk = { aiProvider: 'codex', codex: { model: 'gpt-5', permission: 'read-only', effort: 'medium' } };
+    setup(desk);
+    render(<ChatHost chatId="n1" projectPath="/proj" conn={conn} appSettings={desk} />);
+    await serveNew('n1');
+    await waitFor(() => expect(conn.mirror.get('n1')?.settings.provider).toBe('codex'));
+    await sendFromComposer('hi codex');
+    await waitFor(() => expect(sentOf('chat.command').length).toBeGreaterThan(0));
+    ackAll();
+    await waitFor(() => expect(sentOf('chat.command').some((f) => f.command.kind === 'send')).toBe(true));
+    const cmds = sentOf('chat.command').map((f) => f.command);
+    expect(cmds.find((c) => c.kind === 'settings')?.settings).toMatchObject({ provider: 'codex', model: 'gpt-5', permMode: 'read-only' });
+    expect(cmds.find((c) => c.kind === 'send')).toMatchObject({ provider: 'codex', text: 'hi codex' });
+  });
+
+  it('a new Claude chat takes model, effort and permission from the nested claude settings', async () => {
+    const desk = { aiProvider: 'claude', modelChoice: 'haiku', claude: { model: 'opus', effort: 'low', permission: 'bypass' } };
+    setup(desk);
+    render(<ChatHost chatId="n2" projectPath="/proj" conn={conn} appSettings={desk} />);
+    await serveNew('n2');
+    await sendFromComposer('hi claude');
+    await waitFor(() => expect(sentOf('chat.command').length).toBeGreaterThan(0));
+    ackAll();
+    await waitFor(() => expect(sentOf('chat.command').some((f) => f.command.kind === 'send')).toBe(true));
+    const settings = sentOf('chat.command').map((f) => f.command).find((c) => c.kind === 'settings')?.settings;
+    expect(settings).toMatchObject({ provider: 'claude', model: 'opus', effort: 'low', permMode: 'bypass' });
+  });
+});
+
+describe('ChatHost closes through its own connection', () => {
+  it('unmount after a machine switch closes the chat on the old connection, not window.sai', async () => {
+    setup();
+    const oldConn = conn;
+    const oldSock = last();
+    const { unmount } = render(<ChatHost chatId="m1" projectPath="/proj" conn={oldConn} appSettings={{}} />);
+    await serve('m1', stateWith({ lastSeq: 1, messages: [{ id: 'm1', role: 'assistant', content: 'old desk', timestamp: 1 }] as any }));
+    await screen.findByText('old desk');
+    expect(oldConn.mirror.get('m1')).not.toBeNull();
+
+    // Another machine became active: window.sai now reaches it.
+    const other = new V2Client({ url: 'ws://other/ws', token: 't2', WebSocketImpl: FakeSocket as any, random: () => 0.5 });
+    const otherConn = createConnection(other, { native: { openUrl() {}, copyText() {}, toast() {} }, settings: () => ({}) });
+    other.connect(); last().open(); last().authOk();
+    const otherSock = last();
+    (window as any).sai = otherConn.sai;
+
+    unmount();
+    expect(sentOf('chat.unsubscribe', oldSock)).toEqual([{ type: 'chat.unsubscribe', chatId: 'm1' }]);
+    expect(sentOf('chat.unsubscribe', otherSock)).toEqual([]);
+    expect(oldConn.mirror.get('m1')).toBeNull();
+    other.close();
   });
 });

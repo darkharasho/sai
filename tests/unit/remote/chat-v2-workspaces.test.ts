@@ -213,7 +213,7 @@ describe('ChatV2 app settings', () => {
     const settings: Record<string, unknown> = {
       theme: 'midnight', accent: '#ff0', highlightTheme: 'monokai', messageStampMode: 'time', toolCallsExpanded: true,
       tagMessagesWithTask: false, saiAnimationEnabled: true, autoCompactThreshold: 80,
-      aiProvider: 'claude', modelChoice: 'opus', effortLevel: 'high', permissionMode: 'default',
+      aiProvider: 'claude', modelChoice: 'legacy-flat', effortLevel: 'low', permissionMode: 'bypass',
       github_auth: { token: 'secret' }, linearApiKey: 'k', recentProjects: ['/x'],
     };
     const { v2, ws, frames, settingsFile, ceiling, appSettings } = mk({ settings, ceiling: 'auto-read' });
@@ -223,7 +223,7 @@ describe('ChatV2 app settings', () => {
       settings: {
         theme: 'midnight', accent: '#ff0', highlightTheme: 'monokai', messageStampMode: 'time', toolCallsExpanded: true,
         tagMessagesWithTask: false, saiAnimationEnabled: true, autoCompactThreshold: 80,
-        aiProvider: 'claude', modelChoice: 'opus', effortLevel: 'high', permissionMode: 'default',
+        aiProvider: 'claude',
         remoteCeiling: 'auto-read',
       },
     }]);
@@ -254,9 +254,10 @@ describe('ChatV2 app settings', () => {
       codex: { model: 'gpt-5', permission: 'auto', effort: 'high', apiKey: 'secret' },
       gemini: { model: 'g', approvalMode: 'yolo', conversationMode: 'fast', token: 'x' },
       kimi: { model: 7, approvalMode: 'default' },
-      claude: { anything: 'no' },
+      claude: { model: 'opus', effort: 'high', permission: 'bypass', workspaceOverrides: { '/p': { model: 'haiku' } }, token: 'secret' },
     }, null);
     expect(picked).toEqual({
+      claude: { model: 'opus', effort: 'high', permission: 'bypass' },
       codex: { model: 'gpt-5', permission: 'auto', effort: 'high' },
       gemini: { model: 'g', approvalMode: 'yolo', conversationMode: 'fast' },
       kimi: { approvalMode: 'default' },
