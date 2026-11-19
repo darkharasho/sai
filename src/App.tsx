@@ -63,6 +63,8 @@ import { renderToolCallFor } from './components/Chat/renderToolCallFor';
 import { installRemoteProxyHandler } from './lib/remoteProxyClient';
 import { applyQuestionEvent, mergeAttentionScopes, questionWorkspaces, questionSessionIdsFor, scopeKeyProjectPath } from './lib/awaitingQuestionTracker';
 import { mergeSessionRefresh } from './lib/sessionRefresh';
+import { adoptLogChats } from './lib/chat/adoptLogChats';
+import { inMemorySessionIds } from './lib/sessionRefresh';
 import { turnEndIsStale } from './lib/turnSeqGuard';
 import { resolveClaudeConfig, setWorkspaceOverride, sanitizeOverrideMap, type ClaudeOverrideMap } from './lib/claudeWorkspaceConfig';
 import type { WaitMeta } from '../electron/services/waitClassifier';
@@ -1171,6 +1173,31 @@ export default function App() {
     } catch { /* best-effort */ }
   }, [updateWorkspace]);
 
+  // A log entry for a chat no workspace knows means another device (the phone)
+  // started it: list it here too. Debounced so a streaming turn adopts once.
+  useEffect(() => {
+    const api = window.sai?.chatlog;
+    if (typeof api?.onEvent !== 'function') return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const pending = new Set<string>();
+    const run = async () => {
+      timer = null;
+      const known = inMemorySessionIds(workspacesRef.current);
+      if ([...pending].every(id => known.has(id))) { pending.clear(); return; }
+      pending.clear();
+      for (const wsPath of workspacesRef.current.keys()) {
+        const n = await adoptLogChats(wsPath, inMemorySessionIds(workspacesRef.current)).catch(() => 0);
+        if (n > 0) await refreshWorkspaceSessions(wsPath);
+      }
+    };
+    const off = api.onEvent((entry) => {
+      if (inMemorySessionIds(workspacesRef.current).has(entry.chatId)) return;
+      pending.add(entry.chatId);
+      if (!timer) timer = setTimeout(() => { void run(); }, 1000);
+    });
+    return () => { off(); if (timer) clearTimeout(timer); };
+  }, [refreshWorkspaceSessions]);
+
   // Apply replace edits to an open file's Monaco editor as a single undo group.
   // Looks up the live editor instance via the registry populated by MonacoEditor.
   // Falls back to rewriting OpenFile.content if no editor is mounted for this path
@@ -1632,6 +1659,8 @@ export default function App() {
       await externalizeStoredImagesOnce();
       void pruneOrphanToolImagesOnce();
       void pruneModelCacheOnce();
+      // Chats the phone started live only in main's log until listed here.
+      await adoptLogChats(activeProjectPath, inMemorySessionIds(workspacesRef.current)).catch(() => 0);
       const sessions = await dbGetSessions(activeProjectPath);
       // Normalize lastViewedAt on load. Two cases:
       //   1. Legacy rows with no lastViewedAt field at all.
