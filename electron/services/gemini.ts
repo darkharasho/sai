@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { BrowserWindow, ipcMain } from 'electron';
-import { getOrCreate, get, touchActivity } from './workspace';
+import { getOrCreate, get, touchActivity, beginAcpTurn, endAcpTurn } from './workspace';
 import type { Workspace } from './workspace';
 import { notifyCompletion } from './notify';
 import { enrichedEnv } from './shellEnv';
@@ -149,6 +149,9 @@ export async function promptAntigravityText(
       shell: process.platform === 'win32',
     });
     ws.gemini.process = child;
+    // Chats overlap: each turn owns its process so Stop hits only its chat.
+    const turn = ws.gemini.scopeTurns.get(scope);
+    if (turn) turn.process = child;
     let stdout = '';
     let stderr = '';
     let text = '';
@@ -159,6 +162,7 @@ export async function promptAntigravityText(
       if (settled) return;
       settled = true;
       if (ws.gemini.process === child) ws.gemini.process = null;
+      if (turn?.process === child) turn.process = null;
       error ? reject(error) : resolve(text.trim());
     };
     const consume = (line: string) => {
@@ -234,11 +238,13 @@ export function registerGeminiHandlers(win: BrowserWindow) {
   ipcMain.on('gemini:stop', (_event, projectPath: string, scope = 'chat') => {
     const ws = get(projectPath);
     if (!ws) return;
-    const stoppedTurnSeq = ws.gemini.turnSeq;
-    ws.gemini.process?.kill();
-    ws.gemini.process = null;
-    ws.gemini.busy = false;
-    safeSend(win, { type: 'done', projectPath, scope, turnSeq: stoppedTurnSeq });
+    // Stop only this chat's turn; a sibling chat in the project keeps running.
+    const turn = endAcpTurn(ws.gemini, scope);
+    const child = turn?.process;
+    child?.kill();
+    if (child && ws.gemini.process === child) ws.gemini.process = null;
+    // No live turn for this chat: null is never dropped as stale.
+    safeSend(win, { type: 'done', projectPath, scope, turnSeq: turn ? turn.turnSeq : null });
   });
   // Antigravity print mode cannot pause for an IPC approval round-trip. The
   // appropriate permission mode is selected before each launch instead.
@@ -247,9 +253,7 @@ export function registerGeminiHandlers(win: BrowserWindow) {
     const ws = get(projectPath);
     if (!ws) return;
     touchActivity(projectPath);
-    ws.gemini.turnSeq += 1;
-    const turnSeq = ws.gemini.turnSeq;
-    ws.gemini.busy = true;
+    const { turnSeq } = beginAcpTurn(ws.gemini, scope);
     ws.gemini.lastSendScope = scope;
     safeSend(win, { type: 'streaming_start', projectPath, scope, turnSeq, sessionId: scopeSession(ws, scope) });
     try {
@@ -260,8 +264,7 @@ export function registerGeminiHandlers(win: BrowserWindow) {
     } catch (error) {
       safeSend(win, { type: 'error', projectPath, scope, text: error instanceof Error ? error.message : 'Antigravity request failed' });
     } finally {
-      ws.gemini.busy = false;
-      ws.gemini.process = null;
+      endAcpTurn(ws.gemini, scope, turnSeq);
       safeSend(win, { type: 'done', projectPath, scope, turnSeq });
     }
   });

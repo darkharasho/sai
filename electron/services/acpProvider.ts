@@ -2,7 +2,7 @@ import { BrowserWindow, ipcMain } from 'electron';
 import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
-import { getOrCreate, get, touchActivity } from './workspace';
+import { getOrCreate, get, touchActivity, beginAcpTurn, endAcpTurn } from './workspace';
 import type { Workspace } from './workspace';
 import { notifyCompletion } from './notify';
 import { createAcpClient, type AcpClient } from './acp';
@@ -241,6 +241,7 @@ function getScopeForEvent(ws: Workspace, msg: any, config: AcpProviderConfig): s
 
   // The process is shared by the workspace: an event with no session of its
   // own belongs to the chat whose send started the current turn.
+  // Only correct for untagged legacy methods with one turn at a time.
   return state(ws).lastSendScope ?? 'chat';
 }
 
@@ -460,7 +461,10 @@ export function translateAcpEvent(msg: any, projectPath: string, scope: string):
   return null;
 }
 
-function disableAcpProvider(win: BrowserWindow, ws: Workspace, scope: string, reason: string, config: AcpProviderConfig) {
+/** `turnSeq` is the failing send's own turn (null when no turn of this chat is
+ *  live: never dropped as stale). Sibling chats' prompts fail on the disposed
+ *  transport and end their own turns. */
+function disableAcpProvider(win: BrowserWindow, ws: Workspace, scope: string, reason: string, config: AcpProviderConfig, turnSeq: number | null) {
   const state = (ws: Workspace) => ws[config.key];
   state(ws).transport?.dispose();
   state(ws).transport = null;
@@ -469,7 +473,7 @@ function disableAcpProvider(win: BrowserWindow, ws: Workspace, scope: string, re
   state(ws).suppressedScopes.clear();
   state(ws).availability = 'disabled';
   state(ws).lastError = reason;
-  state(ws).busy = false;
+  if (turnSeq != null) endAcpTurn(state(ws), scope, turnSeq);
   state(ws).activeRequestId = undefined;
   state(ws).pendingApproval = null;
   const hint = config.installHint ? ` ${config.installHint}` : '';
@@ -483,7 +487,7 @@ function disableAcpProvider(win: BrowserWindow, ws: Workspace, scope: string, re
     type: 'done',
     projectPath: ws.projectPath,
     scope,
-    turnSeq: state(ws).turnSeq,
+    turnSeq,
   });
 }
 
@@ -672,7 +676,9 @@ export function registerAcpProviderHandlers(win: BrowserWindow, config: AcpProvi
       await ensureAcpTransport(win, ws, config);
       emitChat(win, { type: 'ready', projectPath: ws.projectPath });
     } catch (error) {
-      disableAcpProvider(win, ws, state(ws).lastSendScope ?? 'chat', error instanceof Error ? error.message : `${config.displayName} startup failed`, config);
+      const scope = state(ws).lastSendScope ?? 'chat';
+      disableAcpProvider(win, ws, scope, error instanceof Error ? error.message : `${config.displayName} startup failed`, config,
+        state(ws).scopeTurns.get(scope)?.turnSeq ?? null);
     }
   });
 
@@ -692,12 +698,15 @@ export function registerAcpProviderHandlers(win: BrowserWindow, config: AcpProvi
     const ws = get(projectPath);
     if (!ws) return;
     const sessionId = getScopeSessionId(ws, scope, config);
-    // Capture turnSeq before any async work. If :send arrives and increments
-    // turnSeq while session/cancel is awaited, this done should still carry the
-    // original turn number so App.tsx's stale-done guard can reject it.
-    const stoppedTurnSeq = state(ws).turnSeq;
+    // Capture this chat's own turn before any async work (chats in a project
+    // overlap and share the counter). If :send starts a new turn on this chat
+    // while session/cancel is awaited, this done still carries the stopped
+    // turn's number so App.tsx's stale-done guard can reject it. No live turn
+    // here: null, which is never dropped as stale.
+    const turn = state(ws).scopeTurns.get(scope);
+    const stoppedTurnSeq = turn ? turn.turnSeq : null;
 
-    if (state(ws).transport && sessionId && state(ws).busy) {
+    if (state(ws).transport && sessionId && turn) {
       try {
         await state(ws).transport!.request('session/cancel', {
           sessionId,
@@ -709,8 +718,8 @@ export function registerAcpProviderHandlers(win: BrowserWindow, config: AcpProvi
       }
     }
 
-    state(ws).busy = false;
-    state(ws).activeRequestId = undefined;
+    if (turn) endAcpTurn(state(ws), scope, turn.turnSeq);
+    if (!state(ws).busy) state(ws).activeRequestId = undefined;
     emitChat(win, {
       type: 'done',
       projectPath: ws.projectPath,
@@ -756,29 +765,32 @@ export function registerAcpProviderHandlers(win: BrowserWindow, config: AcpProvi
           scope,
           text: `${config.displayName} unavailable: ${state(ws).lastError || `retry ${config.displayName} to continue`}`,
         });
+        // No turn started for this send: null is never dropped as stale.
         emitChat(win, {
           type: 'done',
           projectPath: ws.projectPath,
           scope,
-          turnSeq: state(ws).turnSeq,
+          turnSeq: null,
         });
         return;
       }
 
+      // This send's own turn. Chats in a project overlap and share the
+      // counter, so every turn-end below carries this captured value.
+      let turnSeq: number | null = null;
       try {
         const client = await ensureAcpTransport(win, ws, config);
         const sessionId = await ensureSession(win, ws, scope, config);
         const bootstrapText = state(ws).bootstrappedSessionIds.has(sessionId)
           ? undefined
           : buildProjectBootstrap(state(ws).cwd || ws.projectPath);
-        state(ws).turnSeq += 1;
-        state(ws).busy = true;
+        turnSeq = beginAcpTurn(state(ws), scope).turnSeq;
 
         emitChat(win, {
           type: 'streaming_start',
           projectPath: ws.projectPath,
           scope,
-          turnSeq: state(ws).turnSeq,
+          turnSeq,
           // Include the ACP session ID so isStreaming can be scoped to the
           // active SAI session — prevents a background streaming turn from
           // showing the thinking animation in a newly opened empty session.
@@ -826,9 +838,8 @@ export function registerAcpProviderHandlers(win: BrowserWindow, config: AcpProvi
         if (bootstrapText) {
           state(ws).bootstrappedSessionIds.add(sessionId);
         }
-        state(ws).activeRequestId = result?.requestId;
-        state(ws).busy = false;
-        state(ws).activeRequestId = undefined;
+        endAcpTurn(state(ws), scope, turnSeq);
+        if (!state(ws).busy) state(ws).activeRequestId = undefined;
 
         emitChat(win, {
           type: 'result',
@@ -845,7 +856,7 @@ export function registerAcpProviderHandlers(win: BrowserWindow, config: AcpProvi
           type: 'done',
           projectPath: ws.projectPath,
           scope,
-          turnSeq: state(ws).turnSeq,
+          turnSeq,
         });
 
         notifyCompletion(win, ws.projectPath, { provider: config.displayName }, { site: 'acp.turnEnd' });
@@ -860,13 +871,13 @@ export function registerAcpProviderHandlers(win: BrowserWindow, config: AcpProvi
           errorMsg.startsWith(`${config.label} initialize`) ||
           !state(ws).transport;
         if (isTransportFailure) {
-          disableAcpProvider(win, ws, scope, errorMsg, config);
+          disableAcpProvider(win, ws, scope, errorMsg, config, turnSeq);
         } else {
           // Clear session for this scope so the next request starts fresh,
           // avoiding any partial server-side state from the failed turn.
           setScopeSessionId(ws, scope, undefined, config);
-          state(ws).busy = false;
-          state(ws).activeRequestId = undefined;
+          if (turnSeq != null) endAcpTurn(state(ws), scope, turnSeq);
+          if (!state(ws).busy) state(ws).activeRequestId = undefined;
           emitChat(win, {
             type: 'error',
             projectPath: ws.projectPath,
@@ -877,7 +888,7 @@ export function registerAcpProviderHandlers(win: BrowserWindow, config: AcpProvi
             type: 'done',
             projectPath: ws.projectPath,
             scope,
-            turnSeq: state(ws).turnSeq,
+            turnSeq,
           });
         }
       }

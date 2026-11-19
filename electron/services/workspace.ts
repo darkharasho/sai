@@ -116,6 +116,35 @@ export interface AcpWorkspaceState {
   /** Chat id (scope) of the most recent send. Events the provider can't tie to
    *  a scope, and turn-ends with no scope of their own, carry this one. */
   lastSendScope?: string;
+  /** In-flight turns by scope (chat id). Chats in one project can overlap, so
+   *  each turn keeps its own turnSeq (and Antigravity's own process); `busy`
+   *  mirrors `scopeTurns.size > 0`. */
+  scopeTurns: Map<string, AcpScopeTurn>;
+}
+
+export interface AcpScopeTurn {
+  turnSeq: number;
+  /** One-shot process running this turn (Antigravity). */
+  process?: ChildProcess | null;
+}
+
+/** Start a turn for `scope` with its own turnSeq. */
+export function beginAcpTurn(state: AcpWorkspaceState, scope: string): AcpScopeTurn {
+  state.turnSeq += 1;
+  const turn: AcpScopeTurn = { turnSeq: state.turnSeq, process: null };
+  state.scopeTurns.set(scope, turn);
+  state.busy = true;
+  return turn;
+}
+
+/** End `scope`'s turn — only if it is still the turn `turnSeq` (a newer send
+ *  on the same chat may have replaced it). Returns whether it ended. */
+export function endAcpTurn(state: AcpWorkspaceState, scope: string, turnSeq?: number): AcpScopeTurn | undefined {
+  const turn = state.scopeTurns.get(scope);
+  if (!turn || (turnSeq != null && turn.turnSeq !== turnSeq)) return undefined;
+  state.scopeTurns.delete(scope);
+  state.busy = state.scopeTurns.size > 0;
+  return turn;
 }
 
 /** Legacy state shape retained while persisted provider identifiers are migrated. */
@@ -207,6 +236,7 @@ function newAcpState(projectPath: string): AcpWorkspaceState {
     commitSessionId: undefined,
     terminalSessions: new Map(),
     terminalCwds: new Map(),
+    scopeTurns: new Map(),
     activeRequestId: undefined,
     availability: 'available',
     lastError: undefined,
@@ -259,9 +289,13 @@ export function listAcpLiveScopes(provider: 'gemini' | 'kimi'): Array<{ projectP
   const out: Array<{ projectPath: string; scope: string }> = [];
   for (const ws of workspaces.values()) {
     const state = ws[provider];
-    if (!state.process && !state.transport) continue;
-    const scopes = new Set<string>([...state.terminalSessions.keys(), ...state.terminalCwds.keys()]);
-    if (state.chatSessionId || state.busy) scopes.add('chat');
+    if (!state.process && !state.transport && state.scopeTurns.size === 0) continue;
+    // In-flight turns count from their first event: a fresh chat has no
+    // session id yet when streaming_start goes out.
+    const scopes = new Set<string>([
+      ...state.terminalSessions.keys(), ...state.terminalCwds.keys(), ...state.scopeTurns.keys(),
+    ]);
+    if (state.chatSessionId) scopes.add('chat');
     for (const scope of scopes) out.push({ projectPath: ws.projectPath, scope });
   }
   return out;
@@ -273,13 +307,18 @@ export function touchActivity(projectPath: string): void {
 }
 
 function resetAcpState(state: AcpWorkspaceState, emit: (msg: Record<string, unknown>) => void, projectPath: string) {
-  if (state.busy) {
+  for (const [scope, turn] of state.scopeTurns) {
+    emit({ type: 'done', projectPath, scope, turnSeq: turn.turnSeq });
+    try { turn.process?.kill(); } catch { /* already gone */ }
+  }
+  if (state.busy && state.scopeTurns.size === 0) {
     emit({
       type: 'done', projectPath,
       ...(state.lastSendScope ? { scope: state.lastSendScope } : {}),
       turnSeq: state.turnSeq,
     });
   }
+  state.scopeTurns.clear();
   if (state.process) {
     state.process.kill();
     state.process = null;

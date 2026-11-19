@@ -31,6 +31,8 @@ const { handlers, listeners, mockIpcMain, mockSpawn, spawned, acp } = vi.hoisted
     requests: [] as Array<{ method: string; params: any }>,
     emit(e: any) { for (const l of [...acp.events]) l(e); },
     client: null as any,
+    /** Override session/prompt (e.g. a deferred promise) for concurrency tests. */
+    onPrompt: null as null | ((params: any) => Promise<any>),
   };
   acp.client = {
     start: vi.fn(async () => {}),
@@ -40,6 +42,7 @@ const { handlers, listeners, mockIpcMain, mockSpawn, spawned, acp } = vi.hoisted
       acp.requests.push({ method, params });
       if (method === 'session/new') return { sessionId: `kimi-s${++acp.sessionSeq}` };
       if (method === 'session/prompt') {
+        if (acp.onPrompt) return acp.onPrompt(params);
         acp.emit({ method: 'session/update', params: { sessionId: params.sessionId, update: { sessionUpdate: 'agent_message_chunk', content: { text: 'hi ' } } } });
         acp.emit({ method: 'session/update', params: { update: { sessionUpdate: 'agent_message_chunk', content: { text: 'there' } } } });
         return { usage: { input_tokens: 1, output_tokens: 2 } };
@@ -69,7 +72,11 @@ import { registerClaudeHandlers, setChatLog, destroyClaude } from '@electron/ser
 import { __setClaudeBackendForTests } from '@electron/services/claudeBackend';
 import { registerGeminiHandlers } from '@electron/services/gemini';
 import { registerKimiHandlers } from '@electron/services/kimi';
-import { getOrCreate, getClaude, suspend } from '@electron/services/workspace';
+import { getOrCreate, getClaude, suspend, listAcpLiveScopes } from '@electron/services/workspace';
+import { ChatLogStore } from '@electron/services/chatlog/store';
+import { ChatLogService, realPath } from '@electron/services/chatlog/service';
+import fs from 'node:fs';
+import path from 'node:path';
 import { createMockBrowserWindow } from '../../helpers/electron-mock';
 
 const tick = () => new Promise(resolve => setTimeout(resolve, 0));
@@ -87,6 +94,7 @@ beforeEach(() => {
   spawned.length = 0;
   acp.events.clear();
   acp.requests.length = 0;
+  acp.onPrompt = null;
   win = createMockBrowserWindow();
   recorded = [];
   __setClaudeBackendForTests({ destroy: () => {} } as never);
@@ -186,6 +194,8 @@ describe('Kimi (ACP) scope', () => {
     const ws = getOrCreate(PROJECT);
     ws.kimi.terminalSessions.set('chat-k2', 'kimi-sx');
     ws.kimi.turnSeq = 3;
+    ws.kimi.scopeTurns.set('chat-k2', { turnSeq: 3 });
+    ws.kimi.busy = true;
     await listeners.get('kimi:stop')![0]({}, PROJECT, 'chat-k2');
     const done = { type: 'done', projectPath: PROJECT, scope: 'chat-k2', turnSeq: 3 };
     expect(v1Sent()).toContainEqual(done);
@@ -228,5 +238,149 @@ describe('workspace suspend routes its done events through emitChatMessage', () 
     const done = { type: 'done', projectPath: PROJECT, scope: 'chat-k9', turnSeq: 2 };
     expect(v1Sent()).toContainEqual(done);
     expect(recorded).toContainEqual(done);
+  });
+});
+
+function deferred<T = any>() {
+  let resolve!: (v: T) => void;
+  let reject!: (e: unknown) => void;
+  const promise = new Promise<T>((res, rej) => { resolve = res; reject = rej; });
+  return { promise, resolve, reject };
+}
+
+const flush = async () => { for (let i = 0; i < 6; i++) await tick(); };
+
+describe('fix round 1: overlapping chats in one project', () => {
+  it('I1: a fresh Gemini chat is live from streaming_start and its log meta is gemini', async () => {
+    const PROJECT = '/test/gemini-fresh';
+    const ws = getOrCreate(PROJECT);
+    ws.gemini.cwd = PROJECT;
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chatlog-'));
+    const store = new ChatLogStore({ dir });
+    // Same providerOf as main.ts initChatLog.
+    const providerOf = (projectPath: string, scope: string) => {
+      const want = realPath(projectPath);
+      for (const provider of ['gemini', 'kimi'] as const) {
+        if (listAcpLiveScopes(provider).some(e => e.scope === scope && realPath(e.projectPath) === want)) return provider;
+      }
+      return 'claude' as const;
+    };
+    setChatLog(new ChatLogService({
+      store, sendToRenderer: () => {}, bus: () => null,
+      liveChats: () => [], providerOf, devlog: () => {},
+    }));
+    try {
+      listeners.get('gemini:send')![0]({}, PROJECT, 'hello', [], 'default', 'fast', '', 'chat-fresh');
+      // streaming_start is out; the conversation id hasn't arrived yet.
+      expect(listAcpLiveScopes('gemini').filter(e => e.projectPath === PROJECT).map(e => e.scope)).toEqual(['chat-fresh']);
+      expect(store.meta('chat-fresh')?.provider).toBe('gemini');
+      await tick();
+      spawned[0].emit('exit', 0);
+      await flush();
+    } finally {
+      setChatLog(null);
+      store.close();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('I2: Kimi chat A erroring after B has sent ends with A\'s own turnSeq', async () => {
+    const PROJECT = '/test/kimi-overlap-error';
+    const ws = getOrCreate(PROJECT);
+    ws.kimi.cwd = PROJECT;
+    ws.kimi.transport = null;
+    ws.kimi.availability = 'available';
+    ws.kimi.turnSeq = 0;
+    const prompts = new Map<string, ReturnType<typeof deferred>>();
+    acp.onPrompt = (params) => { const d = deferred(); prompts.set(params.scope, d); return d.promise; };
+
+    listeners.get('kimi:send')![0]({}, PROJECT, 'a', [], 'auto_edit', undefined, 'kimi-k3', 'chat-A');
+    await flush();
+    listeners.get('kimi:send')![0]({}, PROJECT, 'b', [], 'auto_edit', undefined, 'kimi-k3', 'chat-B');
+    await flush();
+    const starts = v1Sent().filter(m => m.projectPath === PROJECT && m.type === 'streaming_start');
+    expect(starts.map(m => [m.scope, m.turnSeq])).toEqual([['chat-A', 1], ['chat-B', 2]]);
+
+    prompts.get('chat-A')!.reject(new Error('bad image'));
+    await flush();
+    const doneA = v1Sent().find(m => m.projectPath === PROJECT && m.type === 'done' && m.scope === 'chat-A');
+    expect(doneA).toEqual({ type: 'done', projectPath: PROJECT, scope: 'chat-A', turnSeq: 1 });
+    expect(recorded).toContainEqual(doneA);
+    // B is still running.
+    expect(ws.kimi.busy).toBe(true);
+    expect([...ws.kimi.scopeTurns.keys()]).toEqual(['chat-B']);
+
+    prompts.get('chat-B')!.resolve({ usage: {} });
+    await flush();
+    expect(v1Sent()).toContainEqual({ type: 'done', projectPath: PROJECT, scope: 'chat-B', turnSeq: 2 });
+    expect(ws.kimi.busy).toBe(false);
+  });
+
+  it('I2: stopping Kimi chat A after B has sent emits done{A, seqA} and cancels only A', async () => {
+    const PROJECT = '/test/kimi-overlap-stop';
+    const ws = getOrCreate(PROJECT);
+    ws.kimi.cwd = PROJECT;
+    ws.kimi.transport = null;
+    ws.kimi.availability = 'available';
+    ws.kimi.turnSeq = 0;
+    acp.onPrompt = () => deferred().promise;
+
+    listeners.get('kimi:send')![0]({}, PROJECT, 'a', [], 'auto_edit', undefined, 'kimi-k3', 'chat-A');
+    await flush();
+    listeners.get('kimi:send')![0]({}, PROJECT, 'b', [], 'auto_edit', undefined, 'kimi-k3', 'chat-B');
+    await flush();
+
+    await listeners.get('kimi:stop')![0]({}, PROJECT, 'chat-A');
+    await flush();
+    const done = { type: 'done', projectPath: PROJECT, scope: 'chat-A', turnSeq: 1 };
+    expect(v1Sent()).toContainEqual(done);
+    expect(recorded).toContainEqual(done);
+    const cancels = acp.requests.filter(r => r.method === 'session/cancel');
+    expect(cancels).toHaveLength(1);
+    expect(cancels[0].params).toMatchObject({ scope: 'chat-A', sessionId: ws.kimi.terminalSessions.get('chat-A') });
+    expect(ws.kimi.busy).toBe(true);
+    expect([...ws.kimi.scopeTurns.keys()]).toEqual(['chat-B']);
+  });
+
+  it('I3: Gemini Stop in chat A kills only A\'s process and emits done{A, seqA}', async () => {
+    const PROJECT = '/test/gemini-overlap-stop';
+    const ws = getOrCreate(PROJECT);
+    ws.gemini.cwd = PROJECT;
+    ws.gemini.turnSeq = 0;
+
+    listeners.get('gemini:send')![0]({}, PROJECT, 'a', [], 'default', 'fast', '', 'chat-A');
+    await tick();
+    listeners.get('gemini:send')![0]({}, PROJECT, 'b', [], 'default', 'fast', '', 'chat-B');
+    await tick();
+    const [childA, childB] = spawned;
+
+    listeners.get('gemini:stop')![0]({}, PROJECT, 'chat-A');
+    expect(childA.kill).toHaveBeenCalledOnce();
+    expect(childB.kill).not.toHaveBeenCalled();
+    const done = { type: 'done', projectPath: PROJECT, scope: 'chat-A', turnSeq: 1 };
+    expect(v1Sent()).toContainEqual(done);
+    expect(recorded).toContainEqual(done);
+    expect(ws.gemini.busy).toBe(true);
+    expect([...ws.gemini.scopeTurns.keys()]).toEqual(['chat-B']);
+
+    // B keeps streaming and finishes with its own turnSeq.
+    childB.stdout.emit('data', Buffer.from('{"type":"step_update","content":{"text":"still here"}}\n'));
+    childB.emit('exit', 0);
+    await flush();
+    expect(v1Sent()).toContainEqual(expect.objectContaining({ type: 'assistant', scope: 'chat-B' }));
+    expect(v1Sent()).toContainEqual({ type: 'done', projectPath: PROJECT, scope: 'chat-B', turnSeq: 2 });
+    expect(ws.gemini.busy).toBe(false);
+  });
+
+  it('suspend ends every overlapping ACP turn with its own turnSeq', () => {
+    const PROJECT = '/test/suspend-overlap';
+    const ws = getOrCreate(PROJECT);
+    ws.kimi.scopeTurns.set('chat-A', { turnSeq: 1 });
+    ws.kimi.scopeTurns.set('chat-B', { turnSeq: 2 });
+    ws.kimi.busy = true;
+    suspend(PROJECT, win as never);
+    expect(recorded).toContainEqual({ type: 'done', projectPath: PROJECT, scope: 'chat-A', turnSeq: 1 });
+    expect(recorded).toContainEqual({ type: 'done', projectPath: PROJECT, scope: 'chat-B', turnSeq: 2 });
+    expect(ws.kimi.busy).toBe(false);
   });
 });
