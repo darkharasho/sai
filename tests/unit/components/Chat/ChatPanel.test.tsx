@@ -1750,10 +1750,12 @@ describe('ChatPanel', () => {
     };
     const { container } = render(<ChatPanel {...props} />);
     await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
-    const dividers = container.querySelectorAll('.chat-turn-divider');
-    expect(dividers.length).toBe(0);
-    // and confirm the map still renders every message (no Fragment regression)
-    expect(container.querySelectorAll('[data-testid="chat-message"]').length).toBe(4);
+    // The initial messages render asynchronously; on a loaded CI runner they can land after
+    // the subscription, so wait for them rather than asserting immediately.
+    // Confirms the map still renders every message (no Fragment regression).
+    await waitFor(() =>
+      expect(container.querySelectorAll('[data-testid="chat-message"]').length).toBe(4));
+    expect(container.querySelectorAll('.chat-turn-divider').length).toBe(0);
   });
 
   describe('SAI thinking row relocation', () => {
