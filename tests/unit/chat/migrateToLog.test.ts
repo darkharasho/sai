@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import 'fake-indexeddb/auto';
 import { dbSaveSession, clearDb } from '@/chatDb';
-import { migrateChatsToLog, ensureChatInLog } from '@/lib/chat/migrateToLog';
+import { migrateChatsToLog, ensureChatInLog, _resetMigrateStateForTests } from '@/lib/chat/migrateToLog';
 import type { ChatSession, ChatMessage } from '@/types';
 
 const FLAG = 'sai.chatlog.migrated.v1';
@@ -15,6 +15,7 @@ function session(id: string, over: Partial<ChatSession> = {}): ChatSession {
 
 let logged: Map<string, { init: any; messages: ChatMessage[] }>;
 let importMessages: ReturnType<typeof vi.fn>;
+let list: ReturnType<typeof vi.fn>;
 
 beforeEach(async () => {
   await clearDb();
@@ -26,7 +27,9 @@ beforeEach(async () => {
     return true;
   });
   (globalThis as any).window = (globalThis as any).window ?? globalThis;
-  (window as any).sai = { chatlog: { importMessages } };
+  list = vi.fn(async () => [...logged.keys()].map(chatId => ({ chatId })));
+  (window as any).sai = { chatlog: { importMessages, list } };
+  _resetMigrateStateForTests();
 });
 
 describe('migrateChatsToLog', () => {
@@ -75,15 +78,34 @@ describe('migrateChatsToLog', () => {
   });
 });
 
+it('without window.sai.chatlog returns early and leaves the flag unset', async () => {
+  await dbSaveSession('/p', session('a'));
+  (window as any).sai = {};
+  expect(await migrateChatsToLog()).toEqual({ imported: 0, skipped: 0 });
+  expect(localStorage.getItem(FLAG)).toBeNull();
+});
+
+it('concurrent calls share one pass', async () => {
+  await dbSaveSession('/p', session('a'));
+  const [x, y] = await Promise.all([migrateChatsToLog(), migrateChatsToLog()]);
+  expect(x).toBe(y);
+  expect(importMessages).toHaveBeenCalledTimes(1);
+});
+
 describe('ensureChatInLog', () => {
-  it('imports a missing chat and is a no-op for an existing one', async () => {
+  it('imports a missing chat; skips cheaply when listed or already known', async () => {
     await dbSaveSession('/p', session('a'));
+    await dbSaveSession('/p', session('b'));
     await ensureChatInLog('a');
-    expect(logged.has('a')).toBe(true);
-    importMessages.mockClear();
-    await ensureChatInLog('a');
-    expect(importMessages).toHaveBeenCalledTimes(1); // idempotent: main returns false
-    expect(logged.size).toBe(1);
+    expect(importMessages).toHaveBeenCalledTimes(1);
+    await ensureChatInLog('a'); // known in-memory: no list, no import
+    expect(list).toHaveBeenCalledTimes(1);
+    expect(importMessages).toHaveBeenCalledTimes(1);
+    logged.set('b', { init: {}, messages: [] }); // already in the log, unknown to the module
+    await ensureChatInLog('b');
+    expect(importMessages).toHaveBeenCalledTimes(1);
+    await ensureChatInLog('b');
+    expect(list).toHaveBeenCalledTimes(2);
     await expect(ensureChatInLog('nope')).resolves.toBeUndefined();
   });
 });

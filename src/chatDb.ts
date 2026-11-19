@@ -88,6 +88,19 @@ export async function dbGetAllSessions(): Promise<ChatSession[]> {
   });
 }
 
+/** One session row by id (no messages); undefined if missing or not a chat row. */
+export async function dbGetSession(sessionId: string): Promise<ChatSession | undefined> {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const request = db.transaction('sessions', 'readonly').objectStore('sessions').get(sessionId);
+    request.onsuccess = () => {
+      const row = request.result as { kind?: unknown } | undefined;
+      resolve(row && isChatSessionRow(row) ? (row as ChatSession) : undefined);
+    };
+    request.onerror = () => reject(request.error);
+  });
+}
+
 export async function dbGetMessages(sessionId: string): Promise<ChatMessage[]> {
   const db = await openDb();
   return new Promise((resolve, reject) => {

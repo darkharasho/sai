@@ -1,7 +1,10 @@
-import { dbGetAllSessions, dbGetMessages } from '../../chatDb';
+import { dbGetAllSessions, dbGetMessages, dbGetSession } from '../../chatDb';
 import type { ChatSession } from '../../types';
 
 const FLAG = 'sai.chatlog.migrated.v1';
+
+/** Chat ids known to already be in the log (so repeat checks are free). */
+const knownInLog = new Set<string>();
 
 async function importSession(s: ChatSession): Promise<boolean> {
   const chatlog = (window as any).sai?.chatlog;
@@ -12,13 +15,21 @@ async function importSession(s: ChatSession): Promise<boolean> {
     s.id,
     { projectPath: s.projectPath, provider: s.aiProvider ?? 'claude', title: s.title, createdAt: s.createdAt, updatedAt: s.updatedAt },
     messages,
-  );
+  ).then((imported: boolean) => { knownInLog.add(s.id); return imported; });
 }
 
 /** One-shot, idempotent copy of every IndexedDB chat into the main-process log. */
-export async function migrateChatsToLog(opts: { batch?: number } = {}): Promise<{ imported: number; skipped: number }> {
+let inFlight: Promise<{ imported: number; skipped: number }> | null = null;
+
+export function migrateChatsToLog(opts: { batch?: number } = {}): Promise<{ imported: number; skipped: number }> {
+  if (!inFlight) inFlight = runMigration(opts).finally(() => { inFlight = null; });
+  return inFlight;
+}
+
+async function runMigration(opts: { batch?: number }): Promise<{ imported: number; skipped: number }> {
   const result = { imported: 0, skipped: 0 };
   if (localStorage.getItem(FLAG)) return result;
+  if (!(window as any).sai?.chatlog) return result; // can't import yet; leave the flag unset
   const batch = opts.batch ?? 20;
   const sessions = await dbGetAllSessions();
   let failed = false;
@@ -38,8 +49,20 @@ export async function migrateChatsToLog(opts: { batch?: number } = {}): Promise<
   return result;
 }
 
-/** Imports one chat if its log is missing (no-op when it exists or isn't in IndexedDB). */
+/** Imports one chat if its log is missing. Cheap when already present: no message load, no IPC payload. */
 export async function ensureChatInLog(chatId: string): Promise<void> {
-  const s = (await dbGetAllSessions()).find(x => x.id === chatId);
-  if (s) await importSession(s);
+  if (knownInLog.has(chatId)) return;
+  const chatlog = (window as any).sai?.chatlog;
+  if (!chatlog) return;
+  const s = await dbGetSession(chatId);
+  if (!s?.projectPath) return;
+  const listed = await chatlog.list(s.projectPath);
+  if (listed.some((m: { chatId: string }) => m.chatId === chatId)) { knownInLog.add(chatId); return; }
+  await importSession(s);
+}
+
+/** Test hook. */
+export function _resetMigrateStateForTests(): void {
+  knownInLog.clear();
+  inFlight = null;
 }
