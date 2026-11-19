@@ -32,6 +32,15 @@ jobs:
       - name: Run integration tests
         run: npm run test:integration
 
+      - name: Build the phone app
+        run: npm run build:mobile
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run phone app e2e tests
+        run: npx playwright test --config playwright.mobile.config.ts
+
       - name: Run tests with coverage
         run: npm run test:coverage
 
