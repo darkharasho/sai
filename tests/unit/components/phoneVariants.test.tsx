@@ -183,6 +183,26 @@ describe('long-press link', () => {
     expect((window.sai as any).openExternal).toHaveBeenCalled();
   });
 
+  it('phone: menu item tap after a long-press (no link click) still runs its action', () => {
+    setPhone(true);
+    const { link } = press();
+    act(() => { vi.advanceTimersByTime(600); });
+    fireEvent.touchEnd(link);
+    const item = Array.from(document.querySelectorAll('.link-ctx-item')).find(b => /Open link/.test(b.textContent ?? ''))!;
+    fireEvent.click(item);
+    expect((window.sai as any).openExternal).toHaveBeenCalledWith('https://example.com/x');
+  });
+
+  it('phone: guard expires after touchend so a later tap opens the link', () => {
+    setPhone(true);
+    const { link } = press();
+    act(() => { vi.advanceTimersByTime(600); });
+    fireEvent.touchEnd(link);
+    act(() => { vi.advanceTimersByTime(500); });
+    fireEvent.click(link);
+    expect((window.sai as any).openExternal).toHaveBeenCalledWith('https://example.com/x');
+  });
+
   it('desktop: touch does not open the menu', () => {
     press();
     act(() => { vi.advanceTimersByTime(600); });
