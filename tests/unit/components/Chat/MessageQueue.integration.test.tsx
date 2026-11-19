@@ -19,11 +19,11 @@ describe('MessageQueue (badge + popover)', () => {
   });
 
   it('renders the badge with "<n> queued" when the queue has items', () => {
-    const { container, getByText } = render(
+    const { container } = render(
       <MessageQueue queue={buildQueue(3)} onRemove={vi.fn()} onPromote={vi.fn()} />
     );
     expect(container.querySelector('[data-testid="queue-badge"]')).toBeTruthy();
-    expect(getByText('3 queued')).toBeTruthy();
+    expect(container.querySelector('.queue-badge-count')?.textContent).toBe('3 queued');
   });
 
   it('click opens the popover with all queued items', () => {

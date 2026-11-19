@@ -872,6 +872,26 @@ export default function ChatInput({ projectPath, onSend, overlayControl, onBefor
     }
   };
 
+  const sendFromButton = () => {
+    if (sendingRef.current) return;
+    if (sendsQueued && queueWhilePaused()) return;
+    if (!value.trim()) return;
+    sendingRef.current = true;
+    setHistory(prev => {
+      const trimmed = value.trim();
+      if (prev[prev.length - 1] === trimmed) return prev;
+      return [...prev, trimmed];
+    });
+    setHistoryIndex(-1);
+    draftRef.current = '';
+    const images = contextItems.filter(c => c.type === 'image' && c.data).map(c => c.data!);
+    fireBeforeSend();
+    onSend(buildMessage(value.trim()), images.length > 0 ? images : undefined);
+    setValue('');
+    setContextItems([]);
+    requestAnimationFrame(() => { sendingRef.current = false; });
+  };
+
   // Paused: queue the composer like a busy send. Returns true when it handled
   // the Enter/click (including a full queue, which keeps the text, as Ctrl+Enter does).
   const queueWhilePaused = (): boolean => {
@@ -1613,35 +1633,18 @@ export default function ChatInput({ projectPath, onSend, overlayControl, onBefor
           </button>
           )}
 
-          {(isStreaming || waiting) ? (
+          {(isStreaming || waiting) && (
             <button className="send-btn stop-btn" onClick={onStop} title={waiting && !isStreaming ? 'Cancel wait' : 'Stop'}>
               <Square size={16} fill="currentColor" />
             </button>
-          ) : (
+          )}
+          {/* Phone: no Enter-to-send, so Send stays beside Stop while there's text (main queues it, like the desktop's Enter). */}
+          {(!(isStreaming || waiting) || (isPhone() && value.trim())) && (
             <button
               className="send-btn"
-              onClick={() => {
-                if (sendingRef.current) return;
-                if (sendsQueued && queueWhilePaused()) return;
-                if (value.trim()) {
-                  sendingRef.current = true;
-                  setHistory(prev => {
-                    const trimmed = value.trim();
-                    if (prev[prev.length - 1] === trimmed) return prev;
-                    return [...prev, trimmed];
-                  });
-                  setHistoryIndex(-1);
-                  draftRef.current = '';
-                  const images = contextItems.filter(c => c.type === 'image' && c.data).map(c => c.data!);
-                  fireBeforeSend();
-                  onSend(buildMessage(value.trim()), images.length > 0 ? images : undefined);
-                  setValue('');
-                  setContextItems([]);
-                  requestAnimationFrame(() => { sendingRef.current = false; });
-                }
-              }}
+              onClick={sendFromButton}
               disabled={disabled || !value.trim()}
-              title="Send"
+              title={(isStreaming || waiting) ? 'Send (queued)' : 'Send'}
             >
               <Send size={16} />
             </button>

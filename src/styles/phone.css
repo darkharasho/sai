@@ -83,3 +83,82 @@ html[data-sai-phone] .chat-conversation-header .chat-empty-title {
   font-size: 15px;
   letter-spacing: 2px;
 }
+
+/* iOS zooms the page when a focused field's font is under 16px, which left
+   the composer zoomed and horizontally scrollable (Send off-screen). */
+html[data-sai-phone] .chat-textarea,
+html[data-sai-phone] input,
+html[data-sai-phone] textarea,
+html[data-sai-phone] select {
+  font-size: 16px;
+}
+
+/* Nothing in the shell scrolls sideways; wide content scrolls inside its own box. */
+html[data-sai-phone] body,
+html[data-sai-phone] .chat-messages {
+  overflow-x: hidden;
+}
+html[data-sai-phone] .chat-messages pre,
+html[data-sai-phone] .chat-messages table {
+  max-width: 100%;
+  overflow-x: auto;
+}
+html[data-sai-phone] .chat-messages {
+  overflow-wrap: anywhere;
+}
+
+/* Composer toolbar: Send/Stop match the 44px toolbar targets; it never overflows. */
+html[data-sai-phone] .send-btn {
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+  margin-left: 2px;
+  border-radius: 10px;
+}
+html[data-sai-phone] .send-btn svg {
+  width: 18px;
+  height: 18px;
+}
+html[data-sai-phone] .permission-btn {
+  width: 44px;
+  padding: 0;
+  justify-content: center;
+}
+html[data-sai-phone] .input-toolbar {
+  min-width: 0;
+  padding-left: 0;
+  padding-right: 0;
+}
+html[data-sai-phone] .toolbar-right {
+  min-width: 0;
+  flex-shrink: 1;
+}
+html[data-sai-phone] .model-btn {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Queue badge: just the icon and count, so the toolbar keeps Stop on screen. */
+html[data-sai-phone] .queue-badge {
+  white-space: nowrap;
+  min-height: 44px;
+  flex-shrink: 0;
+}
+html[data-sai-phone] .queue-badge-word {
+  display: none;
+}
+
+/* Messages use the full width: the desktop gutters cost ~50px at phone width. */
+html[data-sai-phone] .chat-msg-assistant {
+  padding-left: 2px;
+  padding-right: 2px;
+}
+html[data-sai-phone] .chat-msg-content {
+  gap: 8px;
+}
+html[data-sai-phone] .chat-msg-user {
+  margin-right: 2px;
+  max-width: 86%;
+}

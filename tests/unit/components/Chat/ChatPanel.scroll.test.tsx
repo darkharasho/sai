@@ -122,17 +122,31 @@ describe('ChatPanel scroll-follow', () => {
     expect(g.top).toBe(466);
   });
 
-  it('touchstart during the follow tween cancels it and releases follow', async () => {
+  it('dragging content down during the follow tween cancels it and releases follow', async () => {
     const { el, g } = await mountScroller();
     g.top = 100; // far from the bottom so the tween runs, but still following
     await emitChat(sai, { type: 'streaming_start', projectPath: '/project', scope: 'c1', turnSeq: 1 });
     await emitChat(sai, { type: 'assistant', projectPath: '/project', scope: 'c1', turnSeq: 1, message: { content: [{ type: 'text', text: 'more', delta: true }] } });
-    fireEvent.touchStart(el);
+    fireEvent.touchStart(el, { touches: [{ clientY: 100 }] });
+    fireEvent.touchMove(el, { touches: [{ clientY: 140 }] });
     g.writes.length = 0;
     await act(async () => { await new Promise(r => setTimeout(r, 80)); });
     expect(g.writes).toEqual([]);
     grow(g, 1200);
     expect(g.writes).toEqual([]);
+  });
+
+  it('a tap during the follow tween (e.g. expanding a tool card) keeps following', async () => {
+    const { el, g } = await mountScroller();
+    g.top = 100;
+    await emitChat(sai, { type: 'streaming_start', projectPath: '/project', scope: 'c1', turnSeq: 1 });
+    await emitChat(sai, { type: 'assistant', projectPath: '/project', scope: 'c1', turnSeq: 1, message: { content: [{ type: 'text', text: 'more', delta: true }] } });
+    fireEvent.touchStart(el, { touches: [{ clientY: 100 }] });
+    fireEvent.touchEnd(el);
+    await act(async () => { await new Promise(r => setTimeout(r, 80)); });
+    g.writes.length = 0;
+    grow(g, 1200);
+    expect(g.writes.length).toBeGreaterThan(0);
   });
 
   it('wheel up still releases follow', async () => {

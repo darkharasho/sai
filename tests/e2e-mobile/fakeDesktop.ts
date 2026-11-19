@@ -55,8 +55,20 @@ const dispatch: ProviderDispatch = {
     let i = 0;
     const timer = setInterval(() => {
       i++;
-      const text = i === 1 ? `Echo: ${prompt}. ` : `word${i} `;
+      const wide = /wide/.test(String(prompt)) && i === 2
+        ? '\n\nhttps://example.com/a/very/long/unbroken/path/that/keeps/going/and/going/forever/and/ever\n\n```ts\nconst somethingQuiteLong = callAFunctionWithAVeryLongName(argumentNumberOne, argumentNumberTwo, three);\n```\n\n| col a | col b | col c | col d |\n|---|---|---|---|\n| aaaaaaaaaa | bbbbbbbbbbbb | cccccccccccc | dddddddddddd |\n\n'
+        : null;
+      const text = wide ?? (i === 1 ? `Echo: ${prompt}. ` : `word${i} `);
       service.record({ type: 'assistant', projectPath, scope, turnSeq: t, message: { content: [{ type: 'text', text, delta: true }] } });
+      // A prompt mentioning "tools" interleaves Bash tool calls (call, then its output a few words later).
+      if (/tools/.test(String(prompt)) && i % 6 === 3) {
+        const id = `tu-${t}-${i}`;
+        service.record({ type: 'assistant', projectPath, scope, turnSeq: t, message: { content: [{ type: 'tool_use', id, name: 'Bash', input: { command: `ls -la /tmp/step${i}` } }] } });
+        setTimeout(() => {
+          const out = Array.from({ length: 12 }, (_, k) => `line ${k} of step ${i}`).join('\n');
+          service.record({ type: 'user', projectPath, scope, turnSeq: t, message: { content: [{ type: 'tool_result', tool_use_id: id, content: out }] } });
+        }, WORD_MS * 2);
+      }
       if (i >= REPLY_WORDS) {
         service.record({ type: 'assistant', projectPath, scope, turnSeq: t, message: { content: [{ type: 'text', text: 'All done.', delta: true }] } });
         finish(scope);

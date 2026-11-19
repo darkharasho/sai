@@ -34,12 +34,20 @@ const consumedBrainstormSeeds = new Set<string>();
 
 /** Run a scrollTop write the user didn't make. The browser delivers its scroll event no later than the next
  *  frame's rendering step, which runs before that frame's rAF callbacks, so the flag clears one frame later. */
+const writeSeq = new WeakMap<object, number>();
 function programmaticWrite(flag: { current: boolean } | undefined, write: () => void) {
   if (!flag) { write(); return; }
+  // Only the latest write may clear the flag: an older write's reset running
+  // after a newer write (same frame) made that write's scroll event read as the
+  // user scrolling up, releasing follow mid-stream. Two frames: the scroll
+  // event for a write made inside a rAF is dispatched on the next frame.
+  const seq = (writeSeq.get(flag) ?? 0) + 1;
+  writeSeq.set(flag, seq);
   flag.current = true;
   write();
-  if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => { flag.current = false; });
-  else flag.current = false;
+  const clear = () => { if (writeSeq.get(flag) === seq) flag.current = false; };
+  if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => requestAnimationFrame(clear));
+  else clear();
 }
 
 /** Returns a cancel function (null when no tween started). Each step also bails once follow is released. */
@@ -64,7 +72,9 @@ function tweenScrollToBottom(container: HTMLElement, durationMs = 280, flag?: { 
     // Recompute target each frame so we follow content that grows mid-tween
     // (e.g. tool output cards expanding via a height animation).
     const target = container.scrollHeight - container.clientHeight;
-    programmaticWrite(flag, () => { container.scrollTop = start + (target - start) * ease(k); });
+    // Never backwards: the ResizeObserver pin may already have put us past this frame's eased position.
+    const next = Math.max(container.scrollTop, start + (target - start) * ease(k));
+    if (next !== container.scrollTop) programmaticWrite(flag, () => { container.scrollTop = next; });
     if (k < 1) requestAnimationFrame(step); else finished = true;
   };
   requestAnimationFrame(step);
@@ -1332,10 +1342,19 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode:
         setFollowOn(false);
       }
     };
-    // A finger down takes over: it releases any in-flight jump guard, and during the
-    // follow tween it stops the tween and releases follow.
-    const onTouchStart = () => {
+    // A finger down releases any in-flight jump guard. Dragging content down
+    // (scrolling up) during the follow tween stops the tween and releases
+    // follow. A tap (e.g. expanding a tool card) doesn't: while a reply
+    // streams the tween is nearly always running.
+    let touchY: number | null = null;
+    const onTouchStart = (e: TouchEvent) => {
       jumpingRef.current = false;
+      touchY = e.touches[0]?.clientY ?? null;
+    };
+    const onTouchMove = (e: TouchEvent) => {
+      const y = e.touches[0]?.clientY;
+      if (touchY === null || y === undefined || y - touchY < 8) return;
+      touchY = null;
       const cancel = tweenCancelRef.current;
       tweenCancelRef.current = null;
       if (!cancel || !cancel()) return;
@@ -1344,7 +1363,12 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode:
     };
     el.addEventListener('wheel', onWheel, { passive: true });
     el.addEventListener('touchstart', onTouchStart, { passive: true });
-    return () => { el.removeEventListener('wheel', onWheel); el.removeEventListener('touchstart', onTouchStart); };
+    el.addEventListener('touchmove', onTouchMove, { passive: true });
+    return () => {
+      el.removeEventListener('wheel', onWheel);
+      el.removeEventListener('touchstart', onTouchStart);
+      el.removeEventListener('touchmove', onTouchMove);
+    };
   }, []);
 
   // Scroll to bottom on mount (session switch remounts via key change)
