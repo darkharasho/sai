@@ -1,6 +1,6 @@
 {
   "name": "sai",
-  "version": "1.38.0",
+  "version": "1.39.0",
   "mobileVersion": "0.1.0",
   "description": "AI-First Code Editor",
   "main": "dist-electron/main.js",
