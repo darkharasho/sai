@@ -6,6 +6,7 @@ import { notifyCompletion } from './notify';
 import { enrichedEnv } from './shellEnv';
 import { withScopeTag } from './loadGuard/scopeTag';
 import { withLoadNote } from './loadGuard/hook';
+import { emitChat } from './chatEmitter';
 
 /**
  * Compatibility module for the provider that used to be backed by Gemini CLI.
@@ -21,12 +22,16 @@ const DISPLAY_NAME = 'Antigravity';
 
 type StreamEvent = Record<string, any>;
 
-function safeSend(win: BrowserWindow, message: unknown) {
+function safeSend(win: BrowserWindow, message: Record<string, unknown>) {
   try {
-    if (!win.isDestroyed()) win.webContents.send('claude:message', message);
+    // A destroyed window never streams: this also keeps the commit one-shot
+    // (which passes a stand-in window that reports destroyed) out of the chat log.
+    if (win.isDestroyed()) return;
   } catch {
-    // The window may be closing while the child process exits.
+    return;
   }
+  // Through emitChatMessage so the durable chat log records the event too.
+  emitChat(win, message);
 }
 
 function scopeSession(ws: Workspace, scope: string): string | undefined {
@@ -245,6 +250,7 @@ export function registerGeminiHandlers(win: BrowserWindow) {
     ws.gemini.turnSeq += 1;
     const turnSeq = ws.gemini.turnSeq;
     ws.gemini.busy = true;
+    ws.gemini.lastSendScope = scope;
     safeSend(win, { type: 'streaming_start', projectPath, scope, turnSeq, sessionId: scopeSession(ws, scope) });
     try {
       const preamble = ws.gemini.metaPreamble && !scopeSession(ws, scope) ? `${ws.gemini.metaPreamble}\n\n` : '';

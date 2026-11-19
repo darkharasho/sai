@@ -2982,8 +2982,8 @@ export default function App() {
     // conversation with no history.
     window.sai.claudeSetSessionId(activeProjectPath, selected.claudeSessionId, selected.id);
     (window.sai as any).codexSetSessionId(activeProjectPath, selected.codexSessionId, selected.id);
-    window.sai.geminiSetSessionId?.(activeProjectPath, selected.geminiSessionId, 'chat');
-    (window.sai as any).kimiSetSessionId?.(activeProjectPath, selected.kimiSessionId, 'chat');
+    window.sai.geminiSetSessionId?.(activeProjectPath, selected.geminiSessionId, selected.id);
+    (window.sai as any).kimiSetSessionId?.(activeProjectPath, selected.kimiSessionId, selected.id);
     const viewedAt = Date.now();
     // Persist lastViewedAt so a subsequent dbGetSessions refresh (triggered by
     // background-chat persistence) doesn't roll it back to undefined, leaving
@@ -3106,8 +3106,8 @@ export default function App() {
     if (activeDeleted) {
       sessionLoadSeqRef.current++; // cancel any in-flight tail load for the deleted chat
       (window.sai as any).codexSetSessionId?.(wsPath, undefined, prevWs!.activeSession.id);
-      window.sai.geminiSetSessionId?.(wsPath, undefined, 'chat');
-      (window.sai as any).kimiSetSessionId?.(wsPath, undefined, 'chat');
+      window.sai.geminiSetSessionId?.(wsPath, undefined, prevWs!.activeSession.id);
+      (window.sai as any).kimiSetSessionId?.(wsPath, undefined, prevWs!.activeSession.id);
       wsMessagesRef.current.delete(wsPath);
       wsFirstLoadedIdxRef.current.delete(wsPath);
       const fresh = { ...createSession(), lastViewedAt: Date.now(), aiProvider };
@@ -3410,16 +3410,9 @@ export default function App() {
                   activeFilePath={ws.activeFilePath}
                   onFileOpen={handleFileOpen}
                   isActive={wsPath === activeProjectPath}
-                  isStreaming={
-                    aiProvider === 'claude' || aiProvider === 'codex'
-                      ? streamingScopes.has(`${wsPath}:${ws.activeSession.id}`)
-                      // Gemini/Kimi use a long-lived ACP — multiple sessions can stream
-                      // concurrently (New Chat keeps the background turn running).
-                      // Only show the animation when the streaming ACP session matches
-                      // this session's own geminiSessionId.
-                      : streamingScopes.has(`${wsPath}:chat`) &&
-                        chatStreamingSessionRef.current.get(wsPath) === ((aiProvider === 'kimi' ? ws.activeSession.kimiSessionId : ws.activeSession.geminiSessionId) ?? null)
-                  }
+                  // Every provider scopes its events by chat id, so a background
+                  // chat's turn never lights up this one.
+                  isStreaming={streamingScopes.has(`${wsPath}:${ws.activeSession.id}`)}
                   followUp={aiProvider === 'claude' ? followUpScopes.get(`${wsPath}:${ws.activeSession.id}`) ?? null : null}
                   onDismissFollowUp={() => setFollowUpScopes(prev => {
                     const k = `${wsPath}:${ws.activeSession.id}`;
@@ -3450,8 +3443,8 @@ export default function App() {
                   awaitingQuestion={
                     // Scope-precise: a sibling chat's pending question must not
                     // freeze THIS panel's thinking indicator / send routing.
-                    // Claude chats are scoped by session id; other providers
-                    // ride the legacy 'chat' scope.
+                    // Chats are scoped by session id; the legacy 'chat' scope
+                    // remains for callers that pass none.
                     awaitingQuestionScopes.has(`${wsPath}:${ws.activeSession.id}`)
                     || awaitingQuestionScopes.has(`${wsPath}:chat`)
                   }
@@ -3809,7 +3802,7 @@ export default function App() {
   // unconditional-unstick done (turnSeq null — never stale-droppable), which
   // flows the normal turn-end path and clears all derived state consistently.
   // Scoped Claude and Codex sessions are reconciled only by their owning
-  // backend. Gemini remains on its fixed `chat` scope and is skipped here.
+  // backend; Gemini/Kimi chat scopes resolve to no reconciler and are skipped.
   useEffect(() => {
     const hasStreaming = streamingScopes.size > 0;
     if (!hasStreaming) return;

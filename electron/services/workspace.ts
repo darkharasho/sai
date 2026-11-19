@@ -3,6 +3,7 @@ import { ChildProcess } from 'node:child_process';
 import type * as pty from 'node-pty';
 import { BrowserWindow } from 'electron';
 import type { AcpClient } from './acp';
+import { emitChat } from './chatEmitter';
 
 export interface PendingToolUse {
   toolName: string;
@@ -112,6 +113,9 @@ export interface AcpWorkspaceState {
   } | null;
   /** Meta-workspace preamble — stashed for future injection if the provider gains a system-prompt hook. */
   metaPreamble?: string;
+  /** Chat id (scope) of the most recent send. Events the provider can't tie to
+   *  a scope, and turn-ends with no scope of their own, carry this one. */
+  lastSendScope?: string;
 }
 
 /** Legacy state shape retained while persisted provider identifiers are migrated. */
@@ -268,9 +272,13 @@ export function touchActivity(projectPath: string): void {
   if (ws) ws.lastActivity = Date.now();
 }
 
-function resetAcpState(state: AcpWorkspaceState, safeSend: (channel: string, ...args: any[]) => void, projectPath: string) {
+function resetAcpState(state: AcpWorkspaceState, emit: (msg: Record<string, unknown>) => void, projectPath: string) {
   if (state.busy) {
-    safeSend('claude:message', { type: 'done', projectPath, turnSeq: state.turnSeq });
+    emit({
+      type: 'done', projectPath,
+      ...(state.lastSendScope ? { scope: state.lastSendScope } : {}),
+      turnSeq: state.turnSeq,
+    });
   }
   if (state.process) {
     state.process.kill();
@@ -290,15 +298,15 @@ function resetAcpState(state: AcpWorkspaceState, safeSend: (channel: string, ...
   state.availability = 'available';
   state.lastError = undefined;
   state.pendingApproval = null;
+  state.lastSendScope = undefined;
 }
 
 export function suspend(projectPath: string, win: BrowserWindow): void {
   const ws = workspaces.get(projectPath);
   if (!ws || ws.status === 'suspended') return;
 
-  const safeSend = (channel: string, ...args: any[]) => {
-    try { if (!win.isDestroyed() && win.webContents) win.webContents.send(channel, ...args); } catch { /* destroyed */ }
-  };
+  // Chat events go through emitChatMessage so the durable chat log sees them.
+  const emit = (msg: Record<string, unknown>) => emitChat(win, msg);
 
   // Give each selected backend first ownership of its runtime settlement. The
   // built-in workspace cleanup below remains a fallback if a hook fails/no-ops.
@@ -309,7 +317,7 @@ export function suspend(projectPath: string, win: BrowserWindow): void {
   // Kill all Claude scoped processes
   for (const [scope, claude] of ws.claudeScopes) {
     if (claude.busy) {
-      safeSend('claude:message', { type: 'done', projectPath: ws.projectPath, scope, turnSeq: claude.turnSeq });
+      emit({ type: 'done', projectPath: ws.projectPath, scope, turnSeq: claude.turnSeq });
     }
     if (claude.process) {
       claude.process.kill();
@@ -329,7 +337,7 @@ export function suspend(projectPath: string, win: BrowserWindow): void {
 
   // Kill Codex process
   if (ws.codex.busy) {
-    safeSend('claude:message', { type: 'done', projectPath: ws.projectPath, turnSeq: ws.codex.turnSeq });
+    emit({ type: 'done', projectPath: ws.projectPath, turnSeq: ws.codex.turnSeq });
   }
   if (ws.codex.process) {
     ws.codex.process.kill();
@@ -338,8 +346,8 @@ export function suspend(projectPath: string, win: BrowserWindow): void {
   ws.codex.busy = false;
 
   // Reset providers that keep an ACP-shaped workspace state (Antigravity, Kimi)
-  resetAcpState(ws.gemini, safeSend, ws.projectPath);
-  resetAcpState(ws.kimi, safeSend, ws.projectPath);
+  resetAcpState(ws.gemini, emit, ws.projectPath);
+  resetAcpState(ws.kimi, emit, ws.projectPath);
 
   // Kill all terminals
   for (const term of ws.terminals.values()) {

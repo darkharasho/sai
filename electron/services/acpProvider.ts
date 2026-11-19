@@ -10,6 +10,7 @@ import { withScopeTag } from './loadGuard/scopeTag';
 import { withLoadNote } from './loadGuard/hook';
 import { getLoadGuard } from './loadGuard';
 import { externalizeToolResultImages } from './toolResultImageStore';
+import { emitChat } from './chatEmitter';
 
 export interface AcpProviderConfig {
   key: 'kimi';                   // IPC channel prefix AND Workspace slot name
@@ -81,14 +82,6 @@ function getEnrichedEnv(): NodeJS.ProcessEnv {
   extraPaths.push(path.join(home, '.local', 'bin'), '/usr/local/bin');
   env.PATH = [...new Set([...(env.PATH || '').split(path.delimiter), ...extraPaths].filter(Boolean))].join(path.delimiter);
   return env;
-}
-
-function safeSend(win: BrowserWindow, channel: string, ...args: unknown[]) {
-  try {
-    if (!win.isDestroyed()) win.webContents.send(channel, ...args);
-  } catch {
-    // Window already destroyed.
-  }
 }
 
 const BOOTSTRAP_FILES = ['README.md', 'package.json', 'GEMINI.md', 'AGENTS.md', 'CLAUDE.md', 'tsconfig.json'];
@@ -246,7 +239,9 @@ function getScopeForEvent(ws: Workspace, msg: any, config: AcpProviderConfig): s
     }
   }
 
-  return 'chat';
+  // The process is shared by the workspace: an event with no session of its
+  // own belongs to the chat whose send started the current turn.
+  return state(ws).lastSendScope ?? 'chat';
 }
 
 function renderToolContent(content: any[] | undefined): string {
@@ -478,13 +473,13 @@ function disableAcpProvider(win: BrowserWindow, ws: Workspace, scope: string, re
   state(ws).activeRequestId = undefined;
   state(ws).pendingApproval = null;
   const hint = config.installHint ? ` ${config.installHint}` : '';
-  safeSend(win, 'claude:message', {
+  emitChat(win, {
     type: 'error',
     projectPath: ws.projectPath,
     scope,
     text: `${config.displayName} unavailable: ${reason}.${hint}`,
   });
-  safeSend(win, 'claude:message', {
+  emitChat(win, {
     type: 'done',
     projectPath: ws.projectPath,
     scope,
@@ -517,7 +512,7 @@ export async function ensureAcpTransport(win: BrowserWindow, ws: Workspace, conf
         description: event.params?.description,
         scope,
       };
-      safeSend(win, 'claude:message', {
+      emitChat(win, {
         type: 'approval_needed',
         projectPath: ws.projectPath,
         scope,
@@ -532,7 +527,7 @@ export async function ensureAcpTransport(win: BrowserWindow, ws: Workspace, conf
 
     const translated = translateAcpEvent(event, ws.projectPath, scope);
     if (translated) {
-      safeSend(win, 'claude:message', externalizeToolResultImages(translated));
+      emitChat(win, externalizeToolResultImages(translated));
     }
   });
 
@@ -572,7 +567,7 @@ async function ensureSession(win: BrowserWindow, ws: Workspace, scope: string, c
   });
   setScopeSessionId(ws, scope, result.sessionId, config);
   state(ws).loadedSessionIds.add(result.sessionId);
-  safeSend(win, 'claude:message', {
+  emitChat(win, {
     type: 'session_id',
     sessionId: result.sessionId,
     projectPath: ws.projectPath,
@@ -675,9 +670,9 @@ export function registerAcpProviderHandlers(win: BrowserWindow, config: AcpProvi
     }
     try {
       await ensureAcpTransport(win, ws, config);
-      safeSend(win, 'claude:message', { type: 'ready', projectPath: ws.projectPath });
+      emitChat(win, { type: 'ready', projectPath: ws.projectPath });
     } catch (error) {
-      disableAcpProvider(win, ws, 'chat', error instanceof Error ? error.message : `${config.displayName} startup failed`, config);
+      disableAcpProvider(win, ws, state(ws).lastSendScope ?? 'chat', error instanceof Error ? error.message : `${config.displayName} startup failed`, config);
     }
   });
 
@@ -716,7 +711,7 @@ export function registerAcpProviderHandlers(win: BrowserWindow, config: AcpProvi
 
     state(ws).busy = false;
     state(ws).activeRequestId = undefined;
-    safeSend(win, 'claude:message', {
+    emitChat(win, {
       type: 'done',
       projectPath: ws.projectPath,
       scope,
@@ -739,10 +734,10 @@ export function registerAcpProviderHandlers(win: BrowserWindow, config: AcpProvi
         modifiedCommand,
       });
       state(ws).pendingApproval = null;
-      safeSend(win, 'claude:message', { type: 'approval_resolved', projectPath: ws.projectPath, scope });
+      emitChat(win, { type: 'approval_resolved', projectPath: ws.projectPath, scope });
     } catch (error: any) {
       state(ws).pendingApproval = null;
-      safeSend(win, 'claude:message', { type: 'error', projectPath: ws.projectPath, scope, text: `${config.displayName} approval failed: ${error?.message || 'Unknown error'}` });
+      emitChat(win, { type: 'error', projectPath: ws.projectPath, scope, text: `${config.displayName} approval failed: ${error?.message || 'Unknown error'}` });
     }
   });
 
@@ -752,15 +747,16 @@ export function registerAcpProviderHandlers(win: BrowserWindow, config: AcpProvi
       const ws = get(projectPath);
       if (!ws) return;
       touchActivity(projectPath);
+      state(ws).lastSendScope = scope;
 
       if (state(ws).availability === 'disabled') {
-        safeSend(win, 'claude:message', {
+        emitChat(win, {
           type: 'error',
           projectPath: ws.projectPath,
           scope,
           text: `${config.displayName} unavailable: ${state(ws).lastError || `retry ${config.displayName} to continue`}`,
         });
-        safeSend(win, 'claude:message', {
+        emitChat(win, {
           type: 'done',
           projectPath: ws.projectPath,
           scope,
@@ -778,7 +774,7 @@ export function registerAcpProviderHandlers(win: BrowserWindow, config: AcpProvi
         state(ws).turnSeq += 1;
         state(ws).busy = true;
 
-        safeSend(win, 'claude:message', {
+        emitChat(win, {
           type: 'streaming_start',
           projectPath: ws.projectPath,
           scope,
@@ -834,7 +830,7 @@ export function registerAcpProviderHandlers(win: BrowserWindow, config: AcpProvi
         state(ws).busy = false;
         state(ws).activeRequestId = undefined;
 
-        safeSend(win, 'claude:message', {
+        emitChat(win, {
           type: 'result',
           projectPath: ws.projectPath,
           scope,
@@ -845,7 +841,7 @@ export function registerAcpProviderHandlers(win: BrowserWindow, config: AcpProvi
             output_tokens: result?.usage?.output_tokens || 0,
           },
         });
-        safeSend(win, 'claude:message', {
+        emitChat(win, {
           type: 'done',
           projectPath: ws.projectPath,
           scope,
@@ -871,13 +867,13 @@ export function registerAcpProviderHandlers(win: BrowserWindow, config: AcpProvi
           setScopeSessionId(ws, scope, undefined, config);
           state(ws).busy = false;
           state(ws).activeRequestId = undefined;
-          safeSend(win, 'claude:message', {
+          emitChat(win, {
             type: 'error',
             projectPath: ws.projectPath,
             scope,
             text: errorMsg,
           });
-          safeSend(win, 'claude:message', {
+          emitChat(win, {
             type: 'done',
             projectPath: ws.projectPath,
             scope,

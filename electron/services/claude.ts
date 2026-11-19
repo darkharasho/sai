@@ -19,6 +19,7 @@ import { clamp, type PermMode } from './remote/clamp';
 import { exitTerminalEvents } from './claudeExit';
 import { imageReadResult } from './imageFiles';
 import { externalizeToolResultImages } from './toolResultImageStore';
+import { setChatEmitter } from './chatEmitter';
 import type { StartArgs, CompactArgs } from './claudeBackend/types';
 import { getClaudeBackend, getClaudeBackendSetting } from './claudeBackend';
 export { touchActivity, getOrCreate as getOrCreateWorkspace } from './workspace';
@@ -121,7 +122,9 @@ export function setChatLog(log: { record(msg: Record<string, unknown>): unknown 
   chatLog = log;
 }
 
-export function emitChatMessage(raw: Record<string, unknown>): void {
+/** `target` defaults to the main window; providers registered against a
+ *  specific window pass it so the v1 send keeps its window target. */
+export function emitChatMessage(raw: Record<string, unknown>, target?: BrowserWindow): void {
   const msg = externalizeToolResultImages(raw);
   // The log must never block v1 delivery below.
   try {
@@ -131,10 +134,12 @@ export function emitChatMessage(raw: Record<string, unknown>): void {
       type: msg.type, scope: msg.scope, error: err instanceof Error ? err.message : String(err),
     });
   }
-  if (mainWin) safeSend(mainWin, 'claude:message', msg);
+  const win = target ?? mainWin;
+  if (win) safeSend(win, 'claude:message', msg);
   const topic = `chat:${msg.projectPath}:${msg.scope ?? 'chat'}`;
   remoteBus?.publish(topic, msg);
 }
+setChatEmitter(emitChatMessage);
 
 /**
  * Emit a `streaming_start` and enforce the turnSeq invariant that keeps the

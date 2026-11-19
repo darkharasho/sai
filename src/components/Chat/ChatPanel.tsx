@@ -954,13 +954,13 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
     // Gap-closing gate (chatFrameGate.ts): register BEFORE subscribing so App
     // stops buffering for this scope, then drain what accumulated in the mount
     // gap right after subscribing. All synchronous — no frame can interleave
-    // between these statements. Claude and Codex chats participate, while
-    // Gemini uses the fixed `chat` scope.
-    const gateScope = (aiProvider === 'claude' || aiProvider === 'codex') && claudeScope !== 'chat'
-      ? claudeScope : null;
+    // between these statements. Every provider's chat is scoped by its chat
+    // id; only the legacy `chat` default has no gate.
+    const gateScope = claudeScope !== 'chat' ? claudeScope : null;
     if (gateScope) registerChatListener(gateScope);
     const onMessage = (msg: any) => {
-      const expectedScope = (aiProvider === 'gemini' || aiProvider === 'kimi') ? 'chat' : claudeScope;
+      // Every provider stamps the chat id as scope (Gemini/Kimi included).
+      const expectedScope = claudeScope;
       // Load-guard events carry '*' wildcards for project and scope (Ruling R5),
       // so they're matched before the generic filter. Provider must match.
       if (msg.type === 'load_guard') {
@@ -984,9 +984,8 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
         return;
       }
       // Only process messages for this workspace and chat scope.
-      // Claude uses session UUIDs as scopes for multi-scope isolation.
-      // Gemini uses a fixed chat scope. Claude and Codex preserve the panel's
-      // scope so parallel sessions cannot consume each other's events.
+      // Every provider uses the chat id as scope, so parallel sessions cannot
+      // consume each other's events.
       if (msg.projectPath && msg.projectPath !== projectPath) return;
       if (msg.scope && msg.scope !== expectedScope) return;
 
@@ -2233,7 +2232,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
     }
     if (aiProvider === 'gemini' || aiProvider === 'kimi') {
       const approve = aiProvider === 'kimi' ? (window.sai as any).kimiApprove : (window.sai as any).geminiApprove;
-      approve?.(projectPath, pendingApproval.toolUseId, true, modifiedCommand, 'chat');
+      approve?.(projectPath, pendingApproval.toolUseId, true, modifiedCommand, claudeScope);
     } else {
       window.sai.claudeApprove(projectPath, pendingApproval.toolUseId, true, modifiedCommand, claudeScope);
     }
@@ -2253,7 +2252,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
     }
     if (aiProvider === 'gemini' || aiProvider === 'kimi') {
       const approve = aiProvider === 'kimi' ? (window.sai as any).kimiApprove : (window.sai as any).geminiApprove;
-      approve?.(projectPath, pendingApproval.toolUseId, false, undefined, 'chat');
+      approve?.(projectPath, pendingApproval.toolUseId, false, undefined, claudeScope);
     } else {
       window.sai.claudeApprove(projectPath, pendingApproval.toolUseId, false, undefined, claudeScope);
     }
@@ -2271,7 +2270,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
     if (aiProvider === 'gemini' || aiProvider === 'kimi') {
       // ACP providers don't support always-allow patterns — just approve this instance
       const approve = aiProvider === 'kimi' ? (window.sai as any).kimiApprove : (window.sai as any).geminiApprove;
-      approve?.(projectPath, pendingApproval.toolUseId, true, undefined, 'chat');
+      approve?.(projectPath, pendingApproval.toolUseId, true, undefined, claudeScope);
     } else {
       const pattern = `${pendingApproval.toolName}(*)`;
       await window.sai.claudeAlwaysAllow(projectPath, pattern);
@@ -2426,8 +2425,8 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
       // false and would otherwise wake the drain useEffect to shift a queued
       // item. Suppress that one drain so only the user's new message runs.
       suppressNextDrainRef.current = true;
-      if (aiProvider === 'gemini') (window.sai as any).geminiStop?.(projectPath);
-      else if (aiProvider === 'kimi') (window.sai as any).kimiStop?.(projectPath);
+      if (aiProvider === 'gemini') (window.sai as any).geminiStop?.(projectPath, claudeScope);
+      else if (aiProvider === 'kimi') (window.sai as any).kimiStop?.(projectPath, claudeScope);
       else if (aiProvider === 'codex') window.sai.codexStop?.(projectPath, claudeScope);
       else window.sai.claudeStop?.(projectPath, claudeScope);
     }
@@ -2461,9 +2460,9 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
     const builtPrompt = activeFilePath && fileContextEnabled ? `[File: ${activeFilePath}]\n\n${text}` : text;
     const prompt = directCard ? directAtTask(builtPrompt, directCard.title) : builtPrompt;
     if (aiProvider === 'gemini') {
-      (window.sai as any).geminiSend(projectPath, prompt, imagePaths, geminiApprovalMode, geminiConversationMode, geminiModel, 'chat');
+      (window.sai as any).geminiSend(projectPath, prompt, imagePaths, geminiApprovalMode, geminiConversationMode, geminiModel, claudeScope);
     } else if (aiProvider === 'kimi') {
-      (window.sai as any).kimiSend(projectPath, prompt, imagePaths, kimiApprovalMode, kimiModel, 'chat');
+      (window.sai as any).kimiSend(projectPath, prompt, imagePaths, kimiApprovalMode, kimiModel, claudeScope);
     } else if (aiProvider === 'codex') {
       const selectedCodexModel = codexModels.find(model => model.id === codexModel);
       const sendEffort = normalizeCodexEffort(codexEffort ?? 'high', selectedCodexModel);
@@ -2530,8 +2529,8 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
     // dispatch immediately; the rest of the queue resumes draining afterwards.
     if (isStreaming) {
       suppressNextDrainRef.current = true;
-      if (aiProvider === 'gemini') (window.sai as any).geminiStop?.(projectPath);
-      else if (aiProvider === 'kimi') (window.sai as any).kimiStop?.(projectPath);
+      if (aiProvider === 'gemini') (window.sai as any).geminiStop?.(projectPath, claudeScope);
+      else if (aiProvider === 'kimi') (window.sai as any).kimiStop?.(projectPath, claudeScope);
       else if (aiProvider === 'codex') window.sai.codexStop?.(projectPath, claudeScope);
       else window.sai.claudeStop?.(projectPath, claudeScope);
     }
@@ -2906,7 +2905,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
             awaitingQuestion={awaitingQuestion}
             messages={messages}
             todos={taskBoard.todos}
-            onStop={() => aiProvider === 'gemini' ? (window.sai as any).geminiStop(projectPath) : aiProvider === 'kimi' ? (window.sai as any).kimiStop(projectPath) : aiProvider === 'codex' ? window.sai.codexStop(projectPath, claudeScope) : window.sai.claudeStop?.(projectPath, claudeScope)}
+            onStop={() => aiProvider === 'gemini' ? (window.sai as any).geminiStop(projectPath, claudeScope) : aiProvider === 'kimi' ? (window.sai as any).kimiStop(projectPath, claudeScope) : aiProvider === 'codex' ? window.sai.codexStop(projectPath, claudeScope) : window.sai.claudeStop?.(projectPath, claudeScope)}
             permissionMode={permissionMode}
             onPermissionChange={onPermissionChange}
             effortLevel={effortLevel}

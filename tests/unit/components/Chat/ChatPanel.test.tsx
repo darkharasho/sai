@@ -612,6 +612,44 @@ describe('ChatPanel', () => {
     onSlashCommandsUpdate: vi.fn(),
   });
 
+  describe('Gemini and Kimi use the chat id as scope', () => {
+    const emitAll = async (msg: any) => {
+      await act(async () => {
+        for (const [handler] of mockSai.claudeOnMessage.mock.calls) (handler as (m: any) => void)(msg);
+      });
+    };
+
+    it('a Gemini chat sends with its chat id and only accepts events for it', async () => {
+      const props = { ...baseProps(), aiProvider: 'gemini' as const, claudeScope: 'chat-g', sessionId: 'chat-g' };
+      const { container } = render(<ChatPanel {...props} />);
+      await waitFor(() => expect(latestChatInputProps).toBeTruthy());
+      await act(async () => { await latestChatInputProps.onSend('hello'); });
+      expect(mockSai.geminiSend).toHaveBeenCalledWith('/project', 'hello', undefined, 'default', 'planning', 'auto-gemini-3', 'chat-g');
+
+      await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+      await emitAll({ type: 'assistant', projectPath: '/project', scope: 'other-chat', message: { content: [{ type: 'text', text: 'not mine' }] } });
+      await emitAll({ type: 'assistant', projectPath: '/project', scope: 'chat-g', message: { content: [{ type: 'text', text: 'mine' }] } });
+      const contents = [...container.querySelectorAll('[data-testid="chat-message"]')].map(el => el.getAttribute('data-msg-content') || '');
+      expect(contents.some(c => c.includes('mine') && !c.includes('not mine'))).toBe(true);
+      expect(contents.some(c => c.includes('not mine'))).toBe(false);
+    });
+
+    it('a Kimi chat sends and stops with its chat id', async () => {
+      const sai = window.sai as any;
+      sai.kimiStart = vi.fn().mockResolvedValue({});
+      sai.kimiSend = vi.fn();
+      sai.kimiStop = vi.fn();
+      sai.kimiApprove = vi.fn();
+      const props = { ...baseProps(), aiProvider: 'kimi' as const, kimiModel: 'kimi-k3', kimiApprovalMode: 'auto_edit', claudeScope: 'chat-k', sessionId: 'chat-k' };
+      render(<ChatPanel {...props as any} />);
+      await waitFor(() => expect(latestChatInputProps).toBeTruthy());
+      await act(async () => { await latestChatInputProps.onSend('hi'); });
+      expect(sai.kimiSend).toHaveBeenCalledWith('/project', 'hi', undefined, 'auto_edit', 'kimi-k3', 'chat-k');
+      await act(async () => { latestChatInputProps.onStop(); });
+      expect(sai.kimiStop).toHaveBeenCalledWith('/project', 'chat-k');
+    });
+  });
+
   it('ignores malformed provider content instead of crashing while handling tool events', async () => {
     render(<ChatPanel {...baseProps()} />);
     await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
