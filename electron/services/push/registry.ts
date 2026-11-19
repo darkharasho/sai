@@ -86,13 +86,21 @@ export class PushRegistry {
 
   get size(): number { return this.regs.size; }
 
-  /** Stores the device's registration; returns false (no write) when it is unchanged (a replay). */
+  /**
+   * Stores the device's registration; returns false (no write) when it is
+   * unchanged (a replay). Any other device's row with the same pushId is
+   * dropped: it is the same phone under an older pairing (a reinstall wipes
+   * the deviceId but keeps the Keychain pushId), and the newest wins.
+   */
   set(deviceId: string, reg: PushRegistration): boolean {
     if (!isDeviceId(deviceId)) throw new Error('invalid deviceId');
     const clean = parsePushRegistration(reg);
     if ('error' in clean) throw new Error(`invalid registration: ${clean.error}`);
     const prev = this.regs.get(deviceId);
     if (prev && same(prev, clean)) return false;
+    for (const [id, r] of [...this.regs]) {
+      if (id !== deviceId && r.pushId === clean.pushId) this.regs.delete(id);
+    }
     this.regs.set(deviceId, clean);
     this.persist();
     return true;

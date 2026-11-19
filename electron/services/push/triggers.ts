@@ -11,11 +11,15 @@
 //   approval  approval_needed that the reducer accepted as the pending approval.
 //   question  question_needed / plan_review_needed / a Codex user_input_needed.
 //   error     a turn closed by `done` whose last word was an error row (or an
-//             error result) rather than a successful result.
+//             error result) rather than a successful result, or a turn the
+//             agent process's exit (process_exit) closed with neither. Error
+//             rows after a finished successful result are noise (the reducer
+//             keeps errors as possibly non-fatal rows) and are ignored.
 //
 // At most one push per (chatId, kind, turn, approval/question id). Nothing is
-// sent while the desktop is focused on the chat's workspace (the user is at
-// the desk), nor to a phone that has the chat in the foreground.
+// sent while the user is at the desk (window focused on the chat's workspace
+// and recent input, screen unlocked: deskActivity.ts), nor to a phone that has
+// the chat in the foreground.
 import path from 'node:path';
 import type { ChatLogEntry, ChatMeta, ChatState } from '../../../src/lib/chat/types';
 import type { PushKind, PushPlain } from '../../../src/lib/push/types';
@@ -34,11 +38,14 @@ export interface PushTriggersOpts {
   chatlog: PushChatLog;
   registry: { all(): PushTarget[] };
   presence: { isViewing(deviceId: string, chatId: string): boolean };
-  /** The desktop window's focus and active workspace (notify.ts). */
-  desktopPresence: () => { focused: boolean; activeWorkspace: string };
+  /**
+   * The desktop window's focus and active workspace (notify.ts), and whether
+   * the user is at it right now (deskActivity.ts: recent input, not locked).
+   */
+  desktopPresence: () => { focused: boolean; activeWorkspace: string; userActive: boolean };
   /** Fire-and-forget; its result is never awaited. */
   send: (target: PushTarget, plain: PushPlain) => unknown;
-  /** The pushNotifications setting (read only when a push is about to go out). */
+  /** Mobile Remote on and the pushNotifications setting (gate.ts; read only when a push is about to go out). */
   enabled?: () => boolean;
   /**
    * A finished turn is pushed this long after its done, unless the chat
@@ -105,7 +112,7 @@ export function createPushTriggers(opts: PushTriggersOpts): { dispose(): void } 
     if (!meta) return;
     remember(key);
     const desk = opts.desktopPresence();
-    if (desk.focused && desk.activeWorkspace && samePath(desk.activeWorkspace, meta.projectPath)) return;
+    if (desk.focused && desk.userActive && desk.activeWorkspace && samePath(desk.activeWorkspace, meta.projectPath)) return;
     // Title ≤ 80 and body ≤ 180 code points (the done body is the first 180 of the final text).
     const plain: PushPlain = clampPlain({
       v: 1, kind, chatId, projectPath: meta.projectPath,
@@ -141,6 +148,8 @@ export function createPushTriggers(opts: PushTriggersOpts): { dispose(): void } 
     const turn = `${t.turnSeq}@${t.startSeq}`;
     if (t.result && !t.result.ok) return fire(chatId, 'error', '', t.result.text || 'The turn failed.', turn);
     if (t.error && !t.result) return fire(chatId, 'error', '', t.error, turn);
+    // The process died mid-turn with no result and no error row of its own.
+    if (!t.result && ev.type === 'process_exit') return fire(chatId, 'error', '', 'The agent process exited.', turn);
     if (!t.result?.finished || waits(ev)) return; // stopped, superseded, waiting or a continuation
     const body = finalText(chatId, t);
     if (delay <= 0) return fire(chatId, 'done', '', body, turn);
@@ -190,6 +199,8 @@ export function createPushTriggers(opts: PushTriggersOpts): { dispose(): void } 
       case 'error': {
         const t = tracks.get(chatId);
         if (!t || !edge.isStreaming) return;
+        // After a finished successful result the turn is done; a late row is noise.
+        if (t.result?.ok && t.result.finished) return;
         // Only an error the reducer kept as a row (load-guard noise is swallowed).
         const last = chatlog.state(chatId)?.messages.at(-1);
         if (last?.id === `e${entry.seq}`) { t.error = str(last.content) || 'The turn failed.'; t.result = null; }

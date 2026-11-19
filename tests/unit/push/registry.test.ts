@@ -118,6 +118,23 @@ describe('push registry', () => {
     expect(new PushRegistry(file).all()).toEqual([]);
   });
 
+  it('a reinstalled phone re-pairing under a new deviceId replaces its old row (same pushId)', () => {
+    const file = path.join(tmp(), 'push-registrations.json');
+    const registry = new PushRegistry(file);
+    const old = parsePushRegistration(validFrame());
+    const other = parsePushRegistration(validFrame({ pushId: Buffer.alloc(16, 9).toString('base64url') }));
+    if ('error' in old || 'error' in other) throw new Error('fixture invalid');
+    registry.set('dev-old', old);
+    registry.set('dev-other', other);
+    // Same phone (pushId), new pairing: a fresh secret and seal key under a new deviceId.
+    const fresh = { ...old, sendSecret: b64url(32).slice(0, 42) + 'Q', sealKey: newSealKey() };
+    expect(registry.set('dev-new', fresh)).toBe(true);
+    expect(registry.all().map((e) => e.deviceId).sort()).toEqual(['dev-new', 'dev-other']);
+    expect(registry.get('dev-old')).toBeNull();
+    // Persisted.
+    expect(new PushRegistry(file).all().map((e) => e.deviceId).sort()).toEqual(['dev-new', 'dev-other']);
+  });
+
   it('phone.presence is per socket, unioned per device, cleared on close', async () => {
     const { presence, v2, ws } = mk(':memory:');
     const ws2 = { send: () => {} };
@@ -164,11 +181,15 @@ describe('push registry', () => {
     return (async () => {
       const a = await pairing.issue('phone A', 'client-a');
       const b = await pairing.issue('phone B', 'client-b');
-      const reg = parsePushRegistration(validFrame());
-      if ('error' in reg) throw new Error('fixture invalid');
-      registry.set(a.deviceId, reg);
-      registry.set(b.deviceId, reg);
-      registry.set('gone-device', reg);
+      // Three different phones (one pushId each: a shared pushId would collapse to one row).
+      const regFor = (n: number) => {
+        const reg = parsePushRegistration(validFrame({ pushId: Buffer.alloc(16, n).toString('base64url') }));
+        if ('error' in reg) throw new Error('fixture invalid');
+        return reg;
+      };
+      registry.set(a.deviceId, regFor(1));
+      registry.set(b.deviceId, regFor(2));
+      registry.set('gone-device', regFor(3));
       // Startup prune: registrations for unknown or revoked devices drop.
       bindRevocation(pairing, registry);
       expect(registry.get('gone-device')).toBeNull();

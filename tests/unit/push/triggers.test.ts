@@ -6,6 +6,8 @@ import path from 'node:path';
 import { ChatLogStore } from '@electron/services/chatlog/store';
 import { ChatLogService } from '@electron/services/chatlog/service';
 import { createPushTriggers } from '@electron/services/push/triggers';
+import { DeskActivity, DESK_ACTIVE_WINDOW_S } from '@electron/services/push/deskActivity';
+import { pushGate } from '@electron/services/push/gate';
 import type { PushRegistration } from '@electron/services/push/registry';
 import type { PushPlain } from '../../../src/lib/push/types';
 
@@ -37,7 +39,7 @@ function mk(opts: { enabled?: boolean; devices?: string[] } = {}) {
   });
   const regs = (opts.devices ?? ['dev-1']).map((deviceId) => ({ deviceId, reg: REG }));
   const viewing = new Set<string>();
-  const desk = { focused: false, activeWorkspace: '' };
+  const desk = { focused: false, activeWorkspace: '', userActive: true };
   const sent: Array<{ deviceId: string; plain: PushPlain }> = [];
   const t = createPushTriggers({
     chatlog: { onEntry: (cb) => service.onAppend(cb), state: (id) => store.state(id), meta: (id) => store.meta(id) },
@@ -214,5 +216,93 @@ describe('push triggers', () => {
     const none = mk({ devices: [] });
     none.turn('c1', 1, 'hi');
     expect(none.sent).toEqual([]);
+  });
+
+  it('focused on the workspace but idle or locked: push (the user walked away)', () => {
+    let idleS = 0;
+    let clock = 1_000_000;
+    const activity = new DeskActivity({ systemIdleSeconds: () => idleS, now: () => clock });
+    const h = mk();
+    h.desk.focused = true;
+    h.desk.activeWorkspace = h.project;
+    // The real presence: focus + workspace from notify.ts, activity from the tracker.
+    Object.defineProperty(h.desk, 'userActive', { get: () => activity.isActive() });
+
+    // Focused + recent input + low system idle: at the desk, suppressed.
+    activity.markInput();
+    h.turn('c1', 1, 'at desk');
+    expect(h.sent).toEqual([]);
+
+    // Focused, but the system has been idle for a minute: sent.
+    idleS = DESK_ACTIVE_WINDOW_S;
+    h.turn('c1', 2, 'idle');
+    expect(h.sent.map((s) => s.plain.body)).toEqual(['idle']);
+
+    // Back at the desk, then the screen locks: sent.
+    idleS = 0;
+    activity.markInput();
+    h.turn('c1', 3, 'back');
+    activity.setLocked(true);
+    h.turn('c1', 4, 'locked');
+    expect(h.sent.map((s) => s.plain.body)).toEqual(['idle', 'locked']);
+
+    // Idle time stuck at 0 (Wayland): the last-input clock decides.
+    activity.setLocked(false);
+    activity.markInput();
+    clock += DESK_ACTIVE_WINDOW_S * 1000;
+    h.turn('c1', 5, 'stale input');
+    expect(h.sent.map((s) => s.plain.body)).toEqual(['idle', 'locked', 'stale input']);
+  });
+
+  it('an error row after a successful result does not turn the done into an error', () => {
+    const { ev, assistant, sent } = mk();
+    ev('c1', { type: 'streaming_start', turnSeq: 1 });
+    assistant('c1', 'all good');
+    ev('c1', { type: 'result', turnSeq: 1, result: 'all good' });
+    ev('c1', { type: 'error', text: 'warning: late stderr noise' });
+    ev('c1', { type: 'done', turnSeq: 1 });
+    expect(sent.map((s) => [s.plain.kind, s.plain.body])).toEqual([['done', 'all good']]);
+  });
+
+  it('a process exit that closes a turn with nothing pushes error once; stops and restarts stay silent', () => {
+    const { ev, assistant, service, sent } = mk();
+    ev('c1', { type: 'streaming_start', turnSeq: 1 });
+    assistant('c1', 'working');
+    ev('c1', { type: 'process_exit' });
+    ev('c1', { type: 'process_exit' }); // a second exit: the turn is already closed
+    expect(sent.map((s) => [s.plain.kind, s.plain.body])).toEqual([['error', 'The agent process exited.']]);
+    // A process exit after a successful result is a normal done.
+    ev('c1', { type: 'streaming_start', turnSeq: 2 });
+    ev('c1', { type: 'result', turnSeq: 2, result: 'finished' });
+    ev('c1', { type: 'process_exit' });
+    expect(sent.map((s) => s.plain.kind)).toEqual(['error', 'done']);
+    // A user Stop (bare done) stays silent.
+    ev('c1', { type: 'streaming_start', turnSeq: 3 });
+    ev('c1', { type: 'done', turnSeq: 3 });
+    // Startup repair closes an open turn with app_restart: silent.
+    ev('c1', { type: 'streaming_start', turnSeq: 4 });
+    service.startupRepair();
+    expect(sent.map((s) => s.plain.kind)).toEqual(['error', 'done']);
+  });
+});
+
+describe('push gate', () => {
+  it('needs Mobile Remote on and the pushNotifications setting not off', () => {
+    let settings: unknown = {};
+    let remote = true;
+    const gate = pushGate(() => settings, () => remote);
+    expect(gate()).toBe(true); // missing setting means on
+    settings = { pushNotifications: false };
+    expect(gate()).toBe(false);
+    settings = { pushNotifications: true };
+    remote = false;
+    expect(gate()).toBe(false);
+    remote = true;
+    expect(gate()).toBe(true);
+    // An unreadable settings file keeps the default (on), still gated by remote.
+    const broken = pushGate(() => { throw new Error('ENOENT'); }, () => remote);
+    expect(broken()).toBe(true);
+    remote = false;
+    expect(broken()).toBe(false);
   });
 });

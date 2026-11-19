@@ -100,6 +100,8 @@ import { PushRegistry, bindRevocation } from './services/push/registry';
 import { PhonePresence } from './services/push/presence';
 import { createPushSender } from './services/push/sender';
 import { createPushTriggers } from './services/push/triggers';
+import { DeskActivity } from './services/push/deskActivity';
+import { pushGate } from './services/push/gate';
 import { devlog, devlogEnabled, devlogFor, devlogPath } from './services/devlog';
 import { readIntactClipboardPng } from './services/clipboardImage';
 import { startIdleMemoryPurge, collectRendererGarbage, logPurge } from './services/idleMemoryPurge';
@@ -312,6 +314,9 @@ let remoteKvPath: string | null = null;
 let pushRegistry: PushRegistry | null = null;
 const phonePresence = new PhonePresence();
 let pushTriggers: { dispose(): void } | null = null;
+/** Is the user at the desk (push suppression)? Fed by window input and screen lock. */
+const deskActivity = new DeskActivity({ systemIdleSeconds: () => powerMonitor.getSystemIdleTime() });
+let deskActivityLockBound = false;
 let activeSessionBroadcast: ((payload: { projectPath: string; scope: string; sessionId: string }) => void) | null = null;
 let lastActiveSession: { projectPath: string; scope: string; sessionId: string } | null = null;
 // Otto uses 17829; pick a distinct port so both can run side by side.
@@ -528,14 +533,11 @@ async function getOrInitRemote(): Promise<RemoteModule> {
   return remote;
 }
 
-/** settings.json pushNotifications; missing means on. */
-function pushNotificationsEnabled(): boolean {
-  try {
-    return JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'settings.json'), 'utf-8')).pushNotifications !== false;
-  } catch {
-    return true;
-  }
-}
+/** Mobile Remote on, and settings.json pushNotifications not off (missing means on). */
+const pushNotificationsEnabled = pushGate(
+  () => JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'settings.json'), 'utf-8')),
+  () => Boolean(readRemoteKv().enabled),
+);
 
 /**
  * Starts the push triggers once both the chat log and the push registry exist
@@ -552,7 +554,7 @@ function initPushTriggers(): void {
     chatlog: { onEntry: (cb) => log.onAppend(cb), state: (id) => store.state(id), meta: (id) => store.meta(id) },
     registry,
     presence: phonePresence,
-    desktopPresence: getDesktopPresence,
+    desktopPresence: () => ({ ...getDesktopPresence(), userActive: deskActivity.isActive() }),
     send,
     enabled: pushNotificationsEnabled,
   });
@@ -661,6 +663,14 @@ function createWindow() {
   });
 
   initFocusTracking(mainWindow);
+  // Push suppression: any input (key, mouse, wheel) or focus means the user is here.
+  mainWindow.webContents.on('input-event', () => deskActivity.markInput());
+  mainWindow.on('focus', () => deskActivity.markInput());
+  if (!deskActivityLockBound) {
+    deskActivityLockBound = true;
+    powerMonitor.on('lock-screen', () => deskActivity.setLocked(true));
+    powerMonitor.on('unlock-screen', () => { deskActivity.setLocked(false); deskActivity.markInput(); });
+  }
   // Focus overlay (off by default; spec 2026-06-11-focus-overlay-design.md).
   // Single instance across re-registration, destroyed in the close handler.
   overlayManager?.destroy();
