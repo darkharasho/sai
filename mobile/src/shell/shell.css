@@ -41,11 +41,12 @@ html[data-sai-phone] body {
   border: 0;
   border-radius: 10px;
   background: transparent;
-  color: var(--text);
-  font-size: 20px;
-  line-height: 1;
+  color: var(--text-secondary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
-.sai-phone-icon-btn:active { background: var(--surface-2); }
+.sai-phone-icon-btn:active { background: var(--surface-2); color: var(--text); }
 .sai-phone-title {
   flex: 1;
   min-width: 0;
@@ -55,6 +56,8 @@ html[data-sai-phone] body {
   font-size: var(--text-lg);
   font-weight: 600;
 }
+.sai-phone-title-ws { color: var(--text-secondary); font-weight: 500; }
+.sai-phone-title-sep { color: var(--text-muted); }
 
 .sai-phone-dot {
   flex-shrink: 0;
@@ -86,6 +89,9 @@ html[data-sai-phone] body {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
 }
 .sai-phone-menu button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   min-height: 44px;
   padding: 0 12px;
   border: 0;
@@ -95,6 +101,7 @@ html[data-sai-phone] body {
   font-size: var(--text-lg);
   text-align: left;
 }
+.sai-phone-menu button svg { color: var(--text-secondary); }
 .sai-phone-menu button:active { background: var(--surface-1); }
 
 .sai-phone-pill {
@@ -127,6 +134,7 @@ html[data-sai-phone] body {
   align-items: center;
   justify-content: center;
   gap: 12px;
+  text-align: center;
   padding: 24px;
   color: var(--text-secondary);
   font-size: var(--text-md);
@@ -138,13 +146,28 @@ html[data-sai-phone] body {
   border-radius: 10px;
   font-size: var(--text-lg);
 }
+.sai-phone-primary, .sai-phone-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-weight: 600;
+}
 .sai-phone-primary { border: 0; background: var(--accent); color: var(--surface-0); }
-.sai-phone-secondary { border: 1px solid var(--border-hairline); background: transparent; color: var(--text); }
+.sai-phone-primary:active { background: var(--accent-hover); }
+.sai-phone-primary:disabled { opacity: 0.45; }
+.sai-phone-secondary { border: 1px solid var(--border-hairline); background: var(--surface-2); color: var(--text); }
+.sai-phone-secondary:active { background: var(--surface-3); }
+.sai-phone-danger { color: var(--red); }
+.sai-phone-placeholder-logo { margin-bottom: 4px; opacity: 0.9; }
 .sai-phone-back {
   align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
   margin: 8px 8px 0;
   min-height: 44px;
-  padding: 0 10px;
+  padding: 0 10px 0 4px;
   border: 0;
   background: transparent;
   color: var(--accent);
@@ -168,7 +191,33 @@ html[data-sai-phone] body {
 }
 @keyframes sai-phone-slide { from { transform: translateX(-100%); } }
 @media (prefers-reduced-motion: reduce) { .sai-phone-drawer { animation: none; } }
-.sai-phone-drawer section + section { margin-top: 14px; }
+.sai-phone-drawer section + section { margin-top: 18px; }
+.sai-phone-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px 14px;
+  color: var(--accent);
+  font-family: 'Geist Mono', monospace;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+}
+.sai-phone-newchat {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 44px;
+  margin-bottom: 6px;
+  border: 1px solid var(--border-accent);
+  border-radius: 10px;
+  background: var(--accent-dim);
+  color: var(--accent);
+  font-size: var(--text-lg);
+  font-weight: 600;
+}
+.sai-phone-newchat:active { background: rgba(var(--accent-rgb), 0.2); }
 .sai-phone-drawer-h {
   margin: 4px 8px 6px;
   font-size: var(--text-xs);
@@ -178,6 +227,7 @@ html[data-sai-phone] body {
   color: var(--text-muted);
 }
 .sai-phone-row {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -193,10 +243,21 @@ html[data-sai-phone] body {
 }
 .sai-phone-row:active { background: var(--surface-2); }
 .sai-phone-row[aria-current='true'] { background: var(--surface-2); }
+.sai-phone-row[aria-current='true']::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 10px;
+  bottom: 10px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+.sai-phone-row-icon { flex-shrink: 0; color: var(--text-muted); }
+.sai-phone-row[aria-current='true'] .sai-phone-row-icon { color: var(--accent); }
 .sai-phone-row-main { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .sai-phone-row-meta { flex-shrink: 0; color: var(--text-muted); font-size: var(--text-sm); }
 .sai-phone-row-muted { color: var(--text-secondary); font-size: var(--text-md); }
-.sai-phone-row-accent { color: var(--accent); }
 .sai-phone-empty { padding: 6px 10px; color: var(--text-muted); font-size: var(--text-md); }
 
 /* Toasts: above the composer, under the header. */
@@ -243,4 +304,41 @@ html[data-sai-phone] body {
   background: transparent;
   color: var(--text-muted);
   font-size: 18px;
+}
+
+/* Full-screen pages (pairing, machines). */
+.sai-phone-page {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 100%;
+  padding: 16px;
+  background: var(--surface-1);
+  color: var(--text);
+}
+.sai-phone-page-head { display: flex; align-items: center; gap: 10px; }
+.sai-phone-page-head h1 { margin: 0; font-size: var(--text-xl); font-weight: 600; }
+.sai-phone-page-lede { margin: 0; color: var(--text-secondary); font-size: var(--text-md); line-height: 1.5; }
+.sai-phone-field { display: flex; flex-direction: column; gap: 6px; font-size: var(--text-sm); color: var(--text-secondary); }
+.sai-phone-field input, .sai-phone-field textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 10px;
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 16px;
+  font-family: inherit;
+}
+.sai-phone-field input:focus, .sai-phone-field textarea:focus { outline: none; border-color: var(--border-accent); }
+.sai-phone-page .sai-phone-primary, .sai-phone-page .sai-phone-secondary { width: 100%; min-height: 48px; }
+.sai-phone-chip {
+  min-height: 36px;
+  padding: 0 14px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 8px;
+  background: var(--surface-3);
+  color: var(--text);
+  font-size: var(--text-md);
 }

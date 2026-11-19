@@ -1,4 +1,6 @@
 import React from 'react';
+import { Folder, Monitor, Plus, Settings2 } from 'lucide-react';
+import SaiLogo from '../../../src/components/SaiLogo';
 import type { ChatMeta } from '../../../src/lib/chat/types';
 import type { RemoteWorkspace } from '../../../electron/services/remote/renderer-proxy';
 import type { Machine } from '../machines/store';
@@ -44,10 +46,14 @@ export function Drawer(p: DrawerProps) {
     <div className="sai-phone-drawer-layer">
       <div className="sai-phone-backdrop" onClick={p.onClose} aria-hidden="true" />
       <nav className="sai-phone-drawer" aria-label="Chats and workspaces">
+        <div className="sai-phone-brand" aria-hidden="true">
+          <SaiLogo mode="static" size={20} />
+          <span>SAI</span>
+        </div>
         {p.activeProjectPath && (
           <section>
             <h2 className="sai-phone-drawer-h">{workspaceName ? `Chats · ${workspaceName}` : 'Chats'}</h2>
-            <button type="button" className="sai-phone-row sai-phone-row-accent" onClick={p.onNewChat}>+ New chat</button>
+            <button type="button" className="sai-phone-newchat" onClick={p.onNewChat}><Plus size={17} aria-hidden="true" />New chat</button>
             {chats === null && <div className="sai-phone-empty">Loading chats…</div>}
             {chats?.length === 0 && <div className="sai-phone-empty">No chats in this workspace yet</div>}
             {chats?.map((c) => {
@@ -82,6 +88,7 @@ export function Drawer(p: DrawerProps) {
               aria-current={w.projectPath === p.activeProjectPath ? 'true' : undefined}
               onClick={() => p.onPickWorkspace(w.projectPath)}
             >
+              <Folder size={16} className="sai-phone-row-icon" aria-hidden="true" />
               <span className="sai-phone-row-main">{w.name}</span>
             </button>
           ))}
@@ -98,10 +105,11 @@ export function Drawer(p: DrawerProps) {
               aria-current={m.id === p.activeMachineId ? 'true' : undefined}
               onClick={() => p.onPickMachine(m)}
             >
+              <Monitor size={16} className="sai-phone-row-icon" aria-hidden="true" />
               <span className="sai-phone-row-main">{m.label}</span>
             </button>
           ))}
-          <button type="button" className="sai-phone-row sai-phone-row-muted" onClick={p.onManageMachines}>Manage machines…</button>
+          <button type="button" className="sai-phone-row sai-phone-row-muted" onClick={p.onManageMachines}><Settings2 size={16} className="sai-phone-row-icon" aria-hidden="true" />Manage machines…</button>
         </section>
 
       </nav>

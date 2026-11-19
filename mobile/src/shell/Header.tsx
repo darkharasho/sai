@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { Menu, MonitorSmartphone, MoreHorizontal, SquarePen } from 'lucide-react';
 import type { ChatMeta, ChatState } from '../../../src/lib/chat/types';
 
 export type ChatStatus = 'streaming' | 'waiting' | 'approval' | 'done';
@@ -37,11 +38,18 @@ export function Header({ workspaceName, chatTitle, status, onMenu, onNewChat, on
     return () => document.removeEventListener('pointerdown', close);
   }, [menuOpen]);
 
-  const title = [workspaceName, chatTitle].filter(Boolean).join(' · ') || 'SAI';
   return (
     <header className="sai-phone-header">
-      <button type="button" className="sai-phone-icon-btn" aria-label="Open menu" onClick={onMenu}>☰</button>
-      <div className="sai-phone-title" data-testid="header-title">{title}</div>
+      <button type="button" className="sai-phone-icon-btn" aria-label="Open menu" onClick={onMenu}><Menu size={22} /></button>
+      <div className="sai-phone-title" data-testid="header-title">
+        {workspaceName && chatTitle ? (
+          <>
+            <span className="sai-phone-title-ws">{workspaceName}</span>
+            <span className="sai-phone-title-sep"> · </span>
+            <span>{chatTitle}</span>
+          </>
+        ) : (workspaceName || chatTitle || 'SAI')}
+      </div>
       {status && (
         <span
           className={`sai-phone-dot sai-phone-dot-${status}`}
@@ -52,11 +60,11 @@ export function Header({ workspaceName, chatTitle, status, onMenu, onNewChat, on
         />
       )}
       <div className="sai-phone-menu-wrap" ref={menuRef}>
-        <button type="button" className="sai-phone-icon-btn" aria-label="More" aria-expanded={menuOpen} onClick={() => setMenuOpen((o) => !o)}>⋯</button>
+        <button type="button" className="sai-phone-icon-btn" aria-label="More" aria-expanded={menuOpen} onClick={() => setMenuOpen((o) => !o)}><MoreHorizontal size={22} /></button>
         {menuOpen && (
           <div role="menu" className="sai-phone-menu">
-            <button role="menuitem" type="button" onClick={() => { setMenuOpen(false); onNewChat(); }}>New chat</button>
-            <button role="menuitem" type="button" onClick={() => { setMenuOpen(false); onMachines(); }}>Machines</button>
+            <button role="menuitem" type="button" onClick={() => { setMenuOpen(false); onNewChat(); }}><SquarePen size={17} aria-hidden="true" />New chat</button>
+            <button role="menuitem" type="button" onClick={() => { setMenuOpen(false); onMachines(); }}><MonitorSmartphone size={17} aria-hidden="true" />Machines</button>
           </div>
         )}
       </div>

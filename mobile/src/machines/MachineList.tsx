@@ -1,4 +1,5 @@
 import React, { useRef, useState } from 'react';
+import { Bell, Plus } from 'lucide-react';
 import type { Machine } from './store';
 import type { Reach } from './hooks';
 import type { PushPermission } from '../native';
@@ -42,16 +43,16 @@ export function MachineList({ machines, reach, onSelect, onRename, onRemove, onA
   const endPress = () => { if (timer.current) clearTimeout(timer.current); timer.current = null; };
 
   return (
-    <div style={{ background: 'var(--surface-1)', color: 'var(--text)', minHeight: '100%', padding: 16 }}>
-      <h1 style={{ fontSize: 'var(--text-xl)', margin: '0 0 12px' }}>Desktops</h1>
+    <div className="sai-phone-page">
+      <div className="sai-phone-page-head"><h1>Desktops</h1></div>
       {machines.length === 0 && (
-        <p style={{ color: 'var(--text-secondary)', fontSize: 'var(--text-md)' }}>No desktops paired yet.</p>
+        <p className="sai-phone-page-lede">No desktops paired yet.</p>
       )}
       <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
         {machines.map((m) => {
           const state = reach[m.id] ?? 'checking';
           return (
-            <li key={m.id} style={{ background: 'var(--surface-2)', borderRadius: 10 }}>
+            <li key={m.id} style={{ background: 'var(--surface-2)', border: '1px solid var(--border-hairline)', borderRadius: 12 }}>
               {renaming?.id === m.id ? (
                 <form
                   style={{ display: 'flex', gap: 8, padding: 12 }}
@@ -62,9 +63,9 @@ export function MachineList({ machines, reach, onSelect, onRename, onRemove, onA
                     autoFocus
                     value={renaming.value}
                     onChange={(e) => setRenaming({ id: m.id, value: e.target.value })}
-                    style={{ flex: 1, background: 'var(--surface-3)', color: 'var(--text)', border: 0, borderRadius: 6, padding: 8, fontSize: 16 }}
+                    style={{ flex: 1, background: 'var(--surface-3)', color: 'var(--text)', border: '1px solid var(--border-accent)', borderRadius: 8, padding: 8, fontSize: 16 }}
                   />
-                  <button type="submit">Save</button>
+                  <button type="submit" className="sai-phone-chip">Save</button>
                 </form>
               ) : (
                 <button
@@ -92,9 +93,9 @@ export function MachineList({ machines, reach, onSelect, onRename, onRemove, onA
               )}
               {menuId === m.id && (
                 <div role="menu" style={{ display: 'flex', gap: 8, padding: '0 12px 12px' }}>
-                  <button role="menuitem" onClick={() => { setMenuId(null); setRenaming({ id: m.id, value: m.label }); }}>Rename</button>
-                  <button role="menuitem" onClick={() => { setMenuId(null); onRemove(m.id); }} style={{ color: '#e5534b' }}>Remove</button>
-                  <button role="menuitem" onClick={() => setMenuId(null)}>Cancel</button>
+                  <button role="menuitem" className="sai-phone-chip" onClick={() => { setMenuId(null); setRenaming({ id: m.id, value: m.label }); }}>Rename</button>
+                  <button role="menuitem" className="sai-phone-chip sai-phone-danger" onClick={() => { setMenuId(null); onRemove(m.id); }}>Remove</button>
+                  <button role="menuitem" className="sai-phone-chip" onClick={() => setMenuId(null)}>Cancel</button>
                 </div>
               )}
             </li>
@@ -104,21 +105,22 @@ export function MachineList({ machines, reach, onSelect, onRename, onRemove, onA
       {onAdd && (
         <button
           type="button"
+          className="sai-phone-primary"
           onClick={onAdd}
-          style={{ marginTop: 16, width: '100%', padding: 14, border: 0, borderRadius: 10, background: 'var(--accent)', color: 'var(--surface-0)', fontSize: 'var(--text-lg)' }}
         >
-          Pair a desktop
+          <Plus size={18} aria-hidden="true" />Pair a desktop
         </button>
       )}
       {notifications && (
         <div
           data-testid="notifications-row"
-          style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 12, padding: 14, background: 'var(--surface-2)', borderRadius: 10 }}
+          style={{ display: 'flex', alignItems: 'center', gap: 12, padding: 14, background: 'var(--surface-2)', border: '1px solid var(--border-hairline)', borderRadius: 12 }}
         >
+          <Bell size={18} aria-hidden="true" style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
           <span style={{ flex: 1, fontSize: 'var(--text-lg)' }}>Notifications</span>
           <span style={{ fontSize: 'var(--text-md)', color: 'var(--text-secondary)' }}>{permissionText[notifications.permission]}</span>
           {notifications.permission === 'denied' && (
-            <button type="button" onClick={notifications.onOpenSettings}>Open Settings</button>
+            <button type="button" className="sai-phone-chip" onClick={notifications.onOpenSettings}>Open Settings</button>
           )}
         </div>
       )}

@@ -3,6 +3,8 @@
 //
 // Imported only after main.tsx has installed window.sai (the chat graph reads
 // settings at import time).
+import { ChevronLeft } from 'lucide-react';
+import SaiLogo from '../../../src/components/SaiLogo';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactDOM from 'react-dom/client';
 import { ErrorBoundary } from '../../../src/ErrorBoundary';
@@ -319,7 +321,7 @@ export function PhoneApp() {
   if (view === 'machines' || !conn) {
     return (
       <div className="sai-phone-app sai-phone-scroll">
-        {conn && <button type="button" className="sai-phone-back" onClick={() => setView('chat')}>‹ Back</button>}
+        {conn && <button type="button" className="sai-phone-back" onClick={() => setView('chat')}><ChevronLeft size={20} aria-hidden="true" />Back</button>}
         <MachineList
           machines={machinesApi.machines}
           reach={machinesApi.reach}
@@ -356,6 +358,7 @@ export function PhoneApp() {
           />
         ) : (
           <div className="sai-phone-placeholder">
+            <SaiLogo mode="static" size={44} className="sai-phone-placeholder-logo" />
             <p>{sel.projectPath ? 'Pick a chat or start a new one.' : 'Pick a workspace.'}</p>
             <button type="button" className="sai-phone-primary" onClick={() => setDrawerOpen(true)}>Open chats</button>
             {sel.projectPath && <button type="button" className="sai-phone-secondary" onClick={newChat}>New chat</button>}
