@@ -8,7 +8,7 @@ import type { PairingStore } from './pairing-store';
 import type { SessionBus, BusEvent } from './session-bus';
 import { ScreenshotUrlSigner } from './screenshot-urls';
 import type { PhoneTerminalRegistry, PhoneTerminalSummary } from './terminal-store';
-import { ChatV2, isV2FrameType } from './chat-v2';
+import { ChatV2, isV2FrameType, type ChatV2Opts } from './chat-v2';
 import type { ChatSync } from '../chatlog/holder';
 import type { WorkspaceRegistry } from './workspaceRegistry';
 import type { AppSettingsFeed } from './appSettings';
@@ -135,6 +135,11 @@ export interface BridgeServerOpts {
   workspaces?: WorkspaceRegistry;
   /** v2 app.settings: the phone-visible settings snapshot + change feed. */
   appSettings?: AppSettingsFeed;
+  /** v2 models.list / slash.list / file.read / chat.background (see ChatV2Opts). */
+  listModels?: ChatV2Opts['listModels'];
+  slashCommands?: ChatV2Opts['slashCommands'];
+  readChatFile?: ChatV2Opts['readFile'];
+  backgroundTasks?: ChatV2Opts['backgroundTasks'];
 }
 
 /** The only paths with CORS (the Capacitor app pairs and probes from its own origin). */
@@ -178,6 +183,10 @@ export class BridgeServer {
       workspaces: opts.workspaces,
       listWorkspacesFallback: opts.listWorkspaces,
       appSettings: opts.appSettings,
+      listModels: opts.listModels,
+      slashCommands: opts.slashCommands,
+      readFile: opts.readChatFile,
+      backgroundTasks: opts.backgroundTasks,
     });
     // Track the latest workspace.status + github.watcher events so we can
     // replay them when a new phone subscribes mid-flight.

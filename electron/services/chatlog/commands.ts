@@ -37,7 +37,19 @@ export type ChatCommand =
   | { kind: 'queueRemove'; chatId: string; clientId: string; target: string }
   /** Moves a queued item to the front (it drains next). */
   | { kind: 'queuePromote'; chatId: string; clientId: string; target: string }
-  | { kind: 'queueClear'; chatId: string; clientId: string };
+  | { kind: 'queueClear'; chatId: string; clientId: string }
+  /** Clears the chat's transcript (appends `cleared`, like the composer's /clear). */
+  | { kind: 'clear'; chatId: string; clientId: string }
+  /** Compacts the chat's context with its settings (Claude only; the same call as claude:compact). */
+  | { kind: 'compact'; chatId: string; clientId: string; origin?: Origin }
+  /**
+   * Appends a client-side event that has no backend effect: a `local_note`, a
+   * `watcher_snapshot`, or a `user_message` marked `local: true` (the /help
+   * bubble). Anything else is rejected. projectPath only to create the chat.
+   */
+  | { kind: 'clientEvent'; chatId: string; clientId: string; ev: ChatEvent; origin?: Origin; projectPath?: string; provider?: Provider }
+  /** Stops one background task of the chat's backend (SDK Claude only). */
+  | { kind: 'stopTask'; chatId: string; clientId: string; taskId: string };
 
 export interface CommandResult { clientId: string; ok: boolean; duplicate: boolean; seq?: number; error?: string }
 
@@ -47,6 +59,10 @@ export interface ProviderDispatch {
   approve(p: Provider, a: { projectPath: string; scope: string; toolUseId: string; approved: boolean; modifiedCommand?: string }): Promise<void>;
   answer(a: { projectPath: string; scope: string; toolUseId: string; answers: Record<string, string | string[]> }): Promise<void>;
   planReview(a: { projectPath: string; scope: string; toolUseId: string; approved: boolean }): Promise<void>;
+  /** claude:compact for the chat (throws for a provider that can't compact). Absent = unsupported. */
+  compact?(p: Provider, a: { projectPath: string; scope: string; settings: ChatSettings }): void;
+  /** claude:stopTask for the chat; false when nothing was stopped. Absent = unsupported. */
+  stopTask?(p: Provider, a: { projectPath: string; scope: string; taskId: string }): Promise<boolean>;
   isBusy(projectPath: string, scope: string): boolean;
   isLoadPaused(): boolean;
   /** False when the provider can't take a send for this chat yet (e.g. no workspace); sends wait in the queue. Default true. */
@@ -89,6 +105,38 @@ export interface ChatCommandsOpts {
  */
 function settledBy(cmd: { origin?: Origin; settled?: boolean }): { imported?: true } {
   return cmd.settled === true && cmd.origin !== 'remote' ? { imported: true } : {};
+}
+
+/** Client event types a clientEvent command may append (see the ChatCommand doc). */
+const CLIENT_COMMAND_EVENTS = new Set(['local_note', 'watcher_snapshot', 'user_message']);
+
+/**
+ * The event a clientEvent command appends: only the fields the reducer reads
+ * for that type, so a client can't smuggle `queued`, `logged` or other flags.
+ */
+function clientEventOf(ev: unknown, origin: Origin): ChatEvent {
+  const src = ev && typeof ev === 'object' && !Array.isArray(ev) ? ev as Record<string, unknown> : null;
+  const type = src && typeof src.type === 'string' ? src.type : '';
+  if (!src || !CLIENT_COMMAND_EVENTS.has(type)) throw new Error(`clientEvent: ${type || 'missing type'} is not allowed`);
+  const s = (k: string): string | undefined => (typeof src[k] === 'string' ? src[k] as string : undefined);
+  switch (type) {
+    case 'user_message':
+      // Only the local bubble (/help): a real send goes through `send`, which dispatches it.
+      if (src.local !== true) throw new Error('clientEvent: user_message must be local');
+      return {
+        type, local: true, origin, text: s('text') ?? '',
+        ...(s('clientId') ? { clientId: s('clientId') } : {}),
+      };
+    case 'local_note':
+      return {
+        type, content: s('content') ?? '',
+        ...(s('noteId') ? { noteId: s('noteId') } : {}),
+        ...(src.error && typeof src.error === 'object' ? { error: src.error } : {}),
+      };
+    default: // watcher_snapshot
+      if (!s('messageId') || !src.snapshot || typeof src.snapshot !== 'object') throw new Error('clientEvent: watcher_snapshot needs messageId and snapshot');
+      return { type, messageId: s('messageId'), snapshot: src.snapshot };
+  }
 }
 
 const defaultTimers: Timers = {
@@ -247,6 +295,33 @@ export class ChatCommands {
       case 'queueClear': {
         this.chat(cmd.chatId);
         return { seq: this.log.appendClient(cmd.chatId, { type: 'queue_cleared' }).seq };
+      }
+      case 'clear': {
+        this.chat(cmd.chatId);
+        return { seq: this.log.appendClient(cmd.chatId, { type: 'cleared' }).seq };
+      }
+      case 'compact': {
+        const { provider, projectPath, state } = this.chat(cmd.chatId);
+        if (provider !== 'claude' || !this.dispatch.compact) throw new Error(`compact is not supported for ${provider}`);
+        const settings = cmd.origin === 'remote' ? capSettings(state.settings, provider, this.getRemoteCeiling()) : state.settings;
+        this.dispatch.compact(provider, { projectPath, scope: cmd.chatId, settings });
+        return {};
+      }
+      case 'clientEvent': {
+        const ev = clientEventOf(cmd.ev, cmd.origin === 'remote' ? 'remote' : 'desktop');
+        let init: { projectPath: string; provider?: Provider; imported?: true } | undefined;
+        if (!this.store.meta(cmd.chatId)) {
+          if (!cmd.projectPath) throw new Error(`unknown chat ${cmd.chatId} and no projectPath`);
+          init = { projectPath: cmd.projectPath, ...(cmd.provider ? { provider: cmd.provider } : {}) };
+        }
+        return { seq: this.log.appendClient(cmd.chatId, ev, init).seq };
+      }
+      case 'stopTask': {
+        const { provider, projectPath } = this.chat(cmd.chatId);
+        if (typeof cmd.taskId !== 'string' || !cmd.taskId) throw new Error('taskId required');
+        const stopped = (await this.dispatch.stopTask?.(provider, { projectPath, scope: cmd.chatId, taskId: cmd.taskId })) ?? false;
+        if (!stopped) throw new Error(`task not stopped: ${cmd.taskId}`);
+        return {};
       }
       default:
         throw new Error(`unknown command ${(cmd as { kind?: unknown }).kind as string}`);

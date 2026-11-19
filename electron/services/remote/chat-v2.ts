@@ -2,13 +2,23 @@
 // durable chat log (snapshot + seq catch-up + live entries) and idempotent
 // commands through ChatCommands. Frames are documented in README.md ("v2").
 import type { ChatCommand, CommandResult } from '../chatlog/commands';
-import type { ChatLogEntry, ChatSettings, ChatSnapshot, ChatState } from '../../../src/lib/chat/types';
+import type { ChatEvent, ChatLogEntry, ChatSettings, ChatSnapshot, ChatState } from '../../../src/lib/chat/types';
 import type { ChatSync } from '../chatlog/holder';
 import { emptyChatState } from '../../../src/lib/chat/reducer';
 import type { SessionBus } from './session-bus';
 import type { RemoteWorkspace } from './renderer-proxy';
 import type { WorkspaceRegistry } from './workspaceRegistry';
 import type { AppSettingsFeed } from './appSettings';
+import type { FileReadResult } from './fileRead';
+
+type Provider = ChatSettings['provider'];
+
+/** Background-task snapshots per chat (backgroundTasksFeed in production). */
+export interface BackgroundTasksSource {
+  /** The chat's latest tasks ([] when none). */
+  latest(chatId: string): unknown[];
+  onChange(cb: (p: { scope: string; tasks: unknown[] }) => void): () => void;
+}
 
 /** The socket surface ChatV2 needs (a `ws` WebSocket in production). */
 export interface V2Socket { send(data: string): void }
@@ -27,7 +37,18 @@ export interface ChatV2Opts {
   appSettings?: AppSettingsFeed;
   /** chats.changed throttle window (ms). */
   chatsThrottleMs?: number;
+  /** models.list: the provider's list (the same function as its <provider>:models IPC). */
+  listModels?: (provider: Provider) => Promise<unknown> | unknown;
+  /** slash.list for a Claude chat (claude:refreshSlashCommands). */
+  slashCommands?: (projectPath: string, chatId: string) => Promise<unknown[]> | unknown[];
+  /** file.read (see fileRead.ts). */
+  readFile?: (kind: unknown, ref: unknown) => Promise<FileReadResult> | FileReadResult;
+  /** chat.background: the claude:backgroundTasks snapshots. */
+  backgroundTasks?: BackgroundTasksSource;
 }
+
+/** Most chats.subscribe projects one socket may hold. */
+export const MAX_CHAT_LIST_SUBS = 32;
 
 /** chats.changed is sent at most once per this window per subscribed project (trailing edge). */
 export const CHATS_THROTTLE_MS = 500;
@@ -39,6 +60,8 @@ const MAX_IMAGES = 8;
 const MAX_IMAGE_BYTES = 24 * 1024 * 1024;
 const PROVIDERS = ['claude', 'codex', 'gemini', 'kimi'] as const;
 const SETTINGS_KEYS = ['provider', 'model', 'permMode', 'effort', 'approvalMode', 'conversationMode'] as const;
+/** Frame types outside the chat./chats. namespaces that ChatV2 handles. */
+const OTHER_V2_TYPES = new Set(['workspaces.subscribe', 'app.settings', 'models.list', 'slash.list', 'file.read']);
 
 interface Sub {
   /** Highest seq sent to the client. */
@@ -112,7 +135,7 @@ export function pickImages(raw: unknown): string[] | undefined {
 /** Frame types ChatV2 handles (bridge routing). */
 export function isV2FrameType(type: unknown): boolean {
   return typeof type === 'string'
-    && (type.startsWith('chat.') || type.startsWith('chats.') || type === 'workspaces.subscribe' || type === 'app.settings');
+    && (type.startsWith('chat.') || type.startsWith('chats.') || OTHER_V2_TYPES.has(type));
 }
 
 export class ChatV2 {
@@ -127,6 +150,9 @@ export class ChatV2 {
   async handle(ws: V2Socket, msg: Frame): Promise<void> {
     if (msg.type === 'workspaces.subscribe') return this.subscribeWorkspaces(ws, msg.reqId);
     if (msg.type === 'app.settings') return this.appSettings(ws, msg.reqId);
+    if (msg.type === 'models.list') return this.listModels(ws, msg.reqId, msg.provider);
+    if (msg.type === 'file.read') return this.readFile(ws, msg.reqId, msg.kind, msg.ref);
+    if (msg.type === 'slash.list') return this.slashList(ws, msg.reqId, msg.projectPath, msg.chatId);
     const chat = this.opts.chat();
     if (!chat) return this.error(ws, null, 'unavailable', 'chat log is not available');
     switch (msg.type) {
@@ -242,8 +268,11 @@ export class ChatV2 {
   private subscribeChats(ws: V2Socket, chat: Pick<ChatSync, 'store'>, projectPath: string, reqId: unknown): void {
     const store = chat.store;
     const real = store.realPath(projectPath);
-    this.unsubscribeChats(ws, real);
     const ex = this.extrasOf(ws);
+    if (!ex.chats.has(real) && ex.chats.size >= MAX_CHAT_LIST_SUBS) {
+      return this.error(ws, null, 'bad_request', 'too many chat-list subscriptions');
+    }
+    this.unsubscribeChats(ws, real);
     const throttleMs = this.opts.chatsThrottleMs ?? CHATS_THROTTLE_MS;
     const sub: ChatsSub = { projectPath, real, timer: null, unsub: () => {} };
     // Trailing-edge throttle: the first change in a window arms the timer; the
@@ -283,6 +312,53 @@ export class ChatV2 {
     this.send(ws, { type: 'app.settings.result', reqId, settings });
   }
 
+  // ─── models, slash commands, files ─────────────────────────────────────────
+
+  private async listModels(ws: V2Socket, reqId: unknown, raw: unknown): Promise<void> {
+    const provider = PROVIDERS.find((p) => p === raw);
+    if (!provider) return this.error(ws, null, 'bad_request', 'valid provider required', reqId);
+    if (!this.opts.listModels) return this.error(ws, null, 'unavailable', 'model lists are not available', reqId);
+    let models: unknown;
+    try { models = await this.opts.listModels(provider); } catch (err) {
+      return this.error(ws, null, 'read_failed', errText(err), reqId);
+    }
+    this.send(ws, { type: 'models.list.result', reqId, provider, models });
+  }
+
+  /**
+   * The chat's slash commands: Claude chats re-pull the live list
+   * (claude:refreshSlashCommands, scope = chat id); other providers have none.
+   * An existing chat uses its logged projectPath and provider.
+   */
+  private async slashList(ws: V2Socket, reqId: unknown, rawPath: unknown, rawChatId: unknown): Promise<void> {
+    const chatId = chatIdOf(rawChatId);
+    const sentPath = str(rawPath);
+    if (!chatId || !sentPath) return this.error(ws, null, 'bad_request', 'projectPath and valid chatId required', reqId);
+    const store = this.opts.chat()?.store ?? null;
+    const meta = store?.meta(chatId) ?? null;
+    const provider: Provider = store?.state(chatId)?.settings.provider ?? meta?.provider ?? 'claude';
+    if (provider !== 'claude' || !this.opts.slashCommands) {
+      return this.send(ws, { type: 'slash.list.result', reqId, commands: [] });
+    }
+    let commands: unknown[];
+    try {
+      const res = await this.opts.slashCommands(meta ? meta.projectPath : sentPath, chatId);
+      commands = Array.isArray(res) ? res : [];
+    } catch (err) {
+      return this.error(ws, chatId, 'read_failed', errText(err), reqId);
+    }
+    this.send(ws, { type: 'slash.list.result', reqId, commands });
+  }
+
+  private async readFile(ws: V2Socket, reqId: unknown, kind: unknown, ref: unknown): Promise<void> {
+    let result: FileReadResult;
+    if (!this.opts.readFile) result = { error: 'unavailable' };
+    else {
+      try { result = await this.opts.readFile(kind, ref); } catch { result = { error: 'read_failed' }; }
+    }
+    this.send(ws, { type: 'file.read.result', reqId, ...result });
+  }
+
   // ─── subscriptions ─────────────────────────────────────────────────────────
 
   /**
@@ -297,12 +373,19 @@ export class ChatV2 {
     if (!subs) { subs = new Map(); this.socks.set(ws, subs); }
     const sub: Sub = { last: after, live: false, buffer: [], unsub: () => {} };
     subs.set(chatId, sub);
-    sub.unsub = this.opts.bus.subscribe(`chatlog:${chatId}`, (e) => {
+    const busUnsub = this.opts.bus.subscribe(`chatlog:${chatId}`, (e) => {
       const entry = e as unknown as ChatLogEntry;
       if (!entry || typeof entry.seq !== 'number') return;
       if (!sub.live) sub.buffer.push(entry);
       else this.deliver(ws, chatId, sub, entry);
     });
+    // chat.background: the chat's background tasks (scope = chat id), current
+    // list first, then every change while subscribed.
+    const bg = this.opts.backgroundTasks;
+    const bgUnsub = bg?.onChange((p) => {
+      if (p && p.scope === chatId) this.send(ws, { type: 'chat.background', chatId, tasks: Array.isArray(p.tasks) ? p.tasks : [] });
+    }) ?? null;
+    sub.unsub = () => { busUnsub(); bgUnsub?.(); };
 
     let snapshot: ChatSnapshot | null;
     let entries: ChatLogEntry[];
@@ -339,6 +422,11 @@ export class ChatV2 {
     const held = sub.buffer.sort((a, b) => a.seq - b.seq);
     sub.buffer = [];
     for (const e of held) this.deliver(ws, chatId, sub, e);
+    if (bg) {
+      let tasks: unknown[] = [];
+      try { tasks = bg.latest(chatId); } catch { /* none */ }
+      this.send(ws, { type: 'chat.background', chatId, tasks });
+    }
   }
 
   private unsubscribe(ws: V2Socket, chatId: string): void {
@@ -426,6 +514,22 @@ export class ChatV2 {
       case 'queueRemove': return { kind: 'queueRemove', ...base, target: target() };
       case 'queuePromote': return { kind: 'queuePromote', ...base, target: target() };
       case 'queueClear': return { kind: 'queueClear', ...base };
+      case 'clear': return { kind: 'clear', ...base };
+      case 'compact': return { kind: 'compact', ...base, origin: 'remote' };
+      case 'clientEvent': {
+        // ChatCommands checks the event type (local_note, watcher_snapshot, local user_message) and keeps only its fields.
+        if (!raw.ev || typeof raw.ev !== 'object' || Array.isArray(raw.ev)) throw new Error('ev required');
+        const provider = PROVIDERS.find((p) => p === raw.provider);
+        return {
+          kind: 'clientEvent', ...base, ev: raw.ev as ChatEvent, origin: 'remote',
+          ...(projectPath ? { projectPath } : {}), ...(provider ? { provider } : {}),
+        };
+      }
+      case 'stopTask': {
+        const taskId = str(raw.taskId);
+        if (!taskId) throw new Error('taskId required');
+        return { kind: 'stopTask', ...base, taskId };
+      }
       default:
         throw new Error(`unknown command ${String(raw.kind)}`);
     }
@@ -437,8 +541,8 @@ export class ChatV2 {
     this.send(ws, { type: 'chat.ack', result });
   }
 
-  private error(ws: V2Socket, chatId: string | null, code: string, message: string): void {
-    this.send(ws, { type: 'chat.error', ...(chatId ? { chatId } : {}), code, message });
+  private error(ws: V2Socket, chatId: string | null, code: string, message: string, reqId?: unknown): void {
+    this.send(ws, { type: 'chat.error', ...(reqId !== undefined ? { reqId } : {}), ...(chatId ? { chatId } : {}), code, message });
   }
 
   private send(ws: V2Socket, frame: Record<string, unknown>): void {

@@ -167,6 +167,8 @@ describe('ChatPanel renders from the durable log', () => {
     const [, userEv] = sai.chatlog.appendClient.mock.calls[0];
     const [, note] = sai.chatlog.appendClient.mock.calls[1];
     expect(note.noteId).toBe(`help-${userEv.clientId}`);
+    // The /help bubble is local (no backend send): the shape remote clientEvent accepts.
+    expect(userEv.local).toBe(true);
     expect(bubbles().map(b => b.getAttribute('data-msg-id'))).toEqual([userEv.clientId, `help-${userEv.clientId}`]);
     expect(log.commands()).toHaveLength(0);
 

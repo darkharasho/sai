@@ -35,6 +35,7 @@ import {
   evictRenderToken,
 } from './services/renderProtocol';
 import { snapshotModel, readCachedModel, pruneModelCache, isVersionKey, setLogModelKeyReferences } from './services/modelCache';
+
 import { execFile as _execFile, execFileSync } from 'node:child_process';
 import { promisify as _promisify } from 'node:util';
 const _execFileP = _promisify(_execFile);
@@ -74,7 +75,7 @@ async function _resolveTailnetEndpointWithEnv() {
   });
 }
 import { registerTerminalHandlers, destroyAllTerminals, listTerminalPids } from './services/pty';
-import { registerClaudeHandlers, destroyClaude, setRemoteCeiling, getRemoteCeiling, setRemoteBus, setSubprocessMemoryCapMB, emitChatMessage, setChatLog } from './services/claude';
+import { registerClaudeHandlers, refreshClaudeSlashCommands, destroyClaude, setRemoteCeiling, getRemoteCeiling, setRemoteBus, setSubprocessMemoryCapMB, emitChatMessage, setChatLog } from './services/claude';
 import { initSudoService, lockSudo } from './services/sudo';
 import { getClaudeBackend, listClaudeLiveScopes } from './services/claudeBackend';
 import { ChatLogStore } from './services/chatlog/store';
@@ -82,7 +83,10 @@ import { ChatLogService, liveChatIds, realPath, registerUnavailableChatLogIpc } 
 import { ChatCommands, type ChatCommand } from './services/chatlog/commands';
 import { createProviderDispatch } from './services/chatlog/providerDispatch';
 import { getChatSync, setChatSync } from './services/chatlog/holder';
-import { setLogImageReferences } from './services/toolResultImageStore';
+import { setLogImageReferences, toolResultImageDir } from './services/toolResultImageStore';
+import { readRemoteFile } from './services/remote/fileRead';
+import { listProviderModels } from './services/providerModels';
+import { backgroundTasksFeed } from './services/backgroundTasksFeed';
 import { RendererProxy } from './services/remote/renderer-proxy';
 import { WorkspaceRegistry } from './services/remote/workspaceRegistry';
 import { AppSettingsFeed, pickRemoteAppSettings } from './services/remote/appSettings';
@@ -130,6 +134,11 @@ import {
 import { renderHostSearch, type RenderHostParams } from './renderHostUrl';
 import { formTimeoutMs } from '../src/render/formTimeout';
 import { sanitizeCssColor } from '../src/render/renderSizing';
+
+/** Content-addressed 3D model version cache (model:* IPC, remote v2 file.read). */
+function modelCacheDir(): string {
+  return path.join(app.getPath('userData'), 'model-cache');
+}
 
 // Allow E2E tests to isolate userData
 if (process.env.SAI_USER_DATA_DIR) {
@@ -402,6 +411,13 @@ async function getOrInitRemote(): Promise<RemoteModule> {
         saveImages: (imgs) => writeRemoteImages(imgs),
         workspaces: workspaceRegistry,
         appSettings: remoteAppSettings,
+        listModels: (provider) => listProviderModels(provider),
+        slashCommands: (projectPath, chatId) => refreshClaudeSlashCommands(projectPath, chatId),
+        readChatFile: (kind, ref) => readRemoteFile(kind, ref, {
+          toolImages: toolResultImageDir(),
+          modelCache: modelCacheDir(),
+        }),
+        backgroundTasks: backgroundTasksFeed,
         sendPrompt: (args) => {
           // Persist base64 image attachments to temp files (parity with the
           // desktop path, which expects on-disk paths). Fire-and-forget:
@@ -1447,7 +1463,6 @@ function createWindow() {
 
   // Content-addressed model version cache (3D viewer): snapshot at tool-call
   // time, read back by versionKey. Containment applies here, not to the code panel.
-  const modelCacheDir = () => path.join(app.getPath('userData'), 'model-cache');
   ipcMain.handle('model:snapshot', (_e, args: { cwd: string; path: string }) => {
     if (!args || typeof args.cwd !== 'string' || typeof args.path !== 'string') {
       return { ok: false, error: 'invalid arguments' };

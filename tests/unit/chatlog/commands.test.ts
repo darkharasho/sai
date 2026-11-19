@@ -28,6 +28,8 @@ function fakeDispatch() {
     approve: vi.fn(async (p, a) => { calls.push(['approve', p, a]); }),
     answer: vi.fn(async (a) => { calls.push(['answer', a]); }),
     planReview: vi.fn(async (a) => { calls.push(['planReview', a]); }),
+    compact: vi.fn((p, a) => { calls.push(['compact', p, a]); }),
+    stopTask: vi.fn(async (p, a) => { calls.push(['stopTask', p, a]); return a.taskId !== 'gone'; }),
     isBusy: vi.fn(() => busy),
     isLoadPaused: vi.fn(() => paused),
     setBusy(b) { busy = b; },
@@ -647,5 +649,77 @@ describe('Task 9 fix round 1', () => {
     log.notifyOpened('nope');
     await tick();
     expect(d.send).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('ChatCommands: clear, compact, clientEvent, stopTask', () => {
+  it('clear command appends cleared once per clientId', async () => {
+    const { store, log, cmds } = mk();
+    await cmds.run(send('u1', 'hi'));
+    runTurn(log);
+    expect(store.state('c1')!.messages.length).toBeGreaterThan(0);
+    const first = await cmds.run({ kind: 'clear', chatId: 'c1', clientId: 'cl1' });
+    expect(first.ok).toBe(true);
+    const again = await cmds.run({ kind: 'clear', chatId: 'c1', clientId: 'cl1' });
+    expect(again).toMatchObject({ ok: true, duplicate: true, seq: first.seq });
+    expect(store.read('c1', 0).entries.filter((e) => e.ev.type === 'cleared')).toHaveLength(1);
+    expect(store.state('c1')!.messages).toEqual([]);
+    // An unknown chat has nothing to clear.
+    expect((await cmds.run({ kind: 'clear', chatId: 'nope', clientId: 'cl2' })).ok).toBe(false);
+  });
+
+  it('compact command dispatches for claude and errors for gemini', async () => {
+    const { log, d, cmds } = mk({ ceiling: 'always-ask' });
+    await cmds.run(send('u1', 'hi'));
+    runTurn(log);
+    await cmds.run({ kind: 'settings', chatId: 'c1', clientId: 's1', settings: { model: 'opus', permMode: 'bypass', effort: 'high' } });
+    const r = await cmds.run({ kind: 'compact', chatId: 'c1', clientId: 'k1' });
+    expect(r.ok).toBe(true);
+    expect((await cmds.run({ kind: 'compact', chatId: 'c1', clientId: 'k1' })).duplicate).toBe(true);
+    expect(d.compact).toHaveBeenCalledTimes(1);
+    expect((d.compact as any).mock.calls[0][0]).toBe('claude');
+    expect((d.compact as any).mock.calls[0][1]).toMatchObject({ projectPath: P, scope: 'c1', settings: { model: 'opus', permMode: 'bypass', effort: 'high' } });
+    // A remote compact runs with the ceiling-capped settings.
+    await cmds.run({ kind: 'compact', chatId: 'c1', clientId: 'k2', origin: 'remote' });
+    expect((d.compact as any).mock.calls[1][1].settings.permMode).toBe('default');
+
+    await cmds.run({ kind: 'settings', chatId: 'c1', clientId: 's2', settings: { provider: 'gemini' } });
+    const g = await cmds.run({ kind: 'compact', chatId: 'c1', clientId: 'k3' });
+    expect(g).toMatchObject({ ok: false, error: 'compact is not supported for gemini' });
+    expect(d.compact).toHaveBeenCalledTimes(2);
+  });
+
+  it('clientEvent rejects backend event types', async () => {
+    const { store, cmds } = mk();
+    const ce = (clientId: string, ev: Record<string, unknown>, extra: Record<string, unknown> = {}) =>
+      cmds.run({ kind: 'clientEvent', chatId: 'c1', clientId, ev: ev as any, projectPath: P, ...extra });
+    for (const [i, type] of ['assistant', 'result', 'done', 'streaming_start', 'approval_needed', 'cleared', 'settings_changed', 'queue_added'].entries()) {
+      const r = await ce(`b${i}`, { type });
+      expect(r.ok).toBe(false);
+      expect(r.error).toMatch(/not allowed/);
+    }
+    // A user_message that isn't local would look sent but never dispatch.
+    expect((await ce('u0', { type: 'user_message', clientId: 'm0', text: 'hi' })).error).toMatch(/must be local/);
+    expect(store.meta('c1')).toBeNull();
+
+    // The /help pair: a local user_message and its local_note (creates the chat).
+    expect((await ce('h1', { type: 'user_message', clientId: 'm1', text: '/help', origin: 'desktop', local: true, queued: true }, { origin: 'remote' })).ok).toBe(true);
+    expect((await ce('h2', { type: 'local_note', noteId: 'help-m1', content: 'Commands…' })).ok).toBe(true);
+    expect((await ce('h2', { type: 'local_note', noteId: 'help-m1', content: 'Commands…' })).duplicate).toBe(true);
+    const evs = store.read('c1', 0).entries.map((e) => e.ev);
+    // Only the type's own fields are kept (no `queued`); origin is the command's.
+    expect(evs[0]).toEqual({ type: 'user_message', local: true, origin: 'remote', text: '/help', clientId: 'm1' });
+    expect(evs.filter((e) => e.type === 'local_note')).toHaveLength(1);
+    expect(store.state('c1')!.messages.map((m) => m.id)).toEqual(['m1', 'help-m1']);
+  });
+
+  it('stopTask maps to the backend stopTask and fails when nothing stopped', async () => {
+    const { d, cmds } = mk();
+    await cmds.run(send('u1', 'hi'));
+    expect((await cmds.run({ kind: 'stopTask', chatId: 'c1', clientId: 't1', taskId: 'bg1' })).ok).toBe(true);
+    expect(d.stopTask).toHaveBeenCalledWith('claude', { projectPath: P, scope: 'c1', taskId: 'bg1' });
+    expect((await cmds.run({ kind: 'stopTask', chatId: 'c1', clientId: 't1', taskId: 'bg1' })).duplicate).toBe(true);
+    expect(d.stopTask).toHaveBeenCalledTimes(1);
+    expect(await cmds.run({ kind: 'stopTask', chatId: 'c1', clientId: 't2', taskId: 'gone' })).toMatchObject({ ok: false, error: 'task not stopped: gone' });
   });
 });

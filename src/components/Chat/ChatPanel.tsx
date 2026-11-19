@@ -1957,7 +1957,8 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode:
 
     if (text === '/help') {
       keepFlipRect();
-      await appendToLog({ type: 'user_message', clientId, text, origin: 'desktop' });
+      // local: a bubble with no backend send (remote clientEvent accepts only local user_messages).
+      await appendToLog({ type: 'user_message', clientId, text, origin: 'desktop', local: true });
       await appendToLog({ type: 'local_note', noteId: `help-${clientId}`, content: buildHelpMessage(aiProvider, slashCommands) });
       return;
     }

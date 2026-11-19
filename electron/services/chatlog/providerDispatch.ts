@@ -87,6 +87,19 @@ export function createProviderDispatch(devlog: (event: string, data: Record<stri
       }
     },
 
+    compact(p, a) {
+      // claude:compact (ChatPanel's /compact): Claude is the only provider with a compact path.
+      if (p !== 'claude') throw new Error(`compact is not supported for ${p}`);
+      const s = a.settings;
+      getClaudeBackend().compact({ projectPath: a.projectPath, permMode: s.permMode, effort: s.effort, model: s.model, scope: a.scope });
+    },
+
+    async stopTask(p, a) {
+      // claude:stopTask: background tasks exist only on the Claude SDK backend.
+      if (p !== 'claude') return false;
+      return (await getClaudeBackend().stopTask?.(a.projectPath, a.scope, a.taskId)) ?? false;
+    },
+
     async answer(a) {
       await getClaudeBackend().answerQuestion(a);
     },

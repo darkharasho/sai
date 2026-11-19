@@ -11,6 +11,7 @@ Modules:
 - `chat-v2.ts` — chat protocol v2 (below) over the durable chat log (`../chatlog/`)
 - `workspaceRegistry.ts` — the renderer-pushed workspace list (v2 `workspaces.subscribe`)
 - `appSettings.ts` — the phone-visible app settings snapshot + change feed (v2 `app.settings`)
+- `fileRead.ts` — v2 `file.read`: tool-result images and cached 3D models as data URLs, confined to their userData dirs
 - `index.ts` — RemoteModule supervisor
 
 Tests live under `tests/unit/remote/` and `tests/integration/remote/` per SAI's vitest project layout.
@@ -19,8 +20,8 @@ Tests live under `tests/unit/remote/` and `tests/integration/remote/` per SAI's 
 
 Runs on the same `/ws` socket as v1, after the same `auth` frame (any frame
 before `auth_ok`, v2 included, closes the socket with 4001). Frames whose
-`type` starts with `chat.` or `chats.`, or is `workspaces.subscribe` or
-`app.settings`, are v2; everything else is v1 and unchanged (v1
+`type` starts with `chat.` or `chats.`, or is `workspaces.subscribe`,
+`app.settings`, `models.list`, `slash.list` or `file.read`, are v2; everything else is v1 and unchanged (v1
 `workspaces.list` included). Every v2 frame the desktop sends carries `v: 2`. The chat log, its
 seq numbers and the reducer (`src/lib/chat/reducer.ts`) are shared with the
 desktop: a client that applies the same entries ends with the same state.
@@ -36,6 +37,9 @@ Client → desktop:
 | `chats.unsubscribe` | `projectPath` |
 | `workspaces.subscribe` | `reqId`: replies `workspaces.list.result`, then pushes `workspaces.changed` |
 | `app.settings` | `reqId`: replies `app.settings.result`, then pushes `app.settings.changed` |
+| `models.list` | `reqId`, `provider` (`claude`, `codex`, `gemini`, `kimi`) |
+| `slash.list` | `reqId`, `projectPath`, `chatId` |
+| `file.read` | `reqId`, `kind` (`toolImage` or `model`), `ref` |
 | `chat.page` | `reqId`, `chatId`, `beforeIndex`, `limit` (≤ 200) |
 | `chat.command` | `command`: a `ChatCommand` (`electron/services/chatlog/commands.ts`) |
 
@@ -52,9 +56,13 @@ Desktop → client:
 | `workspaces.changed` | `workspaces: RemoteWorkspace[]`: the full list |
 | `app.settings.result` | `reqId`, `settings` (below) |
 | `app.settings.changed` | `settings` (below) |
+| `models.list.result` | `reqId`, `provider`, `models`: exactly what the desktop's `<provider>:models` IPC returns |
+| `slash.list.result` | `reqId`, `commands`: the `claude:refreshSlashCommands` list (`[]` for other providers) |
+| `file.read.result` | `reqId`, and `dataUrl` or `error` (`bad_request`, `forbidden`, `not_found`, `too_large`, `read_failed`, `unavailable`) |
+| `chat.background` | `chatId`, `tasks`: the chat's background tasks (the `claude:backgroundTasks` payload's `tasks`) |
 | `chat.page.result` | `reqId`, `chatId`, `messages` (indices `[olderCount, beforeIndex)`), `olderCount` |
 | `chat.ack` | `result: CommandResult` (`clientId`, `ok`, `duplicate`, `seq?`, `error?`) |
-| `chat.error` | `chatId?`, `code` (`bad_request`, `unknown_chat`, `unavailable`, `read_failed`, `unknown_type`, `internal`), `message` |
+| `chat.error` | `reqId?` (when the failed frame was a `models.list` or `slash.list` request), `chatId?`, `code` (`bad_request`, `unknown_chat`, `unavailable`, `read_failed`, `unknown_type`, `internal`), `message` |
 
 **Subscribe.** The desktop attaches its live listener first (buffering), then
 reads the log after `after`. It sends `chat.snapshot` when the read returns one
@@ -94,6 +102,35 @@ previous subscription.
 `remoteCeiling` (`'auto' | 'auto-read' | 'always-ask' | null`, the remote
 permission ceiling). `app.settings.changed` is pushed when one of them changes
 (a settings write on the desktop, a GitHub settings sync, or a ceiling change).
+
+**Models.** `models.list` calls the same function as the desktop's
+`claude:models`, `codex:models`, `gemini:models` or `kimi:models` handler
+(`electron/services/providerModels.ts`), so `models` has that handler's shape
+(e.g. `{ models, detected }` for Claude, `{ models, defaultModel }` for
+Gemini and Kimi). An unknown `provider` gets `chat.error bad_request`.
+
+**Slash commands.** `slash.list` re-pulls a Claude chat's live list
+(`claude:refreshSlashCommands` with the chat id as scope). A logged chat uses
+its logged `projectPath` and provider; an unknown chat counts as Claude with the
+client's `projectPath`. Other providers get `commands: []`.
+
+**Files.** `file.read` returns at most 25 MB (bigger: `error: "too_large"`).
+- `toolImage`: `ref` is the absolute `filePath` a tool-result image carries in
+  the chat. It must realpath inside `userData/tool-result-images`: `..`, a
+  symlink inside the dir, or any other path gets `error: "forbidden"`. The MIME
+  type comes from the extension.
+- `model`: `ref` is a 3D model `versionKey` (32 hex), read from the model cache
+  like `model:readCached`; the data URL is `application/octet-stream`.
+
+**Background tasks.** While a chat is subscribed, `chat.background` carries its
+background tasks: once right after the subscribe catch-up (`tasks: []` when it
+has none), then on every snapshot the desktop's `claude:backgroundTasks` IPC
+gets for that chat (scope = chat id). A push replaces the client's list.
+
+**Chat-list cap.** A socket may hold 32 `chats.subscribe` projects. A 33rd
+distinct project gets `chat.error bad_request` "too many chat-list
+subscriptions"; re-subscribing a held project, or unsubscribing one first, is
+fine.
 
 All subscriptions end when the socket closes.
 
@@ -136,6 +173,19 @@ reuse it only for the same command. Only the fields a phone may set are kept:
   (`toolUseId`, `answers`), `planReview` (`toolUseId`, `approved`),
   `interrupt`, `queueRemove` / `queuePromote` (`target` = the queued item's
   `clientId`), `queueClear`.
+- `clear` — appends `cleared` (the composer's `/clear`).
+- `compact` — compacts the chat's context with its settings, capped by the
+  remote ceiling (the desktop's `claude:compact`). Claude chats only; other
+  providers ack `ok: false, error: "compact is not supported for <provider>"`.
+- `clientEvent` (`ev`, plus `projectPath` / `provider` only to create a chat)
+  — appends an event with no backend effect: `local_note` (`noteId`,
+  `content`, `error?`), `watcher_snapshot` (`messageId`, `snapshot`), or
+  `user_message` with `local: true` (`clientId`, `text`; the `/help` bubble).
+  Only those fields are kept, and a `user_message`'s `origin` is `'remote'`.
+  Any other type, or a `user_message` without `local: true`, acks `ok: false`.
+- `stopTask` (`taskId`) — stops one background task (`claude:stopTask`). Acks
+  `ok: false, error: "task not stopped: <id>"` when nothing was stopped (not a
+  Claude SDK chat, or the task already ended).
 - An existing chat always keeps its logged `projectPath`; a phone-supplied one
   is ignored.
 - Chat ids must match `^[A-Za-z0-9_-]{1,128}$` (the log's safe id shape) and
@@ -152,8 +202,14 @@ reuse it only for the same command. Only the fields a phone may set are kept:
   that chat's older IndexedDB history in when it next opens it (a
   `history_imported` entry follows).
 
-**Known gaps.** `approve` maps to yes/no only. Codex App Server prompts
-(always-allow, exec-policy amendments, user-input requests, MCP elicitations)
-are still answered from the desktop renderer directly, so a phone can see them
-in the state (`pendingApproval`, `pendingCodexUserInput`,
-`pendingCodexMcpElicitation`) but cannot answer them yet.
+**Desktop-only.** These stay on the desktop by design. A phone sees the prompts in
+the state but has no command for them:
+- Always-allow (`claudeAlwaysAllow`): a phone's `approve` is a plain yes/no.
+  Persistent permission grants are made on the desktop.
+- Sudo password replies (`claudeSudoReply`): passwords never cross the bridge.
+- Codex App Server prompts (always-allow, exec-policy amendments, user-input
+  requests, MCP elicitations: `pendingApproval`, `pendingCodexUserInput`,
+  `pendingCodexMcpElicitation`).
+- Answers to `sai_render_form`, `sai_confirm` and `sai_choose`.
+- File-mode `sai-render://` renders (an Electron-only protocol): the phone
+  shows an "open on desktop" note instead.
