@@ -54,7 +54,26 @@ export interface ChatState {
   promptSuggestion: string | null;
   settings: ChatSettings;
   queue: QueuedItem[];
+  /** Turn ended in a wait (done.wait); null otherwise. Scheduled expiry is a client concern: compare since + resumeInSeconds to the clock. */
+  waiting: ChatWaiting | null;
+  /** The follow-up judge's verdict for the last turn; null when none. */
+  followUp: ChatFollowUp | null;
+  /** A question_needed / plan_review_needed is unanswered. */
+  awaitingQuestion: boolean;
   lastSeq: number;
+}
+
+export interface ChatWaiting {
+  kind: 'background' | 'scheduled';
+  resumeInSeconds?: number;
+  taskCount?: number;
+  /** Log timestamp (entry.ts) of the done that opened the wait. */
+  since: number;
+}
+
+export interface ChatFollowUp {
+  state: 'following' | 'resuming' | 'stalled';
+  waitingFor?: string;
 }
 
 export interface ChatSnapshot { chatId: string; seq: number; state: ChatState }

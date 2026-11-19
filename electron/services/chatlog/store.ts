@@ -9,7 +9,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import type { ChatMessage } from '../../../src/types';
 import type { ChatEvent, ChatLogEntry, ChatMeta, ChatSettings, ChatSnapshot, ChatState } from '../../../src/lib/chat/types';
-import { emptyChatState, persistableState, reduceChat, reduceMany, stateFromMessages } from '../../../src/lib/chat/reducer';
+import { emptyChatState, normalizeChatState, persistableState, reduceChat, reduceMany, stateFromMessages } from '../../../src/lib/chat/reducer';
 
 export interface ReadResult { snapshot: ChatSnapshot | null; entries: ChatLogEntry[]; headSeq: number; meta: ChatMeta | null }
 
@@ -134,7 +134,7 @@ export class ChatLogStore {
     try {
       const snap = JSON.parse(raw) as ChatSnapshot;
       if (snap && typeof snap === 'object' && typeof snap.seq === 'number' && snap.state && typeof snap.state === 'object') {
-        return { snap, problem: null };
+        return { snap: { ...snap, state: normalizeChatState(snap.state) }, problem: null };
       }
       return { snap: null, problem: 'corrupt', error: new Error('snapshot has no seq/state') };
     } catch (err) {
