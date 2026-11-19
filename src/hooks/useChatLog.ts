@@ -90,6 +90,14 @@ export function useChatLog(chatId: string | null, fallbackSettings: ChatSettings
     let pageGen = 0;           // bumped when current is replaced by a snapshot: older pages are stale
     let epoch = 0;             // bumped by a history_imported reload: older recovery opens are stale
 
+    // A /clear empties the transcript: nothing older is left to page, and a
+    // page in flight would prepend pre-clear history.
+    const dropOlderOnClear = (applied: ChatLogEntry[]) => {
+      if (!applied.some((e) => e.ev?.type === 'cleared')) return;
+      pageGen++;
+      if (older !== 0) { older = 0; setOlder(0); }
+    };
+
     const flush = () => {
       if (raf !== null) { cancelAnimationFrame(raf); raf = null; }
       if (fallback !== null) { clearTimeout(fallback); fallback = null; }
@@ -97,6 +105,7 @@ export function useChatLog(chatId: string | null, fallbackSettings: ChatSettings
       const batch = queue;
       queue = [];
       current = reduceMany(current, batch);
+      dropOlderOnClear(batch);
       lastApplied.current = [...lastApplied.current, ...batch];
       const next = current;
       setState(next);
@@ -116,9 +125,11 @@ export function useChatLog(chatId: string | null, fallbackSettings: ChatSettings
           pageGen++;
           older = res.olderCount ?? 0;
           setOlder(older);
+          dropOlderOnClear(res.entries); // olderCount counts the snapshot's messages
         } else {
           applied = res.entries.filter((e) => e.seq > after);
           current = reduceMany(current!, applied);
+          dropOlderOnClear(applied);
         }
         head = current.lastSeq;
         lastApplied.current = [...lastApplied.current, ...applied];
@@ -206,6 +217,7 @@ export function useChatLog(chatId: string | null, fallbackSettings: ChatSettings
         pageGen++;
         older = res.olderCount ?? 0;
         setOlder(older);
+        dropOlderOnClear(res.entries); // olderCount counts the snapshot's messages
         setState(current);
         setMeta(res.meta ?? null);
         drainBuffer();

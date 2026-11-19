@@ -77,4 +77,39 @@ describe('useChatLog paging', () => {
     await act(async () => { await result.current.loadOlder(); });
     expect(page).not.toHaveBeenCalled();
   });
+  describe('a /clear', () => {
+    let listener: (e: any) => void = () => {};
+    const cleared = (seq: number) => ({ chatId: 'a', seq, ts: 1, ev: { type: 'cleared' } });
+    beforeEach(() => {
+      vi.stubGlobal('requestAnimationFrame', (cb: () => void) => setTimeout(cb, 0));
+      vi.stubGlobal('cancelAnimationFrame', (h: any) => clearTimeout(h));
+      (window as any).sai.chatlog.onEvent = (cb: any) => { listener = cb; return () => { listener = () => {}; }; };
+    });
+    const applyLive = (e: any) => act(async () => { listener(e); await new Promise((r) => setTimeout(r, 5)); });
+
+    it('resets olderCount, so "Load earlier" goes away and never re-pages the post-clear messages', async () => {
+      const { result } = renderHook(() => useChatLog('a', settings));
+      await flushMicro();
+      expect(result.current.olderCount).toBe(4);
+      await applyLive(cleared(6));
+      expect(result.current.state!.messages).toEqual([]);
+      expect(result.current.olderCount).toBe(0);
+      await act(async () => { await result.current.loadOlder(); });
+      expect(page).not.toHaveBeenCalled();
+    });
+
+    it('drops a page that was in flight when the clear landed', async () => {
+      const d = deferred<any>();
+      page.mockReturnValue(d.promise);
+      const { result } = renderHook(() => useChatLog('a', settings));
+      await flushMicro();
+      let p!: Promise<void>;
+      act(() => { p = result.current.loadOlder(); });
+      await applyLive(cleared(6));
+      d.resolve({ messages: [msg('m3'), msg('m4')], olderCount: 2 });
+      await act(async () => { await p; });
+      expect(result.current.state!.messages).toEqual([]);
+      expect(result.current.olderCount).toBe(0);
+    });
+  });
 });
