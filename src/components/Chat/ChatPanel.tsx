@@ -1,4 +1,5 @@
 import { Fragment, useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
+import { isPhone } from '../../lib/platform';
 import { createPortal } from 'react-dom';
 import { ChevronDown, CornerLeftUp } from 'lucide-react';
 import { stampTaskTags } from './tasks/taskTags';
@@ -2233,7 +2234,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode:
                       {projectPath ? emptyPrompt : 'Select a project to get started'}
                     </div>
                   )}
-                  {projectPath && !logError && <CyclingHints />}
+                  {projectPath && !logError && !isPhone() && <CyclingHints />}
                 </motion.div>
               </AnimatePresence>
             </div>

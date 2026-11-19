@@ -270,9 +270,11 @@ const STYLES = `
     vertical-align: baseline;
     line-height: 1.5;
   }
-  .link-preview-chip:hover {
-    background: color-mix(in srgb, var(--text) 8%, transparent);
-    border-color: color-mix(in srgb, var(--text) 20%, transparent);
+  @media (hover: hover) {
+    .link-preview-chip:hover {
+      background: color-mix(in srgb, var(--text) 8%, transparent);
+      border-color: color-mix(in srgb, var(--text) 20%, transparent);
+    }
   }
   .link-preview-chip-loading {
     opacity: 0.7;

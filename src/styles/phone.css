@@ -1,0 +1,54 @@
+/* Phone shell overrides for the shared chat UI.
+   Imported by the mobile entry only (never the desktop renderer). Every rule
+   is scoped by html[data-sai-phone] so nothing here can touch desktop. */
+
+html[data-sai-phone] body {
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
+}
+html[data-sai-phone] * {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Side gutters: 12px instead of the desktop 15% inset. */
+html[data-sai-phone] .input-wrapper {
+  padding-left: 12px;
+  padding-right: 12px;
+  padding-bottom: calc(12px + env(safe-area-inset-bottom));
+}
+html[data-sai-phone] .chat-messages {
+  padding-left: 12px;
+  padding-right: 12px;
+  overscroll-behavior: contain;
+}
+html[data-sai-phone] .chat-suggestion-row {
+  padding-left: 12px;
+  padding-right: 12px;
+}
+
+/* Dropdowns and popovers fit the screen. */
+html[data-sai-phone] .model-dropdown,
+html[data-sai-phone] .autocomplete-dropdown,
+html[data-sai-phone] .queue-popover,
+html[data-sai-phone] .todo-ring-popover,
+html[data-sai-phone] .link-ctx {
+  min-width: 0;
+  max-width: calc(100vw - 24px);
+}
+
+/* Toolbar buttons: 44px hit targets. */
+html[data-sai-phone] .toolbar-btn {
+  min-width: 44px;
+  min-height: 44px;
+}
+
+/* Touch screens: no sticky :hover styles. */
+@media (hover: none) {
+  html[data-sai-phone] .queue-item:hover,
+  html[data-sai-phone] .queue-action:hover,
+  html[data-sai-phone] .toolbar-btn:hover,
+  html[data-sai-phone] .autocomplete-item:hover {
+    background: none;
+    color: inherit;
+  }
+}

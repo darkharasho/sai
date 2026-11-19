@@ -1,4 +1,5 @@
 import React, { memo, useState, useRef, useCallback, useEffect, useLayoutEffect, useMemo } from 'react';
+import { isPhone } from '../../lib/platform';
 import { isSaiTaskToolName } from '../../lib/saiTaskTool';
 import { createPortal } from 'react-dom';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
@@ -270,14 +271,14 @@ function ImageModal({ src, onClose }: { src: string; onClose: () => void }) {
   };
 
   return createPortal(
-    <div className="img-modal-overlay sai-overlay-in" onClick={onClose} onContextMenu={handleContextMenu}>
+    <div className="img-modal-overlay sai-overlay-in" style={isPhone() ? { touchAction: 'pinch-zoom' } : undefined} onClick={onClose} onContextMenu={handleContextMenu}>
       <button className="img-modal-close" onClick={onClose}><X size={18} /></button>
       <img
         ref={imgRef}
         src={src}
         alt="Full size"
         className="img-modal-img sai-modal-in"
-        onClick={e => e.stopPropagation()}
+        onClick={isPhone() ? onClose : e => e.stopPropagation()}
         onContextMenu={handleContextMenu}
       />
       {ctxMenu && (
@@ -875,6 +876,10 @@ function ChatMessage({
       style={flipPhase === 'measuring' ? { visibility: 'hidden' } : undefined}
       layoutId={flipActive ? undefined : pinnedLayoutId}
       onContextMenu={linkMenu.onContextMenu}
+      onTouchStart={linkMenu.onTouchStart}
+      onTouchMove={linkMenu.onTouchMove}
+      onTouchEnd={linkMenu.onTouchEnd}
+      onTouchCancel={linkMenu.onTouchCancel}
       {...effectiveEntryProps}
     >
       {linkMenu.element}

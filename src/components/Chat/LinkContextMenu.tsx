@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { isPhone } from '../../lib/platform';
 import { Copy, ExternalLink } from 'lucide-react';
 
 // Right-click a link in a chat message → "Copy link address" / "Open link".
@@ -42,6 +43,28 @@ export function useLinkContextMenu(onOpen?: (href: string) => void) {
     setMenu({ x: e.clientX, y: e.clientY, href });
   }, []);
 
+  // Phone: long-press (500ms, cancelled by move/end) stands in for right-click,
+  // replacing the iOS link callout.
+  const pressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cancelPress = useCallback(() => {
+    if (pressTimer.current) { clearTimeout(pressTimer.current); pressTimer.current = null; }
+  }, []);
+  useEffect(() => cancelPress, [cancelPress]);
+
+  const onTouchStart = useCallback((e: React.TouchEvent) => {
+    if (!isPhone()) return;
+    const href = linkHrefAt(e.target);
+    if (!href) return;
+    const t = e.touches[0];
+    const x = t?.clientX ?? 0;
+    const y = t?.clientY ?? 0;
+    cancelPress();
+    pressTimer.current = setTimeout(() => {
+      pressTimer.current = null;
+      setMenu({ x, y, href });
+    }, 500);
+  }, [cancelPress]);
+
   const element = menu ? (
     <LinkContextMenu
       {...menu}
@@ -50,7 +73,7 @@ export function useLinkContextMenu(onOpen?: (href: string) => void) {
     />
   ) : null;
 
-  return { onContextMenu, element };
+  return { onContextMenu, onTouchStart, onTouchMove: cancelPress, onTouchEnd: cancelPress, onTouchCancel: cancelPress, element };
 }
 
 function LinkContextMenu({ x, y, href, onClose, onOpen }: MenuState & { onClose: () => void; onOpen?: () => void }) {

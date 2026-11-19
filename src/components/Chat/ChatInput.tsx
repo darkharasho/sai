@@ -1,4 +1,6 @@
 import { useState, useRef, KeyboardEvent, useEffect, useMemo } from 'react';
+import { isPhone } from '../../lib/platform';
+import { resizeImageToJpegDataUrl } from '../../lib/imageResize';
 import type { PendingApproval, PendingSudoPrompt, TerminalTab, ChatMessage as ChatMessageType, QueuedMessage, MetaWorkspaceRuntime, EffortLevel, CodexEffort, CodexModelOption, ModelChoice, AIProvider } from '../../types';
 import TodoProgress, { type Todo } from './TodoProgress';
 import MessageQueue from './MessageQueue';
@@ -396,6 +398,7 @@ export default function ChatInput({ projectPath, onSend, overlayControl, onBefor
   // no other editable element is focused focuses the textarea and lets the
   // character fall through into it.
   useEffect(() => {
+    if (isPhone()) return; // no hardware keyboard: don't steal focus (and pop the keyboard)
     const onKeyDown = (e: globalThis.KeyboardEvent) => {
       if (disabled) return;
       // Keybindings all use a modifier, so requiring none excludes shortcuts.
@@ -819,6 +822,8 @@ export default function ChatInput({ projectPath, onSend, overlayControl, onBefor
         return;
       }
     }
+    // Phone: Enter is a newline; only the send button sends.
+    if (isPhone() && e.key === 'Enter') return;
     if (e.key === 'Enter' && e.ctrlKey) {
       e.preventDefault();
       const trimmed = value.trim();
@@ -944,6 +949,7 @@ export default function ChatInput({ projectPath, onSend, overlayControl, onBefor
   };
 
   const handleAddFile = async () => {
+    if (isPhone()) { handleAddPhoneImages(); return; }
     const filePath = await (window.sai as any).selectFile();
     if (filePath) {
       setContextItems(prev => [...prev, {
@@ -954,7 +960,30 @@ export default function ChatInput({ projectPath, onSend, overlayControl, onBefor
     }
   };
 
+  // Phone: the native picker (camera / library on iOS). Each image is shrunk to
+  // <= 2048px JPEG before joining the same pending-images list pasted images use.
+  const handleAddPhoneImages = () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.multiple = true;
+    input.onchange = async () => {
+      const files = Array.from(input.files ?? []);
+      for (const file of files) {
+        try {
+          const data = await resizeImageToJpegDataUrl(file);
+          const size = Math.floor(((data.length - data.indexOf(',') - 1) * 3) / 4);
+          setContextItems(prev => [...prev, { label: `Image (${Math.round(size / 1024)}KB)`, type: 'image', data }]);
+        } catch {
+          setPasteError('That image could not be read.');
+        }
+      }
+    };
+    input.click();
+  };
+
   const handleAddImage = () => {
+    if (isPhone()) { handleAddPhoneImages(); return; }
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = 'image/*';
@@ -1080,7 +1109,7 @@ export default function ChatInput({ projectPath, onSend, overlayControl, onBefor
       {/* Toolbar row */}
       <div className="input-toolbar">
         <div className="toolbar-left">
-          <button className="toolbar-btn" onClick={() => { setShowAddMenu(!showAddMenu); setSelectedIndex(0); }} title="Add context">
+          <button className="toolbar-btn" onClick={() => { if (isPhone()) { handleAddPhoneImages(); return; } setShowAddMenu(!showAddMenu); setSelectedIndex(0); }} title="Add context">
             <SquarePlus size={18} />
           </button>
           <button className="toolbar-btn" onClick={() => { setSlashMenuOpen(prev => !prev); setShowAddMenu(false); }} title="Slash commands">
