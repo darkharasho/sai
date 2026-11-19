@@ -1,9 +1,10 @@
 name: iOS
 
 # Builds the iOS app (capacitor.config.ts, project in mobile/ios) on a `mobile-v*` tag and uploads
-# it to App Store Connect, where it shows up in TestFlight. The app is archived unsigned and signed
-# only at export, with cloud-managed distribution signing. Without the App Store Connect secrets,
-# and on pull requests, it only checks that the app compiles, for the simulator, unsigned.
+# it to App Store Connect, where it shows up in TestFlight. The app is archived unsigned, ad-hoc
+# signed with its entitlements, and signed for real only at export, with cloud-managed distribution
+# signing. Without the App Store Connect secrets, and on pull requests, it only checks that the app
+# and its Notification Service Extension compile, for the simulator, unsigned.
 #
 # Release: bump package.json "mobileVersion", then push tag mobile-v<version>. The desktop release
 # (release.yml) uses plain v* tags, so the two never trigger each other.
@@ -134,6 +135,34 @@ jobs:
             MARKETING_VERSION="$VERSION" CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
             archive
 
+          # An unsigned archive carries no entitlements, and export signs with the entitlements it
+          # finds in the archived binaries, so push (aps-environment) and the Keychain group shared
+          # with the extension (keychain-access-groups) would be missing from the uploaded app.
+          # Ad-hoc sign the archived bundles ("-": no certificate, nothing created on the account)
+          # with the project's entitlements, $(AppIdentifierPrefix) expanded to the team. Export then
+          # re-signs them for distribution and sets aps-environment to production.
+          APP="$ARCHIVE/Products/Applications/App.app"
+          ENT_DIR="$RUNNER_TEMP/entitlements"
+          mkdir -p "$ENT_DIR"
+          for f in App/App.entitlements NotificationService/NotificationService.entitlements; do
+            sed "s/\$(AppIdentifierPrefix)/$TEAM_ID./g" "mobile/ios/App/$f" > "$ENT_DIR/$(basename "$f")"
+          done
+          adhoc() { codesign --force --sign - --timestamp=none --generate-entitlement-der "$@"; }
+          shopt -s nullglob
+          for fw in "$APP"/Frameworks/*.framework "$APP"/Frameworks/*.dylib \
+                    "$APP"/PlugIns/*.appex/Frameworks/*.framework; do
+            adhoc "$fw"
+          done
+          adhoc --entitlements "$ENT_DIR/NotificationService.entitlements" "$APP/PlugIns/NotificationService.appex"
+          adhoc --entitlements "$ENT_DIR/App.entitlements" "$APP"
+          for b in "$APP" "$APP/PlugIns/NotificationService.appex"; do
+            ents=$(codesign -d --entitlements - --xml "$b" 2>/dev/null)
+            grep -q "$TEAM_ID.com.project96.sai.shared" <<<"$ents" \
+              || { echo "::error::$b has no shared keychain-access-groups entitlement"; exit 1; }
+          done
+          grep -q aps-environment <<<"$(codesign -d --entitlements - --xml "$APP" 2>/dev/null)" \
+            || { echo "::error::App.app has no aps-environment entitlement"; exit 1; }
+
           cat > "$RUNNER_TEMP/ExportOptions.plist" <<EOF
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -152,4 +181,8 @@ jobs:
           xcodebuild -exportArchive -archivePath "$ARCHIVE" \
             -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" \
             -exportPath "$RUNNER_TEMP/export" "${AUTH[@]}"
+          # What export actually signed with (when Xcode leaves a summary for an upload).
+          if [ -f "$RUNNER_TEMP/export/DistributionSummary.plist" ]; then
+            plutil -p "$RUNNER_TEMP/export/DistributionSummary.plist" | grep -E 'aps-environment|keychain-access-groups|com.project96' || true
+          fi
           echo "Uploaded $VERSION ($BUILD_NUMBER) to App Store Connect; it reaches TestFlight once processed." >> "$GITHUB_STEP_SUMMARY"
