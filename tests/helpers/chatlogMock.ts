@@ -185,8 +185,8 @@ export function createMockChatlog(sai: Record<string, any> = {}): MockChatlog {
           ...(typeof cmd.taskId === 'string' ? { taskId: cmd.taskId } : {}),
           ...(queue ? { queued: true } : {}),
         }, { projectPath: cmd.projectPath, ...(cmd.provider ? { provider: cmd.provider } : {}) });
-        // Main can't see IndexedDB: a command-created log is not imported (R15.1).
-        if (created) chats.get(cmd.chatId)!.meta.imported = false;
+        // Like ChatCommands: a phone-created log is not imported (R15.1); a desktop one is settled.
+        if (created && cmd.origin === 'remote') chats.get(cmd.chatId)!.meta.imported = false;
         const prompt = typeof cmd.promptOverride === 'string' ? cmd.promptOverride : cmd.text;
         const st = stateOf(cmd.chatId)!;
         if (queue) {
@@ -214,7 +214,7 @@ export function createMockChatlog(sai: Record<string, any> = {}): MockChatlog {
         if (created && (!cmd.projectPath || !cmd.settings?.provider)) throw new Error(`unknown chat ${cmd.chatId}`);
         const entry = append(cmd.chatId, { type: 'settings_changed', settings: cmd.settings }, { projectPath: cmd.projectPath, provider: cmd.settings?.provider });
         if (cmd.settings?.provider) chats.get(cmd.chatId)!.meta.provider = cmd.settings.provider;
-        if (created) chats.get(cmd.chatId)!.meta.imported = false;
+        if (created && cmd.origin === 'remote') chats.get(cmd.chatId)!.meta.imported = false;
         return { seq: entry.seq };
       }
       case 'interrupt': known(cmd.chatId); dispatchStop(cmd.chatId); return {};
@@ -254,12 +254,12 @@ export function createMockChatlog(sai: Record<string, any> = {}): MockChatlog {
       return { snapshot: snap, entries: c.entries.filter(e => e.seq > from), headSeq: c.head, meta: { ...c.meta } };
     }),
     onEvent: vi.fn((cb: (e: ChatLogEntry) => void) => { listeners.add(cb); return () => { listeners.delete(cb); }; }),
-    appendClient: vi.fn(async (chatId: string, ev: ChatEvent, init?: { projectPath: string; provider?: Provider }) => {
+    appendClient: vi.fn(async (chatId: string, ev: ChatEvent, init?: { projectPath: string; provider?: Provider; imported?: boolean }) => {
       if (!ev || !CLIENT.has(ev.type)) throw new Error(`appendClient: ${String(ev?.type)} is not a client event type`);
       const created = !chats.has(chatId);
       if (created && !init?.projectPath) throw new Error(`appendClient: unknown chat ${chatId} and no projectPath`);
       const entry = append(chatId, ev, init);
-      if (created) chats.get(chatId)!.meta.imported = false;
+      if (created && !init?.imported) chats.get(chatId)!.meta.imported = false;
       return entry;
     }),
     importMessages: vi.fn(async (chatId: string, init: { projectPath: string; provider: Provider }, messages: ChatMessage[]) => {

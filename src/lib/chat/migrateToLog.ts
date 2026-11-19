@@ -80,6 +80,9 @@ export async function ensureChatInLog(chatId: string): Promise<void> {
   // No IndexedDB history: nothing to fold. An existing log is settled as-is
   // (any IndexedDB row written from now on is a mirror of the log).
   await chatlog.importMessages(chatId, { projectPath: '', provider: 'claude', createdAt: 0, updatedAt: 0 }, []);
+  // Nothing in IndexedDB can be lost: mirror writes (including a /clear's
+  // empty one) may go through from now on.
+  knownInLog.add(chatId);
 }
 
 /** Test hook. */

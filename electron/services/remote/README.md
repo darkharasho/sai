@@ -42,7 +42,7 @@ Desktop → client:
 | `chats.list.result` | `reqId`, `chats: ChatMeta[]` (newest first) |
 | `chat.page.result` | `reqId`, `chatId`, `messages` (indices `[olderCount, beforeIndex)`), `olderCount` |
 | `chat.ack` | `result: CommandResult` (`clientId`, `ok`, `duplicate`, `seq?`, `error?`) |
-| `chat.error` | `chatId?`, `code` (`bad_request`, `unknown_chat`, `unavailable`, `read_failed`, `unknown_type`), `message` |
+| `chat.error` | `chatId?`, `code` (`bad_request`, `unknown_chat`, `unavailable`, `read_failed`, `unknown_type`, `internal`), `message` |
 
 **Subscribe.** The desktop attaches its live listener first (buffering), then
 reads the log after `after`. It sends `chat.snapshot` when the read returns one
@@ -57,10 +57,14 @@ chats subscribe fine (empty `chat.entries`); their first entries arrive live.
 - A snapshot REPLACES the client's state; its `seq` becomes the client head.
 - Apply an entry only when `seq === head + 1`; ignore `seq <= head` (duplicates).
 - `seq > head + 1` is a gap: re-send `chat.subscribe` with `after: head`.
-- A `history_imported` entry means the desktop folded older history in front
-  of the chat: don't apply it; re-subscribe with `after: 0` or with the head
-  you held before it (the fold's snapshot sits at the entry's seq, so either
-  returns it).
+- A LIVE `chat.entry` that is `history_imported` at `head + 1` means the
+  desktop just folded older history in front of the chat: don't apply it;
+  re-subscribe with `after: 0` or with your current head (the fold's snapshot
+  sits at the entry's seq, so either returns it). Inside a `chat.entries`
+  catch-up batch, apply `history_imported` like any entry (the reducer treats
+  it as a no-op) and don't re-subscribe: a fold that happened before the batch
+  already reached you as its snapshot, and a stray entry from a fold whose
+  snapshot write failed would otherwise make you re-subscribe forever.
 - The snapshot holds the last 200 messages; `olderCount` is the absolute index
   of the first one. Page older messages with `chat.page` (`beforeIndex =
   olderCount`). `turn.startIndex` in a trimmed snapshot is shifted by the cut
@@ -85,6 +89,10 @@ reuse it only for the same command. Only the fields a phone may set are kept:
   `clientId`), `queueClear`.
 - An existing chat always keeps its logged `projectPath`; a phone-supplied one
   is ignored.
+- Chat ids must match `^[A-Za-z0-9_-]{1,128}$` (the log's safe id shape) and
+  must not be an `Object.prototype` name (`__proto__`, `constructor`, …):
+  other ids get `chat.error bad_request`, or for a command an `ok: false`
+  ack with `error: "invalid chatId"`.
 - A malformed command acks `ok: false` with an `error`; a frame without a
   `clientId` gets `chat.error bad_request`.
 - `queueRemove` acks `ok: false, error: "not queued: <id>"` when the item has

@@ -37,6 +37,14 @@ interface Sub {
 type Frame = { type?: unknown; [k: string]: unknown };
 
 const str = (v: unknown): string | null => (typeof v === 'string' && v ? v : null);
+/**
+ * The chat log's safe id shape (ChatLogStore SAFE_ID), minus names that exist
+ * on Object.prototype ('__proto__', 'constructor', 'toString', …): those match
+ * the shape but are never real chat ids (UUID-like), so they are refused.
+ */
+const CHAT_ID = /^[A-Za-z0-9_-]{1,128}$/;
+const chatIdOf = (v: unknown): string | null =>
+  (typeof v === 'string' && CHAT_ID.test(v) && !(v in Object.prototype) ? v : null);
 
 /** The last SNAPSHOT_MESSAGES messages of a state; turn.startIndex shifts with the cut. */
 export function trimForWire(state: ChatState): { state: ChatState; olderCount: number } {
@@ -79,13 +87,13 @@ export class ChatV2 {
     if (!chat) return this.error(ws, null, 'unavailable', 'chat log is not available');
     switch (msg.type) {
       case 'chat.subscribe': {
-        const chatId = str(msg.chatId);
-        if (!chatId) return this.error(ws, null, 'bad_request', 'chatId required');
+        const chatId = chatIdOf(msg.chatId);
+        if (!chatId) return this.error(ws, null, 'bad_request', 'valid chatId required');
         const after = typeof msg.after === 'number' && Number.isInteger(msg.after) && msg.after > 0 ? msg.after : 0;
         return this.subscribe(ws, chat, chatId, after);
       }
       case 'chat.unsubscribe': {
-        const chatId = str(msg.chatId);
+        const chatId = chatIdOf(msg.chatId);
         if (chatId) this.unsubscribe(ws, chatId);
         return;
       }
@@ -96,8 +104,8 @@ export class ChatV2 {
         return this.send(ws, { type: 'chats.list.result', reqId: msg.reqId, chats: chat.store.list(projectPath) });
       }
       case 'chat.page': {
-        const chatId = str(msg.chatId);
-        if (!chatId) return this.error(ws, null, 'bad_request', 'chatId required');
+        const chatId = chatIdOf(msg.chatId);
+        if (!chatId) return this.error(ws, null, 'bad_request', 'valid chatId required');
         const state = chat.store.state(chatId);
         if (!state) return this.error(ws, chatId, 'unknown_chat', `unknown chat ${chatId}`);
         const n = state.messages.length;
@@ -111,7 +119,7 @@ export class ChatV2 {
       case 'chat.command': {
         const raw = msg.command && typeof msg.command === 'object' ? msg.command as Frame : null;
         const clientId = raw ? str(raw.clientId) : null;
-        if (!raw || !clientId) return this.error(ws, str(raw?.chatId), 'bad_request', 'command with clientId required');
+        if (!raw || !clientId) return this.error(ws, chatIdOf(raw?.chatId), 'bad_request', 'command with clientId required');
         let cmd: ChatCommand;
         try { cmd = this.toCommand(raw, clientId, chat); } catch (err) {
           return this.ack(ws, { clientId, ok: false, duplicate: false, error: errText(err) });
@@ -162,6 +170,8 @@ export class ChatV2 {
       const res = chat.store.read(chatId, after);
       snapshot = res.snapshot;
       entries = res.entries;
+      // No log yet: its first entries (seq 1..) arrive live, whatever `after` was.
+      if (!res.meta) sub.last = 0;
       if (res.meta && after > res.headSeq) {
         const state = chat.store.state(chatId);
         snapshot = state ? { chatId, seq: res.headSeq, state } : null;
@@ -209,8 +219,8 @@ export class ChatV2 {
    * ceiling); an existing chat keeps its logged projectPath.
    */
   private toCommand(raw: Frame, clientId: string, chat: Pick<ChatSync, 'store'>): ChatCommand {
-    const chatId = str(raw.chatId);
-    if (!chatId) throw new Error('chatId required');
+    const chatId = chatIdOf(raw.chatId);
+    if (!chatId) throw new Error('invalid chatId');
     const meta = chat.store.meta(chatId);
     const projectPath = meta ? meta.projectPath : (str(raw.projectPath) ?? '');
     const toolUseId = (): string => {

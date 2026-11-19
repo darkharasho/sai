@@ -172,20 +172,24 @@ export class ChatLogService {
    * Append a client-originated event (Task 1 list). Throws on backend event
    * types. `init` (or ev.projectPath) creates the chat if it isn't logged yet.
    */
-  appendClient(chatId: string, ev: ChatEvent, init?: { projectPath: string; provider?: ChatSettings['provider'] }): ChatLogEntry {
+  appendClient(chatId: string, ev: ChatEvent, init?: { projectPath: string; provider?: ChatSettings['provider']; imported?: boolean }): ChatLogEntry {
     if (typeof chatId !== 'string' || !chatId) throw new Error('appendClient: chatId required');
     if (!ev || typeof ev.type !== 'string' || !CLIENT_TYPES.has(ev.type)) {
       throw new Error(`appendClient: ${String(ev?.type)} is not a client event type`);
     }
-    let storeInit: { projectPath: string; provider: ChatSettings['provider'] } | undefined;
+    let storeInit: { projectPath: string; provider: ChatSettings['provider']; imported?: boolean } | undefined;
     if (!this.store.meta(chatId)) {
       const projectPath = init?.projectPath ?? (typeof ev.projectPath === 'string' ? ev.projectPath : '');
       if (!projectPath) throw new Error(`appendClient: unknown chat ${chatId} and no projectPath`);
-      // Left unimported: main can't see the renderer's IndexedDB (a phone may
-      // send to a chat whose history was never migrated), so a later
-      // ensureChatInLog must still be able to fold that history in. The
-      // renderer marks it once it has checked (importMessages).
-      storeInit = { projectPath, provider: init?.provider ?? this.opts.providerOf(projectPath, chatId) };
+      // Unimported unless the caller says the chat's IndexedDB history is
+      // settled: main can't see IndexedDB (a phone may send to a chat whose
+      // history was never migrated), so a later ensureChatInLog must still be
+      // able to fold that history in. Desktop-origin commands pass
+      // imported:true (the desktop panel checked IndexedDB when it opened).
+      storeInit = {
+        projectPath, provider: init?.provider ?? this.opts.providerOf(projectPath, chatId),
+        ...(init?.imported ? { imported: true } : {}),
+      };
     }
     return this.appendAndFanOut(chatId, ev, storeInit);
   }
@@ -262,7 +266,7 @@ export class ChatLogService {
     }
   }
 
-  private appendAndFanOut(chatId: string, ev: ChatEvent, init?: { projectPath: string; provider: ChatSettings['provider'] }): ChatLogEntry {
+  private appendAndFanOut(chatId: string, ev: ChatEvent, init?: { projectPath: string; provider: ChatSettings['provider']; imported?: boolean }): ChatLogEntry {
     const wasStreaming = this.store.meta(chatId)?.openTurn === true;
     const entry = this.store.append(chatId, ev, init);
     this.fanOut(chatId, entry);

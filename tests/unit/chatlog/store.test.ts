@@ -220,6 +220,24 @@ describe('ChatLogStore', () => {
     expect(s.state('c1')!.messages.map(m => m.id)).toEqual(['h1', 'm1']);
   });
 
+  it('a chat id like __proto__ never touches Object.prototype', () => {
+    const { s, dir } = mk();
+    for (const id of ['__proto__', 'constructor', 'toString']) {
+      expect(s.meta(id)).toBeNull();
+      expect(s.read(id, 0).meta).toBeNull();
+      s.append(id, um('a'), init);
+      s.append(id, done);
+      expect(s.meta(id)).toMatchObject({ chatId: id, headSeq: 2 });
+    }
+    const probe = {} as Record<string, unknown>;
+    for (const k of ['headSeq', 'snapshotSeq', 'openTurn', 'updatedAt', 'chatId']) expect(probe[k]).toBeUndefined();
+    expect(s.list('/proj').map(m => m.chatId).sort()).toEqual(['__proto__', 'constructor', 'toString']);
+    s.close();
+    const again = mk(dir).s;
+    expect(again.meta('__proto__')).toMatchObject({ headSeq: 2 });
+    expect(({} as any).headSeq).toBeUndefined();
+  });
+
   it('list matches projectPath through a symlink', () => {
     const base = tmp();
     const real = path.join(base, 'real');

@@ -75,6 +75,16 @@ export interface ChatCommandsOpts {
   devlog?: (event: string, data: Record<string, unknown>) => void;
 }
 
+/**
+ * A chat a command creates: the desktop panel checked IndexedDB when it opened
+ * the chat (ensureChatInLog), so a desktop create is settled (imported) — else
+ * a /clear could be undone by a later fold of the IndexedDB mirror. A phone
+ * create stays unimported so the desktop can still fold its history in.
+ */
+function settledBy(origin: Origin | undefined): { imported?: true } {
+  return origin === 'remote' ? {} : { imported: true };
+}
+
 const defaultTimers: Timers = {
   set: (fn, ms) => setTimeout(fn, ms),
   clear: (h) => clearTimeout(h as ReturnType<typeof setTimeout>),
@@ -239,10 +249,10 @@ export class ChatCommands {
 
   private settings(cmd: Extract<ChatCommand, { kind: 'settings' }>): { seq: number } {
     const patch: Partial<ChatSettings> = { ...(cmd.settings ?? {}) };
-    let init: { projectPath: string; provider: Provider } | undefined;
+    let init: { projectPath: string; provider: Provider; imported?: boolean } | undefined;
     if (!this.store.meta(cmd.chatId)) {
       if (!cmd.projectPath || !patch.provider) throw new Error(`unknown chat ${cmd.chatId} (needs projectPath and settings.provider to create it)`);
-      init = { projectPath: cmd.projectPath, provider: patch.provider };
+      init = { projectPath: cmd.projectPath, provider: patch.provider, ...settledBy(cmd.origin) };
     }
     if (cmd.origin === 'remote') {
       // Cap only what the phone changes, judged against the chat's resulting settings.
@@ -287,7 +297,7 @@ export class ChatCommands {
       ...(images ? { images } : {}),
       ...(typeof cmd.taskId === 'string' ? { taskId: cmd.taskId } : {}),
       ...(queue ? { queued: true } : {}),
-    }, exists ? undefined : { projectPath: cmd.projectPath, ...(cmd.provider ? { provider: cmd.provider } : {}) });
+    }, exists ? undefined : { projectPath: cmd.projectPath, ...(cmd.provider ? { provider: cmd.provider } : {}), ...settledBy(origin) });
 
     const { projectPath, provider, state } = this.chat(cmd.chatId);
     const prompt = typeof cmd.promptOverride === 'string' ? cmd.promptOverride : text;

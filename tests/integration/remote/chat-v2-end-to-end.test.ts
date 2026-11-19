@@ -24,11 +24,12 @@ class Client {
   state: ChatState = emptyChatState({ provider: 'claude' });
   head = 0;
   gaps = 0;
+  folds = 0;
   snapshots = 0;
   dropped = false;
   ws!: WebSocket;
   inbox: any[] = [];
-  constructor(private url: string, private token: string, private onEntry?: (c: Client) => void) {}
+  constructor(private url: string, private token: string, private onEntry?: (c: Client) => void, private chatId = 'c1') {}
 
   async connect(): Promise<void> {
     this.dropped = false;
@@ -40,20 +41,27 @@ class Client {
       const m = JSON.parse(d.toString());
       this.inbox.push(m);
       if (m.type === 'chat.snapshot') { this.state = m.state; this.head = m.seq; this.snapshots++; }
-      if (m.type === 'chat.entries') for (const e of m.entries) this.apply(e);
-      if (m.type === 'chat.entry') this.apply(m.entry);
+      // Catch-up batches apply history_imported as a reducer no-op; only a live
+      // one at head + 1 means "a fold just happened: re-subscribe".
+      if (m.type === 'chat.entries') for (const e of m.entries) this.apply(e, false);
+      if (m.type === 'chat.entry') this.apply(m.entry, true);
     });
     await new Promise((r) => ws.once('open', r));
     ws.send(JSON.stringify({ type: 'auth', token: this.token }));
     await until(() => this.inbox.some((m) => m.type === 'auth_ok'));
-    ws.send(JSON.stringify({ v: 2, type: 'chat.subscribe', chatId: 'c1', after: this.head }));
+    ws.send(JSON.stringify({ v: 2, type: 'chat.subscribe', chatId: this.chatId, after: this.head }));
   }
 
-  private apply(e: ChatLogEntry) {
+  private apply(e: ChatLogEntry, live: boolean) {
     if (e.seq <= this.head) return;
     if (e.seq !== this.head + 1) {
       this.gaps++;
-      this.ws.send(JSON.stringify({ v: 2, type: 'chat.subscribe', chatId: 'c1', after: this.head }));
+      this.ws.send(JSON.stringify({ v: 2, type: 'chat.subscribe', chatId: this.chatId, after: this.head }));
+      return;
+    }
+    if (live && e.ev?.type === 'history_imported') {
+      this.folds++;
+      this.ws.send(JSON.stringify({ v: 2, type: 'chat.subscribe', chatId: this.chatId, after: this.head }));
       return;
     }
     this.state = reduceMany(this.state, [e]);
@@ -150,6 +158,68 @@ describe('chat protocol v2 end-to-end', () => {
     const acks = client.inbox.filter((m) => m.type === 'chat.ack').map((m) => m.result.duplicate).sort();
     expect(acks).toEqual([false, true]);
     expect(client.state).toEqual(store.state('c1'));
+    client.ws.close();
+  });
+
+  it('a live fold re-subscribes to its snapshot; a stray fold entry in a catch-up batch is a no-op', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chat-v2-fold-'));
+    const store = new ChatLogStore({ dir });
+    cleanup.push(() => fs.rmSync(dir, { recursive: true, force: true }), () => store.close());
+    const bus = new SessionBus();
+    const service = new ChatLogService({
+      store, bus: () => bus, sendToRenderer: () => {}, liveChats: () => [], providerOf: () => 'claude', devlog: () => {},
+    });
+    const commands = new ChatCommands({
+      log: service, store,
+      dispatch: {
+        send: () => {}, stop: () => {}, approve: async () => {}, answer: async () => {}, planReview: async () => {},
+        isBusy: () => false, isLoadPaused: () => false,
+      },
+    });
+    const pairing = new PairingStore(':memory:');
+    const server = new BridgeServer({
+      tailnetIp: '127.0.0.1', pairing, bus, pwaDir: null, screenshotSecret: 'e2e', loadScreenshot: async () => null,
+      port: 0, chatSync: () => ({ store, commands }),
+    });
+    const { port } = await server.start();
+    cleanup.push(() => server.stop());
+    const code = server.mintPairingCode();
+    const { token } = await (await fetch(`http://127.0.0.1:${port}/pair`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code, deviceLabel: 'E2E' }),
+    })).json();
+    const init = { projectPath: P, provider: 'claude' as const, createdAt: 1, updatedAt: 1 };
+    const turn = (t: number) => {
+      service.record({ type: 'streaming_start', projectPath: P, scope: 'c2', turnSeq: t });
+      service.record({ type: 'assistant', projectPath: P, scope: 'c2', turnSeq: t, message: { content: [{ type: 'text', text: `a${t}` }] } });
+      service.record({ type: 'done', projectPath: P, scope: 'c2', turnSeq: t });
+    };
+    turn(1); // a backend event created the log: not imported
+
+    // A fold whose snapshot write fails leaves a stray history_imported in the log (R15.3).
+    const snap = path.join(dir, 'c2.snap.json');
+    fs.mkdirSync(snap);
+    expect(() => service.importMessages('c2', init, [{ id: 'old1', role: 'user', content: 'old1', timestamp: 0 }])).toThrow();
+    fs.rmSync(snap, { recursive: true });
+    fs.rmSync(snap + '.tmp', { force: true });
+    turn(2);
+
+    const client = new Client(`ws://127.0.0.1:${port}/ws`, token, undefined, 'c2');
+    await client.connect();
+    await until(() => client.head === store.meta('c2')!.headSeq);
+    await new Promise((r) => setTimeout(r, 50)); // a re-subscribe loop would show here
+    expect(client.folds).toBe(0);
+    expect(client.inbox.filter((m) => m.type === 'chat.entries')).toHaveLength(1);
+    expect(client.state).toEqual(store.state('c2'));
+
+    // A real fold while live: the client re-subscribes and takes the snapshot.
+    expect(service.importMessages('c2', init, [{ id: 'old1', role: 'user', content: 'old1', timestamp: 0 }])).toBe('folded');
+    await until(() => client.snapshots === 1 && client.head === store.meta('c2')!.headSeq);
+    expect(client.folds).toBe(1);
+    expect(client.state).toEqual(store.state('c2'));
+    expect(client.state.messages.map((m) => m.id)[0]).toBe('old1');
+    turn(3);
+    await until(() => client.head === store.meta('c2')!.headSeq);
+    expect(client.state).toEqual(store.state('c2'));
     client.ws.close();
   });
 });

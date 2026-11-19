@@ -259,6 +259,28 @@ describe('ChatV2', () => {
     expect(frames.at(-1).result).toMatchObject({ ok: false, error: 'not queued: gone' });
   });
 
+  it('rejects chat ids outside the safe shape (e.g. __proto__) without touching the store', async () => {
+    const { v2, ws, frames, store } = mk();
+    for (const chatId of ['__proto__', 'constructor', 'toString', 'a/b', 'x'.repeat(129), '']) {
+      frames.length = 0;
+      await v2.handle(ws, { type: 'chat.subscribe', chatId, after: 0 });
+      await v2.handle(ws, { type: 'chat.page', reqId: 1, chatId });
+      expect(frames.map(f => [f.type, f.code])).toEqual([['chat.error', 'bad_request'], ['chat.error', 'bad_request']]);
+      await v2.handle(ws, { type: 'chat.command', command: { kind: 'send', chatId, clientId: 'k-' + chatId, text: 'x', projectPath: P } });
+      expect(frames.at(-1)).toMatchObject({ type: 'chat.ack', result: { ok: false, error: 'invalid chatId' } });
+    }
+    expect(store.meta('__proto__')).toBeNull();
+    expect(({} as any).headSeq).toBeUndefined();
+  });
+
+  it('subscribing ahead to a chat that does not exist yet still delivers its first entries', async () => {
+    const { service, v2, ws, frames } = mk();
+    await v2.handle(ws, { type: 'chat.subscribe', chatId: 'new1', after: 5 });
+    expect(frames.map(f => f.type)).toEqual(['chat.entries']);
+    service.appendClient('new1', um('a'), { projectPath: P });
+    expect(frames.at(-1)).toMatchObject({ type: 'chat.entry', entry: { seq: 1 } });
+  });
+
   it('chats.list matches a symlinked projectPath', async () => {
     const { service, v2, ws, frames } = mk();
     const base = tmp();
@@ -335,6 +357,33 @@ describe('ChatV2 on the bridge socket', () => {
         ws.on('open', () => ws.send(JSON.stringify({ v: 2, type: 'chat.subscribe', chatId: 'c1', after: 0 })));
       });
       expect(close).toBe(4001);
+    } finally { await server.stop(); }
+  });
+
+  it('a throwing v2 handler replies chat.error instead of rejecting', async () => {
+    const pairing = new PairingStore(':memory:');
+    const server = new BridgeServer({
+      tailnetIp: '127.0.0.1', pairing, bus: new SessionBus(), pwaDir: null,
+      screenshotSecret: 'x', loadScreenshot: async () => null,
+      chatSync: () => { throw new Error('boom'); },
+    });
+    const { port } = await server.start();
+    try {
+      const code = server.mintPairingCode();
+      const { token } = await (await fetch(`http://127.0.0.1:${port}/pair`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code, deviceLabel: 'T' }),
+      })).json();
+      const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+      const inbox = collect(ws);
+      await new Promise((r) => ws.once('open', r));
+      ws.send(JSON.stringify({ type: 'auth', token }));
+      await until(() => inbox.some(m => m.type === 'auth_ok'));
+      ws.send(JSON.stringify({ v: 2, type: 'chats.list', reqId: 1, projectPath: P }));
+      await until(() => inbox.some(m => m.type === 'chat.error'));
+      expect(inbox.find(m => m.type === 'chat.error')).toMatchObject({ v: 2, code: 'internal', message: 'boom' });
+      ws.send(JSON.stringify({ type: 'ping' }));
+      await until(() => inbox.some(m => m.type === 'pong'));
+      ws.close();
     } finally { await server.stop(); }
   });
 

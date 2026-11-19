@@ -45,7 +45,8 @@ export class ChatLogStore {
   private now: () => number;
   private flushMs: number;
   private compactAfter: number;
-  private index: Record<string, ChatMeta> = {};
+  /** Null-prototype: chat ids like '__proto__' are plain keys, never Object.prototype. */
+  private index: Record<string, ChatMeta> = Object.create(null);
   private loaded = new Map<string, Loaded>();
   private buffers = new Map<string, string[]>();
   private indexDirty = false;
@@ -63,7 +64,7 @@ export class ChatLogStore {
     fs.mkdirSync(this.dir, { recursive: true });
     try {
       const parsed = JSON.parse(fs.readFileSync(this.indexPath(), 'utf8'));
-      if (parsed && typeof parsed === 'object') this.index = parsed;
+      if (parsed && typeof parsed === 'object') this.index = Object.assign(Object.create(null), parsed);
     } catch { /* missing or corrupt index starts empty */ }
   }
 
