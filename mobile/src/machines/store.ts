@@ -44,10 +44,10 @@ export async function addMachine(
   const existing = list.find((x) => x.baseUrl === m.baseUrl);
   const machine: Machine = {
     id: existing?.id ?? crypto.randomUUID(),
-    label: m.label,
+    label: existing?.label ?? m.label,
     baseUrl: m.baseUrl,
     deviceId: m.deviceId,
-    addedAt: Date.now(),
+    addedAt: existing?.addedAt ?? Date.now(),
   };
   await native.keychainSet(tokenKey(machine.id), m.token);
   save(existing ? list.map((x) => (x.id === machine.id ? machine : x)) : [...list, machine]);

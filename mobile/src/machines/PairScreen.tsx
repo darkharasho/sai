@@ -23,15 +23,42 @@ export function PairScreen({ onPaired, onCancel, pairFn = defaultPair }: PairScr
   const streamRef = useRef<MediaStream | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const busyRef = useRef(false);
+  const startingRef = useRef(false);
   const mounted = useRef(true);
 
-  const stopCamera = useCallback(() => {
+  const stopScanning = useCallback(() => {
     if (timerRef.current) clearInterval(timerRef.current);
     timerRef.current = null;
+  }, []);
+
+  const stopCamera = useCallback(() => {
+    stopScanning();
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
     if (mounted.current) setScanning(false);
-  }, []);
+  }, [stopScanning]);
+
+  // Always calls the latest submit (live label/pairFn), never a closure captured when the camera started.
+  const submitRef = useRef<(url: string) => Promise<void>>(async () => {});
+
+  const startScanning = useCallback(() => {
+    stopScanning();
+    const video = videoRef.current;
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    timerRef.current = setInterval(() => {
+      if (!video || !ctx || video.videoWidth === 0 || busyRef.current) return;
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      ctx.drawImage(video, 0, 0);
+      const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const hit = jsQR(img.data, img.width, img.height);
+      if (hit && parsePairUrl(hit.data)) {
+        stopScanning();
+        void submitRef.current(hit.data);
+      }
+    }, SCAN_INTERVAL_MS);
+  }, [stopScanning]);
 
   const submit = useCallback(async (url: string) => {
     if (busyRef.current) return;
@@ -44,14 +71,21 @@ export function PairScreen({ onPaired, onCancel, pairFn = defaultPair }: PairScr
       stopCamera();
       if (mounted.current) onPaired(m);
     } catch (e) {
-      if (mounted.current) setError(e instanceof PairError ? e.message : "can't reach desktop — is Tailscale on?");
+      if (mounted.current) {
+        setError(e instanceof PairError ? e.message : "can't reach desktop — is Tailscale on?");
+        // Camera still on: keep looking so the user can point at a fresh code.
+        if (streamRef.current) startScanning();
+      }
     } finally {
       busyRef.current = false;
       if (mounted.current) setBusy(false);
     }
-  }, [label, onPaired, pairFn, stopCamera]);
+  }, [label, onPaired, pairFn, stopCamera, startScanning]);
+  submitRef.current = submit;
 
   const startCamera = useCallback(async () => {
+    if (startingRef.current || streamRef.current) return;
+    startingRef.current = true;
     setError(null);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
@@ -59,26 +93,15 @@ export function PairScreen({ onPaired, onCancel, pairFn = defaultPair }: PairScr
       streamRef.current = stream;
       const video = videoRef.current;
       if (video) { video.srcObject = stream; await video.play().catch(() => {}); }
+      if (!mounted.current) { stopCamera(); return; }
       setScanning(true);
-      const canvas = document.createElement('canvas');
-      const ctx = canvas.getContext('2d', { willReadFrequently: true });
-      timerRef.current = setInterval(() => {
-        if (!video || !ctx || video.videoWidth === 0 || busyRef.current) return;
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        ctx.drawImage(video, 0, 0);
-        const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const hit = jsQR(img.data, img.width, img.height);
-        if (hit && parsePairUrl(hit.data)) {
-          if (timerRef.current) clearInterval(timerRef.current);
-          timerRef.current = null;
-          void submit(hit.data);
-        }
-      }, SCAN_INTERVAL_MS);
+      startScanning();
     } catch {
-      setError('camera unavailable, paste the pairing link instead');
+      if (mounted.current) setError('camera unavailable, paste the pairing link instead');
+    } finally {
+      startingRef.current = false;
     }
-  }, [submit]);
+  }, [startScanning, stopCamera]);
 
   useEffect(() => {
     mounted.current = true;
