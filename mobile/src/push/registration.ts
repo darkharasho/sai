@@ -57,6 +57,8 @@ interface State {
   waiters: Array<(id: PushIdentity | null) => void>;
   failedAt: number;
   linking: Map<string, Promise<boolean>>;
+  /** machine id → when minting its send secret last failed (unforced retries wait RETRY_AFTER_MS). */
+  mintFailedAt: Map<string, number>;
   listeners: Set<(id: PushIdentity) => void>;
 }
 
@@ -64,7 +66,7 @@ const states = new WeakMap<FullNativeApi, State>();
 function stateOf(native: FullNativeApi): State {
   let s = states.get(native);
   if (!s) {
-    s = { identity: null, listening: false, inflight: null, waiters: [], failedAt: 0, linking: new Map(), listeners: new Set() };
+    s = { identity: null, listening: false, inflight: null, waiters: [], failedAt: 0, linking: new Map(), mintFailedAt: new Map(), listeners: new Set() };
     states.set(native, s);
   }
   return s;
@@ -230,8 +232,11 @@ async function mintSecret(native: FullNativeApi, machine: Machine, id: PushIdent
     return secret;
   }
   warn(`relay secret failed (${res.status})`);
-  // The registration is gone (APNs said the token died) or the owner token no longer matches.
-  return res.status === 401 || res.status === 404 ? 'stale' : null;
+  // Only the relay's own answers mean the registration is gone (APNs said the
+  // token died) or the owner token no longer matches. Any other 401/404 (a
+  // route-level not_found during a deploy mismatch, a proxy) is a plain failure.
+  const code = d && typeof d === 'object' ? (d as { error?: unknown }).error : undefined;
+  return (res.status === 404 && code === 'unknown_push_id') || (res.status === 401 && code === 'unauthorized') ? 'stale' : null;
 }
 
 async function linkOnce(machine: Machine, client: V2Client, native: FullNativeApi): Promise<boolean> {
@@ -243,6 +248,8 @@ async function linkOnce(machine: Machine, client: V2Client, native: FullNativeAp
 
   let secret = parseSecret(await kcGet(native, secretKeyName(machine.id)));
   if (!secret || secret.pushId !== id.pushId) {
+    const failedAt = s.mintFailedAt.get(machine.id);
+    if (failedAt && Date.now() - failedAt < RETRY_AFTER_MS) return false;
     let minted = await mintSecret(native, machine, id);
     if (minted === 'stale') {
       // Re-register (the relay hands out a fresh pushId) and try once more.
@@ -252,7 +259,8 @@ async function linkOnce(machine: Machine, client: V2Client, native: FullNativeAp
       id = await ensurePushRegistration(native, { force: true });
       minted = id ? await mintSecret(native, machine, id) : null;
     }
-    if (!minted || minted === 'stale' || !id) return false;
+    if (!minted || minted === 'stale' || !id) { s.mintFailedAt.set(machine.id, Date.now()); return false; }
+    s.mintFailedAt.delete(machine.id);
     secret = minted;
   }
 
@@ -293,8 +301,14 @@ export function linkMachine(machine: Machine, client: V2Client, native: FullNati
  * desktop can no longer use for anything readable (the seal key is gone).
  */
 export async function unlinkMachine(machine: Pick<Machine, 'id'>, client: V2Client | null, native: FullNativeApi): Promise<void> {
+  const s = stateOf(native);
   try {
+    // Synchronous, before any await: the caller closes the socket right after.
     if (client?.connected) client.request({ type: 'push.unregister' }).catch(() => { /* closing anyway */ });
+    // A link still minting would write the secret and seal key back after we delete them.
+    const running = s.linking.get(machine.id);
+    if (running) await running.catch(() => false);
+    s.mintFailedAt.delete(machine.id);
     const secret = parseSecret(await kcGet(native, secretKeyName(machine.id)));
     const pushId = await kcGet(native, PUSH_ID_KEY);
     const ownerToken = await kcGet(native, OWNER_TOKEN_KEY);

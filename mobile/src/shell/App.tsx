@@ -18,7 +18,7 @@ import { useMachines } from '../machines/hooks';
 import { MachineList } from '../machines/MachineList';
 import { PairScreen } from '../machines/PairScreen';
 import { getToken, listMachines, type Machine } from '../machines/store';
-import { ensurePushRegistration, linkMachine, onPushIdentity } from '../push/registration';
+import { currentPushIdentity, ensurePushRegistration, linkMachine, onPushIdentity } from '../push/registration';
 import { getPresence } from '../push/presence';
 import { parseTap, routeTap } from '../push/routing';
 import {
@@ -91,11 +91,21 @@ export function PhoneApp() {
   useEffect(() => onActive(setConn), []);
   useEffect(() => onAppSettings(setSettings), []);
   const [notifPerm, setNotifPerm] = useState<PushPermission | null>(null);
+  const lastPerm = useRef<PushPermission | null>(null);
   const refreshNotifPerm = useCallback(() => {
     const push = getNative().push;
     if (!push) return;
-    void push.checkPermission().then(setNotifPerm, () => {});
+    void push.checkPermission().then((p) => {
+      const prev = lastPerm.current;
+      lastPerm.current = p;
+      setNotifPerm(p);
+      // Turned on in iOS Settings since we last looked: register now, not at the next launch.
+      if (p === 'granted' && prev !== null && prev !== 'granted' && listMachines().length && !currentPushIdentity(getNative())) {
+        void ensurePushRegistration(getNative());
+      }
+    }, () => {});
   }, []);
+  useEffect(() => { refreshNotifPerm(); }, [refreshNotifPerm]);
   useEffect(() => startLifecycle(() => getActive()?.client ?? null, (isActive) => {
     getPresence().setForeground(isActive);
     if (isActive) refreshNotifPerm(); // back from iOS Settings

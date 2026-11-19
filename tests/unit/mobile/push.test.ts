@@ -16,6 +16,7 @@ import { parsePushRegistration } from '../../../electron/services/push/registry'
 import { PUSH_RELAY_URL } from '../../../src/lib/push/config';
 import { disconnect, installSai } from '../../../mobile/src/shell/connection';
 import { PhoneApp } from '../../../mobile/src/shell/App';
+import { App as CapApp } from '@capacitor/app';
 
 // The app shell reads getNative(); the App test below swaps in a fake device.
 const holder = vi.hoisted(() => ({ native: null as FullNativeApi | null }));
@@ -45,6 +46,8 @@ function fakeDevice(opts: { perm?: PushPermission } = {}) {
   const tap = (d: Record<string, unknown>) => { for (const cb of actionListeners) cb(d); };
   const relayCalls: HttpRequest[] = [];
   let relayDown = false;
+  /** Overrides POST /v1/secrets (once per call); undefined = the normal answer. */
+  let secretsReply: (() => Promise<{ status: number; data: unknown }> | { status: number; data: unknown }) | null = null;
 
   const http = vi.fn(async (req: HttpRequest) => {
     relayCalls.push(req);
@@ -57,6 +60,7 @@ function fakeDevice(opts: { perm?: PushPermission } = {}) {
       return { status: 200, data: { pushId: b64url(22, regSeq), ownerToken: b64url(43, regSeq + 10) } };
     }
     if (req.method === 'POST' && path === '/v1/secrets') {
+      if (secretsReply) { const r = secretsReply; secretsReply = null; return r(); }
       secSeq++;
       return { status: 200, data: { secretId: b64url(22, 30 + secSeq), sendSecret: b64url(43, 40 + secSeq) } };
     }
@@ -84,6 +88,7 @@ function fakeDevice(opts: { perm?: PushPermission } = {}) {
     native, kc, k, relayCalls, http, tap,
     setPerm(p: PushPermission) { perm = p; },
     setRelayDown(v: boolean) { relayDown = v; },
+    replyToSecretsOnce(r: NonNullable<typeof secretsReply>) { secretsReply = r; },
     /** iOS hands the app a new APNs token. */
     rotate(token: string) { nextToken = token; for (const cb of regListeners) cb(token); },
   };
@@ -244,6 +249,75 @@ describe('push registration', () => {
   });
 });
 
+describe('push fix round 1', () => {
+  it('a route-level 404 or other 401 is a plain failure: identity kept, backoff applies', async () => {
+    for (const reply of [{ status: 404, data: { error: 'not_found' } }, { status: 401, data: 'nope' }]) {
+      localStorage.clear();
+      const dev = fakeDevice({ perm: 'granted' });
+      const m = await pairedMachine(dev.native);
+      const id = await ensurePushRegistration(dev.native);
+      const { client, sock } = connectedClient();
+      dev.replyToSecretsOnce(() => reply);
+      expect(await linkMachine(m, client, dev.native)).toBe(false);
+      expect(dev.kc.get(dev.k(PUSH_ID_KEY))).toBe(id!.pushId);
+      expect(dev.kc.get(dev.k(OWNER_TOKEN_KEY))).toBe(id!.ownerToken);
+      expect(relayTo(dev.relayCalls, 'POST', '/v1/register')).toHaveLength(1);
+      // The next auth_ok within the backoff doesn't hit the relay again.
+      expect(await linkMachine(m, client, dev.native)).toBe(false);
+      expect(relayTo(dev.relayCalls, 'POST', '/v1/secrets')).toHaveLength(1);
+      expect(sock().types()).not.toContain('push.register');
+      client.close();
+    }
+  });
+
+  it('unknown_push_id / unauthorized from /v1/secrets re-registers and mints again', async () => {
+    for (const reply of [{ status: 404, data: { error: 'unknown_push_id' } }, { status: 401, data: { error: 'unauthorized' } }]) {
+      localStorage.clear();
+      const dev = fakeDevice({ perm: 'granted' });
+      const m = await pairedMachine(dev.native);
+      const old = await ensurePushRegistration(dev.native);
+      const { client, sock } = connectedClient();
+      dev.replyToSecretsOnce(() => reply);
+      expect(await linkMachine(m, client, dev.native)).toBe(true);
+      const reg = relayTo(dev.relayCalls, 'POST', '/v1/register');
+      expect(reg).toHaveLength(2);
+      expect(reg[1].body).toEqual({ apnsToken: TOKEN_A, env: 'sandbox' }); // fresh, not the dead pushId
+      const fresh = dev.kc.get(dev.k(PUSH_ID_KEY));
+      expect(fresh).not.toBe(old!.pushId);
+      expect(sock().sent.find((f) => f.type === 'push.register')!.pushId).toBe(fresh);
+      client.close();
+    }
+  });
+
+  it('unlink waits for an in-flight link, then revokes what it minted', async () => {
+    const dev = fakeDevice({ perm: 'granted' });
+    const m = await pairedMachine(dev.native);
+    const id = await ensurePushRegistration(dev.native);
+    const { client, sock } = connectedClient();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    const secretId = b64url(22, 77);
+    dev.replyToSecretsOnce(async () => { await gate; return { status: 200, data: { secretId, sendSecret: b64url(43, 78) } }; });
+    const linking = linkMachine(m, client, dev.native);
+    await flush();
+    expect(relayTo(dev.relayCalls, 'POST', '/v1/secrets')).toHaveLength(1);
+
+    const removing = removeMachine(m.id, dev.native, client);
+    // push.unregister goes out before anything is awaited.
+    expect(sock().types()).toContain('push.unregister');
+    release();
+    await linking;
+    await removing;
+
+    expect(dev.kc.has(dev.k(secretKeyName(m.id)))).toBe(false);
+    expect(dev.kc.has(dev.k(sealKeyName(m.id), { accessGroup: SHARED_ACCESS_GROUP }))).toBe(false);
+    const del = relayTo(dev.relayCalls, 'DELETE', '/v1/secrets');
+    expect(del).toHaveLength(1);
+    expect(del[0].body).toEqual({ pushId: id!.pushId, ownerToken: id!.ownerToken, secretId });
+    client.close();
+  });
+});
+
 describe('push tap routing', () => {
   it('tap routes to machine/workspace/chat', async () => {
     const dev = fakeDevice();
@@ -334,5 +408,34 @@ describe('PhoneApp push wiring', () => {
     } finally {
       delete document.documentElement.dataset.saiPhone;
     }
+  });
+});
+
+describe('PhoneApp permission granted in Settings', () => {
+  it('registers on resume once the permission turned granted, without prompting', async () => {
+    const dev = fakeDevice({ perm: 'denied' });
+    holder.native = dev.native;
+    vi.stubGlobal('WebSocket', FakeSocket);
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('offline'); }));
+    installSai();
+    const addListener = vi.mocked(CapApp.addListener);
+    addListener.mockClear();
+    await pairedMachine(dev.native);
+    render(createElement(PhoneApp));
+    await waitFor(() => expect(addListener).toHaveBeenCalled());
+    await waitFor(() => expect(dev.native.push!.checkPermission).toHaveBeenCalled());
+    await flush();
+    expect(relayTo(dev.relayCalls, 'POST', '/v1/register')).toHaveLength(0);
+
+    const onState = addListener.mock.calls.find((c) => c[0] === 'appStateChange')![1] as (s: { isActive: boolean }) => void;
+    // Resumed, still denied: nothing.
+    await act(async () => { onState({ isActive: true }); await flush(); });
+    expect(relayTo(dev.relayCalls, 'POST', '/v1/register')).toHaveLength(0);
+
+    // The user enabled notifications in iOS Settings and came back.
+    dev.setPerm('granted');
+    await act(async () => { onState({ isActive: false }); onState({ isActive: true }); await flush(); });
+    await waitFor(() => expect(relayTo(dev.relayCalls, 'POST', '/v1/register')).toHaveLength(1));
+    expect(dev.native.push!.requestPermission).not.toHaveBeenCalled();
   });
 });
