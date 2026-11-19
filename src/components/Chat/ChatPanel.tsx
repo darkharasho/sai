@@ -1335,12 +1335,13 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode:
         setFollowOn(false);
       }
     };
-    // A finger down during the follow tween takes over: stop the tween and release follow.
+    // A finger down takes over: it releases any in-flight jump guard, and during the
+    // follow tween it stops the tween and releases follow.
     const onTouchStart = () => {
+      jumpingRef.current = false;
       const cancel = tweenCancelRef.current;
       tweenCancelRef.current = null;
       if (!cancel || !cancel()) return;
-      jumpingRef.current = false;
       isAtBottomRef.current = false;
       setFollowOn(false);
     };
@@ -1547,8 +1548,8 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode:
     lastScrollTopRef.current = top;
     lastScrollMaxRef.current = max;
     let released = false;
-    if (dropped > 4 && !programmaticScroll.current && !clamped) {
-      jumpingRef.current = false;
+    // A jump's own smooth scroll moves up too; leave its guard alone (wheel/touchstart release it).
+    if (dropped > 4 && !programmaticScroll.current && !clamped && !jumpingRef.current) {
       isAtBottomRef.current = false;
       setFollowOn(false);
       released = true;

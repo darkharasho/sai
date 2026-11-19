@@ -144,6 +144,63 @@ describe('ChatPanel scroll-follow', () => {
   });
 });
 
+describe('ChatPanel jump-to-message guard', () => {
+  type IO = { cb: (e: Array<{ isIntersecting: boolean }>) => void; targets: Element[] };
+  let ios: IO[] = [];
+  beforeEach(() => {
+    ios = [];
+    Object.defineProperty(window, 'IntersectionObserver', {
+      writable: true,
+      value: class {
+        rec: IO;
+        constructor(cb: IO['cb']) { this.rec = { cb, targets: [] }; ios.push(this.rec); }
+        observe(t: Element) { this.rec.targets.push(t); }
+        disconnect() { this.rec.targets = []; }
+        unobserve() {}
+      },
+    });
+  });
+
+  // 10 assistant rows, the user's question, then 60 more rows: the question sits
+  // outside the 50-message tail, so the pinned bar offers "Jump".
+  async function mountLong() {
+    const msgs: any[] = [];
+    for (let i = 0; i < 10; i++) msgs.push({ id: `a${i}`, role: 'assistant', content: 'x', timestamp: i });
+    msgs.push({ id: 'uq', role: 'user', content: 'question', timestamp: 10 });
+    for (let i = 0; i < 60; i++) msgs.push({ id: `b${i}`, role: 'assistant', content: 'y', timestamp: 11 + i });
+    log.seed('c1', msgs, { projectPath: '/project' });
+    const r = render(<ChatPanel {...baseProps()} />);
+    await flushChatlog();
+    const el = r.container.querySelector('.chat-messages') as HTMLElement;
+    const g = fakeScroller(el);
+    scrollTo(el, g, 500);
+    await act(async () => { fireEvent.click(screen.getByTitle('Jump to message')); });
+    // The jump re-windowed to idx - 5 = 5: 66 rows mounted, the sentinel still live.
+    expect(screen.getAllByTestId('chat-message')).toHaveLength(66);
+    return { el, g, r };
+  }
+  const fireSentinel = (r: ReturnType<typeof render>) => {
+    const sentinel = r.container.querySelector('.chat-load-sentinel')!;
+    const io = ios.filter(o => o.targets.includes(sentinel)).pop()!;
+    act(() => { io.cb([{ isIntersecting: true }]); });
+  };
+
+  it("the jump's own upward smooth-scroll events don't release the guard", async () => {
+    const { el, g, r } = await mountLong();
+    scrollTo(el, g, 420); // smooth scroll heading up toward the target
+    scrollTo(el, g, 300);
+    fireSentinel(r);
+    expect(screen.getAllByTestId('chat-message')).toHaveLength(66);
+  });
+
+  it('a touchstart during the jump releases the guard', async () => {
+    const { el, r } = await mountLong();
+    fireEvent.touchStart(el);
+    fireSentinel(r);
+    expect(screen.getAllByTestId('chat-message')).toHaveLength(71);
+  });
+});
+
 describe('ChatPanel load earlier row', () => {
   const withOlder = (n: number) => {
     const orig = log.open.getMockImplementation()!;
