@@ -59,6 +59,12 @@ export interface ChatMeta {
   provider: ChatSettings['provider'];
   /** Equals the post-reduce state's turn.streaming; lets startup find open turns without reducing logs. */
   openTurn: boolean;
+  /**
+   * The chat's pre-log (IndexedDB) history is settled: imported, or the chat
+   * was created by a client (which checks IndexedDB first). False/absent for a
+   * log a backend event created — importMessages folds the history in front.
+   */
+  imported?: boolean;
 }
 
 export interface PendingApproval {

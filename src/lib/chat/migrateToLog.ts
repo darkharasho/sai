@@ -1,10 +1,21 @@
 import { dbGetAllSessions, dbGetMessages, dbGetSession } from '../../chatDb';
 import type { ChatSession } from '../../types';
 
-const FLAG = 'sai.chatlog.migrated.v1';
+export const MIGRATED_FLAG = 'sai.chatlog.migrated.v1';
+const FLAG = MIGRATED_FLAG;
 
-/** Chat ids known to already be in the log (so repeat checks are free). */
+/** Chat ids whose IndexedDB history is known to be in the log (so repeat checks are free). */
 const knownInLog = new Set<string>();
+
+/** True once every IndexedDB chat has been imported (the one-shot migration finished). */
+export function isMigrationDone(): boolean {
+  try { return !!localStorage.getItem(FLAG); } catch { return false; }
+}
+
+/** True when this chat's IndexedDB history is known to be in the log. */
+export function isChatImported(chatId: string): boolean {
+  return knownInLog.has(chatId);
+}
 
 async function importSession(s: ChatSession): Promise<boolean> {
   const chatlog = (window as any).sai?.chatlog;
@@ -15,7 +26,7 @@ async function importSession(s: ChatSession): Promise<boolean> {
     s.id,
     { projectPath: s.projectPath, provider: s.aiProvider ?? 'claude', title: s.title, createdAt: s.createdAt, updatedAt: s.updatedAt },
     messages,
-  ).then((imported: boolean) => { knownInLog.add(s.id); return imported; });
+  ).then((result: 'created' | 'folded' | 'marked' | false) => { knownInLog.add(s.id); return !!result; });
 }
 
 /** One-shot, idempotent copy of every IndexedDB chat into the main-process log. */
@@ -49,16 +60,26 @@ async function runMigration(opts: { batch?: number }): Promise<{ imported: numbe
   return result;
 }
 
-/** Imports one chat if its log is missing. Cheap when already present: no message load, no IPC payload. */
+/**
+ * Makes sure a chat's IndexedDB history is in the log: imports it when the log
+ * is missing, and FOLDS it in when a log exists that was never imported (a
+ * backend event created it first — e.g. a start-up `ready` racing this check).
+ * Cheap once known: no message load, no IPC payload.
+ */
 export async function ensureChatInLog(chatId: string): Promise<void> {
   if (knownInLog.has(chatId)) return;
   const chatlog = (window as any).sai?.chatlog;
   if (!chatlog) return;
   const s = await dbGetSession(chatId);
-  if (!s?.projectPath) return;
-  const listed = await chatlog.list(s.projectPath);
-  if (listed.some((m: { chatId: string }) => m.chatId === chatId)) { knownInLog.add(chatId); return; }
-  await importSession(s);
+  if (s?.projectPath) {
+    const listed: Array<{ chatId: string; imported?: boolean }> = await chatlog.list(s.projectPath);
+    if (listed.some(m => m.chatId === chatId && m.imported)) { knownInLog.add(chatId); return; }
+    await importSession(s);
+    return;
+  }
+  // No IndexedDB history: nothing to fold. An existing log is settled as-is
+  // (any IndexedDB row written from now on is a mirror of the log).
+  await chatlog.importMessages(chatId, { projectPath: '', provider: 'claude', createdAt: 0, updatedAt: 0 }, []);
 }
 
 /** Test hook. */

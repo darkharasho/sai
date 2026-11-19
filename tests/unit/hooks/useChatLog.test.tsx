@@ -79,6 +79,22 @@ describe('useChatLog', () => {
     expect(result.current.lastApplied.current.map((e) => e.seq)).toEqual([2, 3]);
   });
 
+  it('a history_imported entry reloads the chat from seq 0 (main folded history in front)', async () => {
+    openMock.mockResolvedValueOnce(res([entry('a', 1)]));
+    const { result } = renderHook(() => useChatLog('a', settings));
+    await flushMicro();
+    const base = { ...(await import('../../../src/lib/chat/reducer')).emptyChatState(settings) };
+    const folded = { ...base, lastSeq: 1, messages: [{ id: 'old', role: 'user', content: 'old', timestamp: 0 }, { id: 'm1', role: 'user', content: 'm1', timestamp: 1 }] };
+    openMock.mockResolvedValueOnce(res([{ chatId: 'a', seq: 2, ts: 2, ev: { type: 'history_imported' } }], { chatId: 'a', seq: 1, state: folded }));
+    act(() => { listener({ chatId: 'a', seq: 2, ts: 2, ev: { type: 'history_imported' } }); });
+    await flushMicro();
+    expect(openMock).toHaveBeenLastCalledWith('a', 0);
+    expect(result.current.state?.messages.map((m: any) => m.id)).toEqual(['old', 'm1']);
+    expect(result.current.state?.lastSeq).toBe(2);
+    // History, not live activity: no side-effect entries.
+    expect(result.current.lastApplied.current).toEqual([]);
+  });
+
   it('batches many deltas into one render per frame', async () => {
     openMock.mockResolvedValue(res([entry('a', 1)]));
     let renders = 0;

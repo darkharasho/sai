@@ -27,7 +27,7 @@ beforeEach(async () => {
     return true;
   });
   (globalThis as any).window = (globalThis as any).window ?? globalThis;
-  list = vi.fn(async () => [...logged.keys()].map(chatId => ({ chatId })));
+  list = vi.fn(async () => [...logged.keys()].map(chatId => ({ chatId, imported: true })));
   (window as any).sai = { chatlog: { importMessages, list } };
   _resetMigrateStateForTests();
 });
@@ -106,6 +106,18 @@ describe('ensureChatInLog', () => {
     expect(importMessages).toHaveBeenCalledTimes(1);
     await ensureChatInLog('b');
     expect(list).toHaveBeenCalledTimes(2);
+    // No IndexedDB row: nothing to fold; an existing log is only marked settled.
     await expect(ensureChatInLog('nope')).resolves.toBeUndefined();
+    expect(importMessages).toHaveBeenLastCalledWith('nope', expect.objectContaining({ projectPath: '' }), []);
+  });
+
+  it('imports (folds) when a log exists that was never imported, even though list() shows it', async () => {
+    await dbSaveSession('/p', session('a'));
+    // A start-up `ready` made main create the log before this check ran.
+    list.mockResolvedValue([{ chatId: 'a' }]);
+    await ensureChatInLog('a');
+    expect(importMessages).toHaveBeenCalledWith('a', expect.objectContaining({ projectPath: '/p' }), [
+      expect.objectContaining({ id: 'a-m1' }), expect.objectContaining({ id: 'a-m2' }),
+    ]);
   });
 });

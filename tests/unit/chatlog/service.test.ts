@@ -22,7 +22,8 @@ afterEach(() => {
 });
 
 function mk(over: Partial<ChatLogServiceOpts> = {}) {
-  const store = new ChatLogStore({ dir: tmp() });
+  const dir = tmp();
+  const store = new ChatLogStore({ dir });
   stores.push(store);
   const sent: ChatLogEntry[] = [];
   const bus = new SessionBus();
@@ -37,7 +38,7 @@ function mk(over: Partial<ChatLogServiceOpts> = {}) {
     devlog,
     ...over,
   });
-  return { svc, store, sent, bus, devlog, live };
+  return { svc, store, sent, bus, devlog, live, dir };
 }
 
 describe('ChatLogService.record', () => {
@@ -57,7 +58,7 @@ describe('ChatLogService.record', () => {
     const { svc } = mk();
     const seqs: Array<[string, number]> = [];
     for (const scope of ['c1', 'c2', 'c1', 'c1', 'c2']) {
-      const [e] = svc.record({ type: 'status', projectPath: '/p', scope });
+      const [e] = svc.record({ type: 'user', projectPath: '/p', scope });
       seqs.push([e.chatId, e.seq]);
     }
     expect(seqs).toEqual([['c1', 1], ['c2', 1], ['c1', 2], ['c1', 3], ['c2', 2]]);
@@ -65,8 +66,8 @@ describe('ChatLogService.record', () => {
 
   it("'*' load_guard fans out to liveChats with one entry each, same card id", () => {
     const { svc, store, live } = mk();
-    svc.record({ type: 'status', projectPath: '/p', scope: 'c1' });
-    svc.record({ type: 'status', projectPath: '/p', scope: 'c2' });
+    svc.record({ type: 'user', projectPath: '/p', scope: 'c1' });
+    svc.record({ type: 'user', projectPath: '/p', scope: 'c2' });
     live.set('kimi', ['c1', 'c2', 'c1']);
     const msg = { type: 'load_guard', id: 'lg-1', projectPath: '/p', scope: '*', provider: 'kimi', loadGuard: { kind: 'killed' } };
     const out = svc.record(msg);
@@ -90,7 +91,7 @@ describe('ChatLogService.record', () => {
     const link = path.join(tmp(), 'link');
     fs.symlinkSync(real, link);
     svc.bindLegacyScope(link, 'c9');
-    const out = svc.record({ type: 'status', projectPath: real, scope: 'chat' });
+    const out = svc.record({ type: 'user', projectPath: real, scope: 'chat' });
     expect(out).toHaveLength(1);
     expect(out[0].chatId).toBe('c9');
     expect(store.meta('c9')!.projectPath).toBe(real);
@@ -104,7 +105,7 @@ describe('ChatLogService.record', () => {
 
   it('prefers a valid msg.provider over providerOf for a new chat', () => {
     const { svc, store } = mk({ providerOf: () => 'claude' });
-    svc.record({ type: 'status', projectPath: '/p', scope: 'c1', provider: 'codex' });
+    svc.record({ type: 'user', projectPath: '/p', scope: 'c1', provider: 'codex' });
     expect(store.meta('c1')!.provider).toBe('codex');
   });
 
@@ -128,12 +129,13 @@ describe('ChatLogService.record', () => {
       ended: (id, ev) => ended.push(`${id}:${ev.type}`),
       idleDone: (id) => idle.push(id),
     });
+    svc.record({ type: 'user', projectPath: '/p', scope: 'c1' }); // creates the chat's log
     svc.record({ type: 'done', projectPath: '/p', scope: 'c1', turnSeq: null });
     expect(ended).toEqual([]); // not streaming: no flip
     expect(idle).toEqual(['c1']);
     svc.record({ type: 'streaming_start', projectPath: '/p', scope: 'c1', turnSeq: 1 });
     expect(started).toEqual(['c1']);
-    svc.record({ type: 'status', projectPath: '/p', scope: 'c1' });
+    svc.record({ type: 'user', projectPath: '/p', scope: 'c1' });
     expect(ended).toEqual([]);
     svc.record({ type: 'done', projectPath: '/p', scope: 'c1', turnSeq: 1 });
     expect(ended).toEqual(['c1:done']);
@@ -151,16 +153,96 @@ describe('ChatLogService.record', () => {
   });
 });
 
+describe('ChatLogService: logs are created only by transcript events', () => {
+  it.each(['ready', 'session_id', 'init', 'context_usage', 'rate_limit_event', 'auth_status', 'done', 'process_exit'])(
+    'a %s for an unknown chat creates no log', (type) => {
+      const { svc, store, sent } = mk();
+      const ev = type === 'init' ? { type: 'system', subtype: 'init' } : { type };
+      expect(svc.record({ ...ev, projectPath: '/p', scope: 'c1' })).toEqual([]);
+      expect(store.meta('c1')).toBeNull();
+      expect(sent).toEqual([]);
+    },
+  );
+
+  it('a commands_changed for an unknown chat creates no log; once the chat exists it is recorded', () => {
+    const { svc, store } = mk();
+    const cc = { type: 'system', subtype: 'commands_changed', commands: [], projectPath: '/p', scope: 'c1' };
+    expect(svc.record(cc)).toEqual([]);
+    expect(store.meta('c1')).toBeNull();
+    svc.record({ type: 'streaming_start', projectPath: '/p', scope: 'c1', turnSeq: 1 });
+    expect(svc.record(cc)).toHaveLength(1);
+    expect(svc.record({ type: 'ready', projectPath: '/p', scope: 'c1' })).toHaveLength(1);
+  });
+
+  it('a backend-created log is not imported; a client-created one is', () => {
+    const { svc, store } = mk();
+    svc.record({ type: 'streaming_start', projectPath: '/p', scope: 'b1', turnSeq: 1 });
+    svc.appendClient('c1', { type: 'user_message', clientId: 'u', text: 'x' }, { projectPath: '/p' });
+    expect(store.meta('b1')!.imported).toBeFalsy();
+    expect(store.meta('c1')!.imported).toBe(true);
+  });
+});
+
+describe('ChatLogService.importMessages folds history into a log a backend event created', () => {
+  const init = { projectPath: '/p', provider: 'claude' as const, title: 'Old chat', createdAt: 5, updatedAt: 6 };
+  const history = [
+    { id: 'h1', role: 'user' as const, content: 'old question', timestamp: 1 },
+    { id: 'h2', role: 'assistant' as const, content: 'old answer', timestamp: 2 },
+  ];
+
+  it('folds the history in front of the logged state, signals clients, and reads back whole', () => {
+    const { svc, store, sent } = mk();
+    svc.record({ type: 'streaming_start', projectPath: '/p', scope: 'c1', turnSeq: 1 });
+    svc.record({ type: 'assistant', projectPath: '/p', scope: 'c1', turnSeq: 1, message: { content: [{ type: 'text', text: 'new reply' }] } });
+    expect(svc.importMessages('c1', init, history)).toBe('folded');
+    const state = store.state('c1')!;
+    expect(state.messages.map(m => m.content)).toEqual(['old question', 'old answer', 'new reply']);
+    expect(state.turn.streaming).toBe(true);
+    expect(state.turn.startIndex).toBe(2);
+    expect(store.meta('c1')).toMatchObject({ imported: true, title: 'Old chat', createdAt: 5 });
+    expect(sent.at(-1)!.ev).toEqual({ type: 'history_imported' });
+    // A fresh reader (open from 0) gets the folded snapshot plus what follows.
+    const read = store.read('c1', 0);
+    const base = read.snapshot!.state;
+    expect(base.messages.map(m => m.content)).toEqual(['old question', 'old answer', 'new reply']);
+    expect(read.entries.map(e => e.ev.type)).toEqual(['history_imported']);
+    // Later events land after the folded history; a second import is refused.
+    svc.record({ type: 'done', projectPath: '/p', scope: 'c1', turnSeq: 1 });
+    expect(svc.importMessages('c1', init, history)).toBe(false);
+    expect(store.state('c1')!.messages).toHaveLength(3);
+  });
+
+  it('skips messages the log already holds (a mirror written from the log) and only marks it', () => {
+    const { svc, store, sent } = mk();
+    svc.record({ type: 'user_message', projectPath: '/p', scope: 'c1', clientId: 'h1', text: 'old question' });
+    const before = sent.length;
+    expect(svc.importMessages('c1', init, [history[0]])).toBe('marked');
+    expect(store.state('c1')!.messages).toHaveLength(1);
+    expect(store.meta('c1')!.imported).toBe(true);
+    expect(sent.length).toBe(before);
+  });
+
+  it('survives a restart: the folded snapshot is on disk', () => {
+    const { svc, store, dir } = mk();
+    svc.record({ type: 'user', projectPath: '/p', scope: 'c1' });
+    svc.importMessages('c1', init, history);
+    store.close();
+    const again = new ChatLogStore({ dir });
+    expect(again.state('c1')!.messages.map((m: any) => m.id)).toEqual(['h1', 'h2']);
+    expect(again.meta('c1')!.imported).toBe(true);
+  });
+});
+
 describe('ChatLogService.appendClient', () => {
   it('appendClient rejects backend event types (e.g. assistant)', () => {
     const { svc } = mk();
-    svc.record({ type: 'status', projectPath: '/p', scope: 'c1' });
+    svc.record({ type: 'user', projectPath: '/p', scope: 'c1' });
     expect(() => svc.appendClient('c1', { type: 'assistant', message: { content: [] } })).toThrow(/client event/);
   });
 
   it('appends a client event and fans it out', () => {
     const { svc, sent } = mk();
-    svc.record({ type: 'status', projectPath: '/p', scope: 'c1' });
+    svc.record({ type: 'user', projectPath: '/p', scope: 'c1' });
     const e = svc.appendClient('c1', { type: 'user_message', clientId: 'u1', text: 'hi' });
     expect(e.seq).toBe(2);
     expect(sent.at(-1)).toEqual(e);
@@ -206,7 +288,7 @@ describe('ChatLogService.startupRepair', () => {
 describe('ChatLogService delivery isolation', () => {
   it('a throwing renderer send or bus subscriber does not stop the append', () => {
     const { svc, store } = mk({ sendToRenderer: () => { throw new Error('window gone'); } });
-    expect(svc.record({ type: 'status', projectPath: '/p', scope: 'c1' })).toHaveLength(1);
+    expect(svc.record({ type: 'user', projectPath: '/p', scope: 'c1' })).toHaveLength(1);
     expect(store.meta('c1')!.headSeq).toBe(1);
   });
 });

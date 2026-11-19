@@ -1751,8 +1751,17 @@ export default function App() {
         tone: 'error',
       });
     };
+    // A chat command (send) failed after the composer cleared; the panel restores the text.
+    const onChatError = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { message?: string };
+      setToast({ message: detail?.message ?? 'Message not sent', key: Date.now(), tone: 'error' });
+    };
     window.addEventListener('sai-persist-error', onPersistError);
-    return () => window.removeEventListener('sai-persist-error', onPersistError);
+    window.addEventListener('sai-chat-error', onChatError);
+    return () => {
+      window.removeEventListener('sai-persist-error', onPersistError);
+      window.removeEventListener('sai-chat-error', onChatError);
+    };
   }, []);
 
   // Periodically persist active sessions as a safety net (every 30s)

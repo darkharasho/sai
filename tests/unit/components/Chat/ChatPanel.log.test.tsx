@@ -327,3 +327,72 @@ describe('dogfood scenarios (log-driven)', () => {
     expect(screen.queryByTestId('thinking-animation')).toBeNull();
   });
 });
+
+describe('fix round 1', () => {
+  it('a turn only the log holds open is reconciled with the backend every 20s until it closes', async () => {
+    vi.useFakeTimers();
+    try {
+      sai.claudeReconcileScope = vi.fn();
+      await mount({ isStreaming: false });
+      await emitChat(sai, { type: 'streaming_start', projectPath: P, scope: 'c1', turnSeq: 3 });
+      expect(inputProps.isStreaming).toBe(true); // Stop shows from the log turn
+      await act(async () => { await vi.advanceTimersByTimeAsync(19_000); });
+      expect(sai.claudeReconcileScope).not.toHaveBeenCalled();
+      await act(async () => { await vi.advanceTimersByTimeAsync(2_000); });
+      expect(sai.claudeReconcileScope).toHaveBeenCalledTimes(1);
+      expect(sai.claudeReconcileScope).toHaveBeenCalledWith(P, 'c1');
+      // The backend's unstick done(turnSeq:null) is logged and closes the turn.
+      await emitChat(sai, { type: 'done', projectPath: P, scope: 'c1', turnSeq: null });
+      expect(inputProps.isStreaming).toBe(false);
+      await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+      expect(sai.claudeReconcileScope).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('no log-turn reconcile while App still counts the turn busy', async () => {
+    vi.useFakeTimers();
+    try {
+      sai.claudeReconcileScope = vi.fn();
+      await mount({ isStreaming: true });
+      await emitChat(sai, { type: 'streaming_start', projectPath: P, scope: 'c1', turnSeq: 3 });
+      await act(async () => { await vi.advanceTimersByTimeAsync(65_000); });
+      expect(sai.claudeReconcileScope).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a failed send puts the text back into the composer and raises the error notice', async () => {
+    await mount();
+    const restore = vi.fn();
+    inputProps.draftRestoreRef.current = restore;
+    const notices: string[] = [];
+    const onErr = (e: Event) => notices.push((e as CustomEvent).detail.message);
+    window.addEventListener('sai-chat-error', onErr);
+    sai.chatlog.command.mockImplementation(async (cmd: any) => (
+      cmd.kind === 'send' ? { clientId: cmd.clientId, ok: false, duplicate: false, error: 'backend down' } : { clientId: cmd.clientId, ok: true, duplicate: false }
+    ));
+    try {
+      await act(async () => { await inputProps.onSend('do not lose me'); });
+      expect(restore).toHaveBeenCalledWith('do not lose me');
+      expect(notices).toEqual(['Message not sent: backend down']);
+    } finally {
+      window.removeEventListener('sai-chat-error', onErr);
+    }
+  });
+
+  it('dismissed prompts and suggestions reset when the panel moves to another chat', async () => {
+    log.append('c1', { type: 'prompt_suggestion', suggestion: 'run the tests' }, { projectPath: P });
+    const { rerender } = await mount();
+    expect(screen.getByTestId('prompt-suggestion-chip')).toBeTruthy();
+    await act(async () => { screen.getByLabelText('Dismiss suggestion').click(); });
+    expect(screen.queryByTestId('prompt-suggestion-chip')).toBeNull();
+    rerender(<ChatPanel {...baseProps({ sessionId: 'c2', claudeScope: 'c2' })} />);
+    await flushChatlog();
+    rerender(<ChatPanel {...baseProps()} />);
+    await flushChatlog();
+    expect(screen.getByTestId('prompt-suggestion-chip')).toBeTruthy();
+  });
+});

@@ -179,7 +179,7 @@ export function installE2EChatlog(sai: Record<string, any>): void {
       const now = Date.now();
       const provider = init?.provider ?? 'claude';
       c = {
-        meta: { chatId, projectPath: init?.projectPath ?? '', createdAt: now, updatedAt: now, headSeq: 0, snapshotSeq: 0, provider, openTurn: false },
+        meta: { chatId, projectPath: init?.projectPath ?? '', createdAt: now, updatedAt: now, headSeq: 0, snapshotSeq: 0, provider, openTurn: false, imported: true },
         snapshot: null, entries: [], settings: { provider },
       };
       chats.set(chatId, c);

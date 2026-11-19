@@ -166,7 +166,7 @@ describe('ChatLogStore', () => {
     const { s } = mk();
     const msgs = [{ id: 'm1', role: 'user', content: 'hello', timestamp: 5 }] as any;
     const ii = { ...init, title: 'T', createdAt: 10, updatedAt: 20 };
-    expect(s.importMessages('c1', ii, msgs)).toBe(true);
+    expect(s.importMessages('c1', ii, msgs)).toBe('created');
     expect(s.importMessages('c1', ii, msgs)).toBe(false);
     expect(s.meta('c1')).toMatchObject({ title: 'T', createdAt: 10, updatedAt: 20, headSeq: 0, snapshotSeq: 0, openTurn: false });
     expect(s.state('c1')!.messages).toHaveLength(1);

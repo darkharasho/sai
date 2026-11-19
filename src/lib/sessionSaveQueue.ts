@@ -1,4 +1,5 @@
-import { dbSaveSession } from '../chatDb';
+import { dbGetMessages, dbSaveSession } from '../chatDb';
+import { isChatImported, isMigrationDone } from './chat/migrateToLog';
 import { externalizeSessionImages } from './externalizeImages';
 import type { ChatSession } from '../types';
 
@@ -40,6 +41,24 @@ export function createSaveQueue(saveFn: SaveFn = dbSaveSession): SaveFn {
   };
 }
 
-export const queueSaveSession = createSaveQueue(
-  async (projectPath, session, fromIdx) => dbSaveSession(projectPath, await externalizeSessionImages(session), fromIdx),
-);
+/**
+ * IndexedDB is a mirror of the chat log. Until a chat's IndexedDB history is
+ * known to be in the log (migration done AND this chat imported), a mirror
+ * write that would leave fewer messages than IndexedDB holds is skipped: the
+ * log copy may still be missing that history, and replacing the stored list
+ * with it would lose the only copy.
+ */
+export async function mirrorWouldShrink(session: ChatSession, fromIdx?: number): Promise<boolean> {
+  if (isMigrationDone() && isChatImported(session.id)) return false;
+  let stored: number;
+  try { stored = (await dbGetMessages(session.id)).length; } catch { return false; }
+  const next = Math.max(0, fromIdx ?? 0) + session.messages.length;
+  if (next >= stored) return false;
+  window.sai?.devlog?.('chatlog.mirrorShrinkSkipped', { chatId: session.id, stored, next });
+  return true;
+}
+
+export const queueSaveSession = createSaveQueue(async (projectPath, session, fromIdx) => {
+  if (await mirrorWouldShrink(session, fromIdx)) return;
+  return dbSaveSession(projectPath, await externalizeSessionImages(session), fromIdx);
+});

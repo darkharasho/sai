@@ -31,6 +31,24 @@ export interface TurnHooks {
 }
 
 const PROVIDERS: ReadonlyArray<ChatSettings['provider']> = ['claude', 'codex', 'gemini', 'kimi'];
+
+/**
+ * Backend events that may CREATE a chat's log: transcript content or a pending
+ * prompt. Anything else (ready, session_id, commands_changed, init,
+ * context_usage, rate_limit_event, auth_status, a stray done, …) is only
+ * recorded for a chat that already has a log — a start-up `ready` must never
+ * create an empty log ahead of the chat's IndexedDB import.
+ */
+const CREATING_TYPES = new Set([
+  'streaming_start', 'user_message', 'assistant', 'user', 'result', 'error', 'reasoning_delta',
+  'approval_needed', 'user_input_needed', 'mcp_elicitation_needed', 'sudo-prompt', 'subagent_activity',
+]);
+const CREATING_SYSTEM_SUBTYPES = new Set(['context_compacted', 'auto_compact', 'compact']);
+
+function createsLog(msg: Record<string, unknown>): boolean {
+  if (msg.type === 'system') return CREATING_SYSTEM_SUBTYPES.has(String(msg.subtype));
+  return CREATING_TYPES.has(String(msg.type));
+}
 const CLIENT_TYPES = new Set<string>(CLIENT_EVENT_TYPES);
 const SEEN_IDS_CAP = 2000;
 
@@ -134,6 +152,10 @@ export class ChatLogService {
 
     let init: { projectPath: string; provider: ChatSettings['provider'] } | undefined;
     if (!this.store.meta(chatId)) {
+      if (!createsLog(msg)) {
+        this.opts.devlog('chatlog.skipNonTranscript', { type, projectPath, scope });
+        return [];
+      }
       if (!projectPath || projectPath === '*') {
         this.opts.devlog('chatlog.unroutable', { type, projectPath, scope, reason: 'no-project' });
         return [];
@@ -153,13 +175,30 @@ export class ChatLogService {
     if (!ev || typeof ev.type !== 'string' || !CLIENT_TYPES.has(ev.type)) {
       throw new Error(`appendClient: ${String(ev?.type)} is not a client event type`);
     }
-    let storeInit: { projectPath: string; provider: ChatSettings['provider'] } | undefined;
+    let storeInit: { projectPath: string; provider: ChatSettings['provider']; imported: boolean } | undefined;
     if (!this.store.meta(chatId)) {
       const projectPath = init?.projectPath ?? (typeof ev.projectPath === 'string' ? ev.projectPath : '');
       if (!projectPath) throw new Error(`appendClient: unknown chat ${chatId} and no projectPath`);
-      storeInit = { projectPath, provider: init?.provider ?? this.opts.providerOf(projectPath, chatId) };
+      // A client creates a chat only after checking IndexedDB (ensureChatInLog
+      // imports any history first), so its log starts as the whole history.
+      storeInit = { projectPath, provider: init?.provider ?? this.opts.providerOf(projectPath, chatId), imported: true };
     }
     return this.appendAndFanOut(chatId, ev, storeInit);
+  }
+
+  /**
+   * Imports a chat's IndexedDB history (see ChatLogStore.importMessages). When
+   * it was folded in front of an existing log, a `history_imported` entry
+   * tells every open client to reload the chat from seq 0.
+   */
+  importMessages(
+    chatId: string,
+    init: { projectPath: string; provider: ChatSettings['provider']; title?: string; createdAt: number; updatedAt: number },
+    messages: ChatMessage[],
+  ): 'created' | 'folded' | 'marked' | false {
+    const result = this.store.importMessages(chatId, init, messages);
+    if (result === 'folded') this.appendAndFanOut(chatId, { type: 'history_imported' });
+    return result;
   }
 
   /** For chats left mid-turn by a previous run with no live backend now: close the turn. */
@@ -197,7 +236,7 @@ export class ChatLogService {
       chatId: string,
       init: { projectPath: string; provider: ChatSettings['provider']; title?: string; createdAt: number; updatedAt: number },
       messages: ChatMessage[],
-    ) => this.store.importMessages(String(chatId), init, Array.isArray(messages) ? messages : []));
+    ) => this.importMessages(String(chatId), init, Array.isArray(messages) ? messages : []));
     ipcMain.handle('chatlog:list', (_e, projectPath: string): ChatMeta[] => this.store.list(String(projectPath)));
     ipcMain.handle('chatlog:delete', (_e, chatIds: string[]) => {
       for (const id of Array.isArray(chatIds) ? chatIds : []) if (typeof id === 'string' && id) this.store.delete(id);
@@ -207,7 +246,7 @@ export class ChatLogService {
       this.store.patchMeta(String(chatId), patch ?? {}));
   }
 
-  private appendAndFanOut(chatId: string, ev: ChatEvent, init?: { projectPath: string; provider: ChatSettings['provider'] }): ChatLogEntry {
+  private appendAndFanOut(chatId: string, ev: ChatEvent, init?: { projectPath: string; provider: ChatSettings['provider']; imported?: boolean }): ChatLogEntry {
     const wasStreaming = this.store.meta(chatId)?.openTurn === true;
     const entry = this.store.append(chatId, ev, init);
     try { this.opts.sendToRenderer('chatlog:event', entry); } catch (err) {

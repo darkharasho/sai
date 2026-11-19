@@ -93,6 +93,15 @@ export function useChatLog(chatId: string | null, fallbackSettings: ChatSettings
 
     const handle = (entry: ChatLogEntry) => {
       if (entry.seq <= head) return;
+      if (entry.seq === head + 1 && entry.ev?.type === 'history_imported') {
+        // Main folded the chat's pre-log history in front of what we hold:
+        // reload from seq 0 (history, so no side effects).
+        flush();
+        ready = false;
+        buffer = [];
+        loadInitial();
+        return;
+      }
       if (entry.seq === head + 1) {
         head = entry.seq;
         queue.push(entry);

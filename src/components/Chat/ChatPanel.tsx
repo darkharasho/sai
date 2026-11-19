@@ -503,6 +503,8 @@ const THINKING_ROW_MOTION = {
   style: { overflow: 'hidden', flexShrink: 0 },
 } as const;
 const LOAD_MORE_CHUNK = 30; // messages to load when scrolling up
+/** A log turn still open with App idle is checked against the backend this often (App's reconcile cadence). */
+const LOG_TURN_RECONCILE_MS = 20_000;
 
 
 export default function ChatPanel({ projectPath, overlayControl, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, availableModels, claudeOverrideState, aiProvider, codexModel, onCodexModelChange, codexModels, onCodexModelsRefresh, codexPermission, onCodexPermissionChange, codexEffort, onCodexEffortChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, kimiModel, onKimiModelChange, kimiModels, kimiApprovalMode, onKimiApprovalModeChange, onMessagesChange, onTurnComplete, onClaudeSessionId, onGeminiSessionId, onKimiSessionId, onCodexSessionId, activeFilePath, onFileOpen, isActive, isStreaming = false, awaitingQuestion = false, initialDraft, onDraftChange, initialContextItems, onContextItemsChange, messageQueue = [], onQueueAdd, onQueueRemove, onQueueShift, onQueuePromote, sessionId, terminalTabs = [], onSlashCommandsUpdate, claudeScope = 'chat', onOpenMcpPanel, renderToolCall, activeMetaRuntime, mentionInsertRef: mentionInsertRefProp, waiting = null, followUp = null, onDismissFollowUp, liveBackgroundTaskCount, onToggleBackgroundTasks, backgroundTasksOpen, taskUiEnabled = false, backgroundTasks, onStopBackgroundTask, claudeSessionId }: ChatPanelProps) {
@@ -686,6 +688,10 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
   const dismissPrompt = useCallback((key: string) => {
     setDismissedPrompts(prev => (prev.has(key) ? prev : new Set(prev).add(key)));
   }, []);
+  useEffect(() => {
+    setDismissedPrompts(prev => (prev.size === 0 ? prev : new Set()));
+    setDismissedSuggestion(null);
+  }, [chatId]);
   const approvalKey = (a: PendingApproval) => `approval:${a.requestHandle ?? a.toolUseId}`;
   const logApproval = logState?.pendingApproval ?? null;
   const pendingApproval: PendingApproval | null = logApproval && !dismissedPrompts.has(approvalKey(logApproval)) ? logApproval : null;
@@ -754,6 +760,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
   const pendingJumpRef = useRef<string | null>(null);
   const pendingComposerRectRef = useRef<DOMRect | null>(null);
   const localMentionInsertRef = useRef<((linkName: string) => void) | null>(null);
+  const draftRestoreRef = useRef<((text: string) => void) | null>(null);
   const mentionInsertRef = mentionInsertRefProp ?? localMentionInsertRef;
 
   // Task tabs (display-only). The hook is a no-op when disabled.
@@ -1476,7 +1483,25 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
   const thinkingHint = subagentHint ?? streamHint;
   // The log's turn is authoritative for this chat (it survives remounts and
   // reloads); App's busy flag still covers the gap before the log catches up.
-  const turnLive = isStreaming || (logState?.turn.streaming ?? false);
+  const logTurnOpen = logState?.turn.streaming ?? false;
+  const turnLive = isStreaming || logTurnOpen;
+  // Backend-truth reconciliation for a turn only the log still holds open
+  // (App's busy flag is off, so App's own 20s reconcile poll skips it): ask
+  // the provider every LOG_TURN_RECONCILE_MS; an idle backend answers with an
+  // unstick done(turnSeq:null), which is logged and closes the turn. Gemini
+  // and Kimi have no reconciler; their Stop (interrupt) still ends the turn.
+  const reconcileLogTurn = !!chatId && logTurnOpen && !isStreaming;
+  useEffect(() => {
+    if (!reconcileLogTurn || !chatId) return;
+    const reconcile = aiProvider === 'claude' ? window.sai.claudeReconcileScope
+      : aiProvider === 'codex' ? window.sai.codexReconcileScope : undefined;
+    if (typeof reconcile !== 'function') return;
+    const t = window.setInterval(() => {
+      window.sai.devlog?.('chatPanel.reconcileLogTurn', { chatId, provider: aiProvider });
+      reconcile(projectPath, chatId);
+    }, LOG_TURN_RECONCILE_MS);
+    return () => window.clearInterval(t);
+  }, [reconcileLogTurn, chatId, aiProvider, projectPath]);
   const streamingForDisplay = turnLive || drainInFlight || messageQueue.length > 0 || subagentThinking;
   const isWaiting = !!waiting && waiting.wait.kind !== 'none';
   // While waiting we are NOT thinking — suppress the thinking indicator.
@@ -1606,8 +1631,8 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
    * main: if the composer's picks differ from the chat's logged settings, one
    * settings command goes first so the dispatch uses what the user picked.
    */
-  const sendToLog = async (text: string, opts: { clientId: string; images?: string[]; imagePaths?: string[]; prompt?: string; taskId?: string; now?: boolean }) => {
-    if (!chatId || !projectPath) return;
+  const sendToLog = async (text: string, opts: { clientId: string; images?: string[]; imagePaths?: string[]; prompt?: string; taskId?: string; now?: boolean }): Promise<boolean> => {
+    if (!chatId || !projectPath) return false;
     const current = logState?.settings;
     const differs = !current || (Object.keys(composerSettings) as Array<keyof ChatSettings>)
       .some(k => current[k] !== composerSettings[k]);
@@ -1625,7 +1650,14 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
         ...(opts.taskId ? { taskId: opts.taskId } : {}),
         ...(opts.now ? { now: true } : {}),
       });
-    } catch { /* logged to devlog by runCommand; the composer stays usable */ }
+      return true;
+    } catch (err) {
+      // Devlogged by runCommand. Tell the user; the caller restores the text.
+      window.dispatchEvent(new CustomEvent('sai-chat-error', {
+        detail: { message: `Message not sent: ${err instanceof Error ? err.message : String(err)}` },
+      }));
+      return false;
+    }
   };
   const sendToLogRef = useRef(sendToLog);
   sendToLogRef.current = sendToLog;
@@ -1844,11 +1876,13 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
 
     const builtPrompt = activeFilePath && fileContextEnabled ? `[File: ${activeFilePath}]\n\n${text}` : text;
     const prompt = directCard ? directAtTask(builtPrompt, directCard.title) : builtPrompt;
-    await sendToLog(text, {
+    const sent = await sendToLog(text, {
       clientId, images, imagePaths, prompt, now,
       // A message typed on a task tab belongs to that task; stamping keeps an explicit tag.
       ...(directCard ? { taskId: directCard.tag } : {}),
     });
+    // The composer already cleared: give the text back so nothing is lost.
+    if (!sent) draftRestoreRef.current?.(text);
   };
 
   const handleCancelWait = () => {
@@ -2298,6 +2332,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
             onContextItemsChange={onContextItemsChange}
             metaRuntime={activeMetaRuntime}
             mentionInsertRef={mentionInsertRef}
+            draftRestoreRef={draftRestoreRef}
           />
         </div>
       </LayoutGroup>

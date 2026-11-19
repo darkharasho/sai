@@ -58,7 +58,7 @@ export function createMockChatlog(sai: Record<string, any> = {}): MockChatlog {
       c = {
         meta: {
           chatId, projectPath: init?.projectPath ?? '/project', createdAt: now, updatedAt: now,
-          headSeq: 0, snapshotSeq: 0, provider: init?.provider ?? 'claude', openTurn: false,
+          headSeq: 0, snapshotSeq: 0, provider: init?.provider ?? 'claude', openTurn: false, imported: true,
         },
         snapshot: null, entries: [], head: 0,
       };
@@ -114,10 +114,15 @@ export function createMockChatlog(sai: Record<string, any> = {}): MockChatlog {
       chatId = entry[1] as string;
       home = home || (entry[0] as string);
     }
-    // Lenient where main is strict: a scoped event with no project still lands (tests omit it).
-    return [append(chatId, { ...msg, type, scope: chatId } as ChatEvent, {
+    // Lenient where main is strict: a scoped event with no project still lands
+    // (tests omit it), and any type may create the log. A backend-created log
+    // is not "imported" (see ChatLogStore.importMessages).
+    const created = !chats.has(chatId);
+    const out = [append(chatId, { ...msg, type, scope: chatId } as ChatEvent, {
       projectPath: home || '/project', ...(typeof msg.provider === 'string' ? { provider: msg.provider as Provider } : {}),
     })];
+    if (created) chats.get(chatId)!.meta.imported = false;
+    return out;
   };
 
   /** providerDispatch.ts, routed to the legacy preload methods. */
@@ -205,9 +210,24 @@ export function createMockChatlog(sai: Record<string, any> = {}): MockChatlog {
       return append(chatId, ev, init);
     }),
     importMessages: vi.fn(async (chatId: string, init: { projectPath: string; provider: Provider }, messages: ChatMessage[]) => {
-      if (chats.has(chatId)) return false;
+      const c = chats.get(chatId);
+      if (c) {
+        // ChatLogStore.importMessages: fold into a never-imported log, by id.
+        if (c.meta.imported) return false;
+        c.meta.imported = true;
+        const state = stateOf(chatId)!;
+        const have = new Set(state.messages.map(m => m.id));
+        const prefix = messages.filter(m => !have.has(m.id));
+        if (prefix.length === 0) return 'marked';
+        const turn = state.turn.startIndex != null ? { ...state.turn, startIndex: state.turn.startIndex + prefix.length } : state.turn;
+        c.snapshot = { chatId, seq: c.head, state: { ...state, messages: [...prefix, ...state.messages], turn } };
+        c.entries = [];
+        append(chatId, { type: 'history_imported' });
+        return 'folded';
+      }
+      if (!init?.projectPath) return false;
       api.seed(chatId, messages, init);
-      return true;
+      return 'created';
     }),
     list: vi.fn(async (projectPath: string) => [...chats.values()].filter(c => c.meta.projectPath === projectPath).map(c => ({ ...c.meta }))),
     delete: vi.fn(async (ids: string[]) => { for (const id of ids) chats.delete(id); }),

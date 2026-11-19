@@ -446,7 +446,7 @@ export interface SaiChatLogApi {
     chatId: string,
     init: { projectPath: string; provider: import('./lib/chat/types').ChatSettings['provider']; title?: string; createdAt: number; updatedAt: number },
     messages: ChatMessage[],
-  ): Promise<boolean>;
+  ): Promise<'created' | 'folded' | 'marked' | false>;
   list(projectPath: string): Promise<import('./lib/chat/types').ChatMeta[]>;
   delete(chatIds: string[]): Promise<void>;
   bindLegacyScope(projectPath: string, chatId: string): Promise<void>;

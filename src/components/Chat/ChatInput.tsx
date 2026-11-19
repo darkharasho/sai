@@ -118,6 +118,8 @@ interface ChatInputProps {
   onContextItemsChange?: (items: ContextItem[]) => void;
   metaRuntime?: MetaWorkspaceRuntime | null;
   mentionInsertRef?: React.MutableRefObject<((linkName: string) => void) | null>;
+  /** Filled with a callback that puts text back into the composer (a send that failed after it cleared). */
+  draftRestoreRef?: React.MutableRefObject<((text: string) => void) | null>;
 }
 
 interface AutocompleteItem {
@@ -296,7 +298,7 @@ function getBarColor(pct: number, isOverage: boolean): string {
   return 'var(--accent)';
 }
 
-export default function ChatInput({ projectPath, onSend, overlayControl, onBeforeSend, disabled, slashCommands = [], onSlashRefresh, isStreaming, waiting, awaitingQuestion, messages = [], todos, onStop, onQueue, sendsQueued, loadGuard, queueCount, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, availableModels, claudeOverrideState, contextUsage, sessionUsage, sessionCost, usageLimits = [], billingMode = 'subscription', activeFilePath, fileContextEnabled = true, onFileContextToggle, aiProvider = 'claude', pendingApproval, pendingSudoPrompt, onApprove, onDeny, onAlwaysAllow, onAmend, codexModel = 'o3', codexModels = [], onCodexModelChange, onCodexModelsRefresh, codexPermission = 'auto', onCodexPermissionChange, codexEffort = 'high', onCodexEffortChange, geminiModel = 'auto-gemini-3', geminiModels = [], onGeminiModelChange, geminiApprovalMode = 'default', onGeminiApprovalModeChange, geminiConversationMode = 'planning', onGeminiConversationModeChange, kimiModel = 'kimi-k3', kimiModels = [], onKimiModelChange, kimiApprovalMode = 'default', onKimiApprovalModeChange, terminalTabs = [], messageQueue = [], onQueueRemove, onQueuePromote, onQueueSendNow, initialDraft = '', onDraftChange, initialContextItems = [], onContextItemsChange, metaRuntime, mentionInsertRef }: ChatInputProps) {
+export default function ChatInput({ projectPath, onSend, overlayControl, onBeforeSend, disabled, slashCommands = [], onSlashRefresh, isStreaming, waiting, awaitingQuestion, messages = [], todos, onStop, onQueue, sendsQueued, loadGuard, queueCount, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, availableModels, claudeOverrideState, contextUsage, sessionUsage, sessionCost, usageLimits = [], billingMode = 'subscription', activeFilePath, fileContextEnabled = true, onFileContextToggle, aiProvider = 'claude', pendingApproval, pendingSudoPrompt, onApprove, onDeny, onAlwaysAllow, onAmend, codexModel = 'o3', codexModels = [], onCodexModelChange, onCodexModelsRefresh, codexPermission = 'auto', onCodexPermissionChange, codexEffort = 'high', onCodexEffortChange, geminiModel = 'auto-gemini-3', geminiModels = [], onGeminiModelChange, geminiApprovalMode = 'default', onGeminiApprovalModeChange, geminiConversationMode = 'planning', onGeminiConversationModeChange, kimiModel = 'kimi-k3', kimiModels = [], onKimiModelChange, kimiApprovalMode = 'default', onKimiApprovalModeChange, terminalTabs = [], messageQueue = [], onQueueRemove, onQueuePromote, onQueueSendNow, initialDraft = '', onDraftChange, initialContextItems = [], onContextItemsChange, metaRuntime, mentionInsertRef, draftRestoreRef }: ChatInputProps) {
   const selectedCodexModel = codexModels.find(model => model.id === codexModel);
   const supportedCodexEfforts = effortsForCodexModel(selectedCodexModel);
   const effectiveCodexEffort = normalizeCodexEffort(codexEffort, selectedCodexModel);
@@ -346,6 +348,15 @@ export default function ChatInput({ projectPath, onSend, overlayControl, onBefor
   // mentionInsertRef identity is stable; we only want this to run once
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mentionInsertRef]);
+
+  // A failed send hands its text back: restored in front of anything typed since.
+  useEffect(() => {
+    if (!draftRestoreRef) return;
+    draftRestoreRef.current = (text: string) => {
+      setValue(prev => (prev.trim() ? `${text}\n${prev}` : text));
+    };
+    return () => { draftRestoreRef.current = null; };
+  }, [draftRestoreRef]);
 
   const fireBeforeSend = () => {
     if (!onBeforeSend) return;
