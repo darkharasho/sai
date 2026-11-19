@@ -1,0 +1,420 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`golden: 'claude-background-wait' > reduces to the reviewed snapshot 1`] = `
+{
+  "activeSubagents": {},
+  "lastSeq": 42,
+  "messages": [
+    {
+      "content": "Get a reviewer on the parser changes in the background.",
+      "id": "u-1",
+      "role": "user",
+      "timestamp": 1795078801002,
+    },
+    {
+      "completedAt": 1795078801715,
+      "content": "I'll launch a reviewer in the background.",
+      "durationMs": 712,
+      "id": "m8",
+      "role": "assistant",
+      "startedAt": 1795078801003,
+      "timestamp": 1795078801708,
+    },
+    {
+      "content": "",
+      "id": "m15",
+      "role": "assistant",
+      "startedAt": 1795078801715,
+      "timestamp": 1795078801715,
+      "toolCalls": [
+        {
+          "durationMs": 404,
+          "id": "toolu_03Agent",
+          "input": "{
+  "description": "Review parser changes",
+  "prompt": "Review the uncommitted changes under src/parser for correctness bugs and report findings.",
+  "subagent_type": "general-purpose",
+  "run_in_background": true
+}",
+          "liveOutput": false,
+          "name": "Agent",
+          "output": "Async agent launched successfully.
+agentId: a7f3e91c04b2d6e58 (internal ID - do not mention to user. Use SendMessage with to: 'a7f3e91c04b2d6e58' to continue this agent.)
+The agent is working in the background. You will be notified automatically when it completes.",
+          "startedAt": 1795078801715,
+          "turnSeq": 1,
+          "type": "agent",
+        },
+      ],
+    },
+    {
+      "completedAt": 1795078803128,
+      "content": "The reviewer is running. I'll report its findings when it finishes.",
+      "durationMs": 2125,
+      "id": "m22",
+      "role": "assistant",
+      "startedAt": 1795078802119,
+      "timestamp": 1795078803022,
+    },
+    {
+      "completedAt": 1795078890941,
+      "content": "The reviewer found one issue: \`tokenize()\` drops a trailing escaped quote. Everything else looks correct.",
+      "durationMs": 1709,
+      "id": "m35",
+      "role": "assistant",
+      "startedAt": 1795078889232,
+      "timestamp": 1795078890835,
+    },
+  ],
+  "pendingApproval": null,
+  "pendingCodexMcpElicitation": null,
+  "pendingCodexUserInput": null,
+  "pendingSudo": null,
+  "promptSuggestion": null,
+  "queue": [],
+  "settings": {
+    "effort": "high",
+    "model": "claude-opus-5-5",
+    "permMode": "bypass",
+    "provider": "claude",
+  },
+  "streamHint": null,
+  "turn": {
+    "forceNewBubble": false,
+    "loadGuardEnded": false,
+    "loadGuardQuietUntil": null,
+    "nextSegmentStart": null,
+    "reasoningActive": false,
+    "startIndex": null,
+    "startedAt": null,
+    "streaming": false,
+    "turnSeq": -1,
+  },
+}
+`;
+
+exports[`golden: 'claude-interrupt-superseded' > reduces to the reviewed snapshot 1`] = `
+{
+  "activeSubagents": {},
+  "lastSeq": 25,
+  "messages": [
+    {
+      "content": "Write a long changelog entry for the queue strip.",
+      "id": "u-1",
+      "role": "user",
+      "timestamp": 1795078801002,
+    },
+    {
+      "completedAt": 1795078803211,
+      "content": "### Queue strip
+
+- Queued sends now show in a strip above the composer",
+      "durationMs": 2208,
+      "id": "m8",
+      "role": "assistant",
+      "startedAt": 1795078801003,
+      "timestamp": 1795078801808,
+    },
+    {
+      "content": "Actually, keep it to one line.",
+      "id": "u-2",
+      "role": "user",
+      "timestamp": 1795078803210,
+    },
+    {
+      "completedAt": 1795078804624,
+      "content": "Queued sends now wait in a strip above the composer.",
+      "durationMs": 1412,
+      "id": "m18",
+      "role": "assistant",
+      "startedAt": 1795078804415,
+      "timestamp": 1795078804418,
+    },
+  ],
+  "pendingApproval": null,
+  "pendingCodexMcpElicitation": null,
+  "pendingCodexUserInput": null,
+  "pendingSudo": null,
+  "promptSuggestion": null,
+  "queue": [],
+  "settings": {
+    "effort": "high",
+    "model": "claude-opus-5-5",
+    "permMode": "bypass",
+    "provider": "claude",
+  },
+  "streamHint": null,
+  "turn": {
+    "forceNewBubble": false,
+    "loadGuardEnded": false,
+    "loadGuardQuietUntil": null,
+    "nextSegmentStart": null,
+    "reasoningActive": false,
+    "startIndex": null,
+    "startedAt": null,
+    "streaming": false,
+    "turnSeq": -1,
+  },
+}
+`;
+
+exports[`golden: 'claude-tools-reasoning' > reduces to the reviewed snapshot 1`] = `
+{
+  "activeSubagents": {},
+  "lastSeq": 46,
+  "messages": [
+    {
+      "content": "Which version does package.json declare, and does the lockfile agree?",
+      "id": "u-1",
+      "role": "user",
+      "timestamp": 1795078802002,
+    },
+    {
+      "content": "",
+      "id": "m8",
+      "reasoning": "The user wants the declared version and whether the lockfile matches. I can read the version with a quick node one-liner, then read the top of package-lock.json to compare.",
+      "reasoningDurationMs": 1206,
+      "role": "assistant",
+      "timestamp": 1795078803308,
+    },
+    {
+      "completedAt": 1795078805121,
+      "content": "I'll check the declared version first.",
+      "durationMs": 3118,
+      "id": "m14",
+      "role": "assistant",
+      "startedAt": 1795078802003,
+      "timestamp": 1795078804514,
+    },
+    {
+      "content": "",
+      "id": "m21",
+      "role": "assistant",
+      "startedAt": 1795078805121,
+      "timestamp": 1795078805121,
+      "toolCalls": [
+        {
+          "durationMs": 1503,
+          "id": "toolu_01Bash",
+          "input": "{
+  "command": "node -p \\"require('./package.json').version\\"",
+  "description": "Print the package.json version"
+}",
+          "liveOutput": false,
+          "name": "Bash",
+          "output": "1.37.1",
+          "startedAt": 1795078805121,
+          "turnSeq": 1,
+          "type": "terminal_command",
+        },
+      ],
+    },
+    {
+      "content": "",
+      "id": "m27",
+      "reasoning": "Now compare with the lockfile header.",
+      "reasoningDurationMs": 506,
+      "role": "assistant",
+      "timestamp": 1795078807427,
+    },
+    {
+      "content": "",
+      "id": "m33",
+      "role": "assistant",
+      "startedAt": 1795078806624,
+      "timestamp": 1795078807933,
+      "toolCalls": [
+        {
+          "durationMs": 303,
+          "id": "toolu_01Read",
+          "input": "{
+  "file_path": "/home/user/project/package-lock.json",
+  "limit": 6
+}",
+          "liveOutput": false,
+          "name": "Read",
+          "output": "     1	{
+     2	  "name": "sai",
+     3	  "version": "1.37.1",
+     4	  "lockfileVersion": 3,
+     5	  "requires": true,
+     6	  "packages": {",
+          "startedAt": 1795078807933,
+          "turnSeq": 1,
+          "type": "file_read",
+        },
+      ],
+    },
+    {
+      "completedAt": 1795078809145,
+      "content": "Both agree: \`package.json\` declares **1.37.1** and \`package-lock.json\` records the same version.",
+      "durationMs": 7142,
+      "id": "m39",
+      "role": "assistant",
+      "startedAt": 1795078808236,
+      "timestamp": 1795078808939,
+    },
+  ],
+  "pendingApproval": null,
+  "pendingCodexMcpElicitation": null,
+  "pendingCodexUserInput": null,
+  "pendingSudo": null,
+  "promptSuggestion": null,
+  "queue": [],
+  "settings": {
+    "effort": "high",
+    "model": "claude-opus-5-5",
+    "permMode": "bypass",
+    "provider": "claude",
+  },
+  "streamHint": null,
+  "turn": {
+    "forceNewBubble": false,
+    "loadGuardEnded": false,
+    "loadGuardQuietUntil": null,
+    "nextSegmentStart": null,
+    "reasoningActive": false,
+    "startIndex": null,
+    "startedAt": null,
+    "streaming": false,
+    "turnSeq": -1,
+  },
+}
+`;
+
+exports[`golden: 'codex-two-turns' > reduces to the reviewed snapshot 1`] = `
+{
+  "activeSubagents": {},
+  "lastSeq": 19,
+  "messages": [
+    {
+      "content": "What scripts does package.json define?",
+      "id": "u-1",
+      "role": "user",
+      "timestamp": 1795078801002,
+    },
+    {
+      "content": "",
+      "id": "m5",
+      "reasoning": "**Listing scripts**
+
+I can ask npm for the scripts block of package.json.",
+      "reasoningDurationMs": 301,
+      "role": "assistant",
+      "timestamp": 1795078803105,
+    },
+    {
+      "content": "",
+      "id": "m6",
+      "role": "assistant",
+      "startedAt": 1795078801003,
+      "timestamp": 1795078803406,
+      "toolCalls": [
+        {
+          "durationMs": 801,
+          "id": "item_1",
+          "input": "{
+  "command": "bash -lc 'npm pkg get scripts'"
+}",
+          "liveOutput": false,
+          "name": "Bash",
+          "output": "{
+  "dev": "vite",
+  "build": "vite build",
+  "test": "vitest",
+  "lint": "eslint ."
+}
+",
+          "startedAt": 1795078803406,
+          "turnSeq": 1,
+          "type": "terminal_command",
+        },
+      ],
+    },
+    {
+      "completedAt": 1795078805809,
+      "content": "The project defines four scripts: \`dev\`, \`build\`, \`test\` and \`lint\`.",
+      "durationMs": 4806,
+      "id": "m8",
+      "role": "assistant",
+      "startedAt": 1795078804207,
+      "timestamp": 1795078805708,
+    },
+    {
+      "content": "Run the lint one.",
+      "id": "u-2",
+      "role": "user",
+      "timestamp": 1795078825811,
+    },
+    {
+      "content": "",
+      "id": "m13",
+      "reasoning": "**Running lint**
+
+Run the lint script and report the result.",
+      "reasoningDurationMs": 201,
+      "role": "assistant",
+      "timestamp": 1795078827613,
+    },
+    {
+      "content": "",
+      "id": "m14",
+      "role": "assistant",
+      "startedAt": 1795078825812,
+      "timestamp": 1795078827814,
+      "toolCalls": [
+        {
+          "durationMs": 3802,
+          "id": "item_1",
+          "input": "{
+  "command": "bash -lc 'npm run lint'"
+}",
+          "liveOutput": false,
+          "name": "Bash",
+          "output": "
+> project@1.0.0 lint
+> eslint .
+
+",
+          "startedAt": 1795078827814,
+          "turnSeq": 2,
+          "type": "terminal_command",
+        },
+      ],
+    },
+    {
+      "completedAt": 1795078832618,
+      "content": "Lint passes with no warnings.",
+      "durationMs": 6806,
+      "id": "m17",
+      "role": "assistant",
+      "startedAt": 1795078831616,
+      "timestamp": 1795078832517,
+    },
+  ],
+  "pendingApproval": null,
+  "pendingCodexMcpElicitation": null,
+  "pendingCodexUserInput": null,
+  "pendingSudo": null,
+  "promptSuggestion": null,
+  "queue": [],
+  "settings": {
+    "effort": "medium",
+    "model": "gpt-5-codex",
+    "permMode": "auto",
+    "provider": "codex",
+  },
+  "streamHint": null,
+  "turn": {
+    "forceNewBubble": false,
+    "loadGuardEnded": false,
+    "loadGuardQuietUntil": null,
+    "nextSegmentStart": null,
+    "reasoningActive": false,
+    "startIndex": null,
+    "startedAt": null,
+    "streaming": false,
+    "turnSeq": -1,
+  },
+}
+`;
