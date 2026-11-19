@@ -28,3 +28,15 @@ export function mergeSessionRefresh(
   }
   return merged;
 }
+
+/** Every chat id the desktop holds in memory: listed rows plus each workspace's active (maybe unpersisted) chat. */
+export function inMemorySessionIds(
+  workspaces: ReadonlyMap<string, { sessions: ChatSession[]; activeSession?: ChatSession | null }>,
+): Set<string> {
+  const ids = new Set<string>();
+  for (const ws of workspaces.values()) {
+    for (const s of ws.sessions) ids.add(s.id);
+    if (ws.activeSession) ids.add(ws.activeSession.id);
+  }
+  return ids;
+}
