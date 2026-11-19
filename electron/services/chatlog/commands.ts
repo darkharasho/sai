@@ -136,12 +136,86 @@ function clientEventOf(ev: unknown, origin: Origin): ChatEvent {
       return {
         type, content: s('content') ?? '',
         ...(s('noteId') ? { noteId: s('noteId') } : {}),
-        ...(src.error && typeof src.error === 'object' ? { error: src.error } : {}),
+        ...(src.error !== undefined && src.error !== null ? { error: noteErrorOf(src.error) } : {}),
       };
-    default: // watcher_snapshot
-      if (!s('messageId') || !src.snapshot || typeof src.snapshot !== 'object') throw new Error('clientEvent: watcher_snapshot needs messageId and snapshot');
-      return { type, messageId: s('messageId'), snapshot: src.snapshot };
+    default: { // watcher_snapshot
+      if (!s('messageId')) throw new Error('clientEvent: watcher_snapshot needs messageId and snapshot');
+      return { type, messageId: s('messageId'), snapshot: watcherSnapshotOf(src.snapshot) };
+    }
   }
+}
+
+// ─── clientEvent payload shapes ─────────────────────────────────────────────
+// A phone's clientEvent lands in the desktop transcript, so its nested payload
+// is rebuilt from typed fields: a malformed one is rejected, unknown keys drop.
+
+type Rec = Record<string, unknown>;
+type FieldKind = 'string' | 'number' | 'boolean' | 'string?null' | 'strings';
+const isRec = (v: unknown): v is Rec => !!v && typeof v === 'object' && !Array.isArray(v);
+function fieldOk(v: unknown, k: FieldKind): boolean {
+  switch (k) {
+    case 'string': return typeof v === 'string';
+    case 'number': return typeof v === 'number' && Number.isFinite(v);
+    case 'boolean': return typeof v === 'boolean';
+    case 'string?null': return v === null || typeof v === 'string';
+    case 'strings': return Array.isArray(v) && v.every((x) => typeof x === 'string');
+  }
+}
+/** Copies the listed fields; a required one must be present, an optional one is checked when present. */
+function pick(src: unknown, what: string, required: Record<string, FieldKind>, optional: Record<string, FieldKind> = {}): Rec {
+  if (!isRec(src)) throw new Error(`clientEvent: ${what} must be an object`);
+  const out: Rec = {};
+  for (const [k, kind] of Object.entries(required)) {
+    if (!fieldOk(src[k], kind)) throw new Error(`clientEvent: ${what}.${k} is invalid`);
+    out[k] = src[k];
+  }
+  for (const [k, kind] of Object.entries(optional)) {
+    if (src[k] === undefined) continue;
+    if (!fieldOk(src[k], kind)) throw new Error(`clientEvent: ${what}.${k} is invalid`);
+    out[k] = src[k];
+  }
+  return out;
+}
+
+/** local_note.error: the ChatMessage error card's fields (message required). */
+function noteErrorOf(v: unknown): Rec {
+  return pick(v, 'error', { message: 'string' }, {
+    title: 'string', status: 'number', requestId: 'string', details: 'string', errorType: 'string',
+  });
+}
+
+const WATCHER_PHASES = new Set(['pending', 'queued', 'in_progress', 'success', 'failure', 'cancelled', 'neutral', 'error']);
+const RUN_FIELDS: Record<string, FieldKind> = {
+  status: 'string', conclusion: 'string?null', name: 'string', displayTitle: 'string', runNumber: 'number',
+  runAttempt: 'number', headBranch: 'string', headSha: 'string', event: 'string', actor: 'string',
+  actorAvatar: 'string', htmlUrl: 'string', startedAt: 'string', updatedAt: 'string',
+};
+const JOB_FIELDS: Record<string, FieldKind> = {
+  conclusion: 'string?null', startedAt: 'string', completedAt: 'string', needs: 'strings',
+  synthetic: 'boolean', level: 'number', defKey: 'string', defIndex: 'number',
+};
+const STEP_FIELDS: Record<string, FieldKind> = { conclusion: 'string?null', number: 'number' };
+
+/** watcher_snapshot.snapshot: GitHubWatcherSnapshot with the RunState (+ __jobs) GitHubWatcherCard renders from `data`. */
+function watcherSnapshotOf(v: unknown): Rec {
+  const snap = pick(v, 'snapshot', { url: 'string', phase: 'string', capturedAt: 'number' }, { kind: 'string' });
+  if (!WATCHER_PHASES.has(snap.phase as string)) throw new Error('clientEvent: snapshot.phase is invalid');
+  if (snap.kind !== undefined && snap.kind !== 'run') throw new Error('clientEvent: snapshot.kind is invalid');
+  const rawData = (v as Rec).data;
+  const data = pick(rawData, 'snapshot.data', {}, RUN_FIELDS);
+  const rawJobs = isRec(rawData) ? rawData.__jobs : undefined;
+  if (rawJobs !== undefined) {
+    if (!Array.isArray(rawJobs)) throw new Error('clientEvent: snapshot.data.__jobs must be an array');
+    data.__jobs = rawJobs.map((j) => {
+      const job = pick(j, 'job', { name: 'string', status: 'string' }, JOB_FIELDS);
+      const id = (j as Rec).id;
+      if (typeof id !== 'number' && typeof id !== 'string') throw new Error('clientEvent: job.id is invalid');
+      const steps = (j as Rec).steps;
+      if (!Array.isArray(steps)) throw new Error('clientEvent: job.steps must be an array');
+      return { id, ...job, steps: steps.map((st) => pick(st, 'step', { name: 'string', status: 'string' }, STEP_FIELDS)) };
+    });
+  }
+  return { ...snap, kind: 'run', data };
 }
 
 const defaultTimers: Timers = {
@@ -195,17 +269,41 @@ export class ChatCommands {
       this.ledger.set(clientId, prior);
       return prior.then((r) => ({ ...r, duplicate: true }));
     }
+    // The ledger is memory-only: after a desktop restart a phone resending an
+    // un-acked send must still not run it twice. The log remembers it.
+    if (this.sendIsLogged(cmd)) {
+      const dup = Promise.resolve<CommandResult>({ clientId, ok: true, duplicate: true });
+      this.remember(clientId, dup);
+      return dup;
+    }
     const result = this.exec(cmd).then(
       (r): CommandResult => ({ clientId, ok: true, duplicate: false, ...r }),
       (err): CommandResult => ({ clientId, ok: false, duplicate: false, error: err instanceof Error ? err.message : String(err) }),
     );
+    this.remember(clientId, result);
+    return result;
+  }
+
+  private remember(clientId: string, result: Promise<CommandResult>): void {
     this.ledger.set(clientId, result);
     while (this.ledger.size > this.ledgerSize) {
       const oldest = this.ledger.keys().next().value;
       if (oldest === undefined) break;
       this.ledger.delete(oldest);
     }
-    return result;
+  }
+
+  /**
+   * A send (or a compact, which can wait in the queue as a /compact send) whose
+   * clientId the chat's log already holds: as the user bubble (the reducer keys
+   * it by clientId, also once a queued item drains) or as a waiting queue item.
+   */
+  private sendIsLogged(cmd: ChatCommand): boolean {
+    if (cmd.kind !== 'send' && cmd.kind !== 'compact') return false;
+    if (!this.store.meta(cmd.chatId)) return false;
+    const state = this.store.state(cmd.chatId);
+    if (!state) return false;
+    return state.messages.some((m) => m.id === cmd.clientId) || state.queue.some((q) => q.clientId === cmd.clientId);
   }
 
   // ─── log hooks (ChatLogService.setTurnHooks) ───────────────────────────────

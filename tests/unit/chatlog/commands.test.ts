@@ -767,3 +767,105 @@ describe('ChatCommands: clear, compact, clientEvent, stopTask', () => {
     expect(store.read('c1', 0).entries.filter((e) => e.ev.type === 'user_message')).toHaveLength(1);
   });
 });
+
+describe('ChatCommands: resend after a desktop restart (the ledger is memory-only)', () => {
+  it('a send whose clientId is already a logged message is acked duplicate without dispatching', async () => {
+    const first = mk();
+    await first.cmds.run(send('X', 'run the migration', { origin: 'remote' }));
+    runTurn(first.log);
+    first.store.close();
+    // Restart: same log dir, fresh store/service/commands (empty ledger).
+    const second = mk({ dir: first.dir });
+    const r = await second.cmds.run(send('X', 'run the migration', { origin: 'remote' }));
+    expect(r).toMatchObject({ clientId: 'X', ok: true, duplicate: true });
+    expect(second.d.send).not.toHaveBeenCalled();
+    expect(second.store.read('c1', 0).entries.filter((e) => e.ev.type === 'user_message')).toHaveLength(1);
+    // A later repeat in the same process is still a duplicate (from the ledger).
+    expect((await second.cmds.run(send('X', 'run the migration', { origin: 'remote' }))).duplicate).toBe(true);
+    // A new clientId still sends.
+    expect((await second.cmds.run(send('Y', 'next'))).duplicate).toBe(false);
+    expect(second.d.send).toHaveBeenCalledTimes(1);
+  });
+
+  it('a send whose clientId is still waiting in the logged queue is acked duplicate', async () => {
+    const first = mk();
+    first.d.setPaused(true);
+    await first.cmds.run(send('Q', 'held', { origin: 'remote' }));
+    first.store.close();
+    const second = mk({ dir: first.dir });
+    const r = await second.cmds.run(send('Q', 'held', { origin: 'remote' }));
+    expect(r).toMatchObject({ clientId: 'Q', ok: true, duplicate: true });
+    expect(second.d.send).not.toHaveBeenCalled();
+    expect(second.store.state('c1')!.queue.map((q) => q.clientId)).toEqual(['Q']);
+    expect(second.store.read('c1', 0).entries.filter((e) => e.ev.type === 'queue_added')).toHaveLength(1);
+  });
+
+  it('a queued /compact resent after a restart is acked duplicate', async () => {
+    const first = mk();
+    await first.cmds.run(send('u1', 'hi'));
+    runTurn(first.log);
+    first.d.setPaused(true);
+    await first.cmds.run({ kind: 'compact', chatId: 'c1', clientId: 'k1', origin: 'remote' });
+    first.store.close();
+    const second = mk({ dir: first.dir });
+    second.d.setPaused(true);
+    expect(await second.cmds.run({ kind: 'compact', chatId: 'c1', clientId: 'k1', origin: 'remote' })).toMatchObject({ ok: true, duplicate: true });
+    expect(second.store.state('c1')!.queue.map((q) => q.clientId)).toEqual(['k1']);
+  });
+});
+
+describe('ChatCommands: clientEvent payload validation', () => {
+  const run = { status: 'completed', conclusion: 'success', name: 'CI', displayTitle: 'fix', runNumber: 7, runAttempt: 1, headBranch: 'main', headSha: 'abcdef1234', event: 'push', actor: 'me', htmlUrl: 'https://github.com/o/r/actions/runs/1', startedAt: '2026-11-19T00:00:00Z', updatedAt: '2026-11-19T00:01:00Z' };
+  const job = { id: 1, name: 'build', status: 'completed', conclusion: 'success', startedAt: '2026-11-19T00:00:00Z', completedAt: '2026-11-19T00:01:00Z', steps: [{ name: 'checkout', status: 'completed', conclusion: 'success', number: 1 }], needs: ['lint'], level: 0 };
+  const snap = (over: Record<string, unknown> = {}, data: Record<string, unknown> = {}) => ({
+    url: 'https://github.com/o/r/actions/runs/1', kind: 'run', phase: 'success', capturedAt: 123,
+    data: { ...run, __jobs: [job], ...data }, ...over,
+  });
+  async function withMessage() {
+    const t = mk();
+    await t.cmds.run(send('u1', 'watch it'));
+    runTurn(t.log);
+    const ce = (clientId: string, ev: Record<string, unknown>) =>
+      t.cmds.run({ kind: 'clientEvent', chatId: 'c1', clientId, ev: ev as any, origin: 'remote' });
+    return { ...t, ce };
+  }
+
+  it('accepts a well-formed watcher_snapshot and keeps only known fields', async () => {
+    const { store, ce } = await withMessage();
+    const r = await ce('w1', { type: 'watcher_snapshot', messageId: 'u1', snapshot: { ...snap({}, { evil: { x: 1 } }), extra: 1 } });
+    expect(r.ok).toBe(true);
+    const ev = store.read('c1', 0).entries.map((e) => e.ev).find((e) => e.type === 'watcher_snapshot') as any;
+    expect(ev.snapshot).toEqual(snap());
+  });
+
+  it.each([
+    ['non-string url', snap({ url: 42 })],
+    ['missing phase', snap({ phase: undefined })],
+    ['unknown phase', snap({ phase: 'exploded' })],
+    ['non-number capturedAt', snap({ capturedAt: 'now' })],
+    ['non-object data', snap({ data: 'x' })],
+    ['object run name', snap({}, { name: { toString: 1 } })],
+    ['numeric headSha', snap({}, { headSha: 1234567 })],
+    ['jobs not an array', snap({}, { __jobs: { 0: job } })],
+    ['job without steps', snap({}, { __jobs: [{ ...job, steps: undefined }] })],
+    ['step with object name', snap({}, { __jobs: [{ ...job, steps: [{ name: {}, status: 'completed', conclusion: null, number: 1 }] }] })],
+    ['needs not strings', snap({}, { __jobs: [{ ...job, needs: [1] }] })],
+  ])('rejects a watcher_snapshot with %s', async (_label, bad) => {
+    const { store, ce } = await withMessage();
+    const r = await ce('w1', { type: 'watcher_snapshot', messageId: 'u1', snapshot: bad });
+    expect(r.ok).toBe(false);
+    expect(store.read('c1', 0).entries.some((e) => e.ev.type === 'watcher_snapshot')).toBe(false);
+  });
+
+  it('local_note.error keeps only its typed fields and rejects a malformed error', async () => {
+    const { store, ce } = await withMessage();
+    expect((await ce('n1', { type: 'local_note', noteId: 'e1', content: 'boom', error: { title: 'Overloaded', message: 'boom', status: 529, requestId: 'req_1', evil: { a: 1 } } })).ok).toBe(true);
+    const ev = store.read('c1', 0).entries.map((e) => e.ev).find((e) => e.type === 'local_note') as any;
+    expect(ev.error).toEqual({ title: 'Overloaded', message: 'boom', status: 529, requestId: 'req_1' });
+    for (const [i, error] of [{ message: 5 }, { title: 'x' }, { message: 'm', title: {} }, { message: 'm', status: '529' }, 'boom'].entries()) {
+      const r = await ce(`bad${i}`, { type: 'local_note', noteId: `b${i}`, content: 'x', error });
+      expect(r.ok).toBe(false);
+    }
+    expect(store.read('c1', 0).entries.filter((e) => e.ev.type === 'local_note')).toHaveLength(1);
+  });
+});
