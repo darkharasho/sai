@@ -116,16 +116,18 @@ test('follows the reply to the bottom through tool cards', async ({ page }) => {
   }
 });
 
-test('mid-reply: Send sits beside Stop and queues the message', async ({ page }) => {
+test('mid-reply: Send sits beside Stop and sends the message into the running turn', async ({ page }) => {
   await pair(page);
   await newChat(page);
   await send(page, 'hello there');
   await expect(page.getByTitle('Stop')).toBeVisible();
   await page.getByRole('textbox').fill('and a follow-up');
-  const queued = page.getByTitle('Send (queued)');
-  await expect(queued).toBeVisible();
-  await queued.click();
-  await expect(page.getByTestId('queue-badge')).toContainText('1');
+  const midTurn = page.locator('.send-btn:not(.stop-btn)');
+  await expect(midTurn).toHaveAttribute('title', 'Send');
+  await midTurn.click();
+  // Claude takes it mid-turn: the bubble shows at once and the reply answers it; nothing queues.
+  await expect(page.getByText('Echo: and a follow-up')).toBeVisible();
+  await expect(page.getByTestId('queue-badge')).toHaveCount(0);
   // The composer toolbar never runs off the screen.
   const vw = page.viewportSize()!.width;
   for (const b of await page.locator('.input-wrapper button').all()) {

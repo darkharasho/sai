@@ -85,6 +85,13 @@ const dispatch: ProviderDispatch = {
 };
 
 const commands = new ChatCommands({ log: service, store, dispatch });
+// As electron/main.ts wires them: turn starts clear the in-flight mark, turn ends drain the queue.
+service.setTurnHooks({
+  started: (chatId) => commands.onTurnStarted(chatId),
+  ended: (chatId, ev) => commands.onTurnEnded(chatId, ev),
+  idleDone: (chatId) => commands.onIdleDone(chatId),
+  opened: (chatId) => commands.onChatOpened(chatId),
+});
 
 const workspaces = new WorkspaceRegistry();
 workspaces.set([{ projectPath: project, name: 'demo', kind: 'project', state: 'active' }]);
