@@ -111,8 +111,12 @@ test('follows the reply to the bottom through tool cards', async ({ page }) => {
   // Several tool calls land and grow while the reply streams; the view stays pinned.
   for (let i = 0; i < 6; i++) {
     await page.waitForTimeout(400);
-    const gap = await page.locator('.chat-messages').evaluate((el) => el.scrollHeight - el.clientHeight - el.scrollTop);
-    expect(gap).toBeLessThan(4);
+    // A sample can land in the frame where a card grew but the follow hasn't
+    // scrolled yet; pinned means it catches up right away, not never.
+    await expect.poll(
+      () => page.locator('.chat-messages').evaluate((el) => el.scrollHeight - el.clientHeight - el.scrollTop),
+      { timeout: 500, intervals: [16, 32, 50] },
+    ).toBeLessThan(4);
   }
 });
 
