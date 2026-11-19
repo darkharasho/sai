@@ -213,6 +213,7 @@ describe('ChatV2 app settings', () => {
     const settings: Record<string, unknown> = {
       theme: 'midnight', accent: '#ff0', highlightTheme: 'monokai', messageStampMode: 'time', toolCallsExpanded: true,
       tagMessagesWithTask: false, saiAnimationEnabled: true, autoCompactThreshold: 80,
+      aiProvider: 'claude', modelChoice: 'opus', effortLevel: 'high', permissionMode: 'default',
       github_auth: { token: 'secret' }, linearApiKey: 'k', recentProjects: ['/x'],
     };
     const { v2, ws, frames, settingsFile, ceiling, appSettings } = mk({ settings, ceiling: 'auto-read' });
@@ -221,7 +222,9 @@ describe('ChatV2 app settings', () => {
       v: 2, type: 'app.settings.result', reqId: 9,
       settings: {
         theme: 'midnight', accent: '#ff0', highlightTheme: 'monokai', messageStampMode: 'time', toolCallsExpanded: true,
-        tagMessagesWithTask: false, saiAnimationEnabled: true, autoCompactThreshold: 80, remoteCeiling: 'auto-read',
+        tagMessagesWithTask: false, saiAnimationEnabled: true, autoCompactThreshold: 80,
+        aiProvider: 'claude', modelChoice: 'opus', effortLevel: 'high', permissionMode: 'default',
+        remoteCeiling: 'auto-read',
       },
     }]);
     expect(Object.keys(frames[0].settings).sort()).toEqual([...REMOTE_APP_SETTING_KEYS, 'remoteCeiling'].sort());
@@ -244,6 +247,21 @@ describe('ChatV2 app settings', () => {
     const { v2, ws, frames } = mk({ settings: { theme: 'default' } });
     await v2.handle(ws, { type: 'app.settings', reqId: 1 });
     expect(frames[0].settings).toEqual({ theme: 'default', remoteCeiling: null });
+  });
+
+  it('nested provider defaults cross with their listed string fields only', () => {
+    const picked = pickRemoteAppSettings({
+      codex: { model: 'gpt-5', permission: 'auto', effort: 'high', apiKey: 'secret' },
+      gemini: { model: 'g', approvalMode: 'yolo', conversationMode: 'fast', token: 'x' },
+      kimi: { model: 7, approvalMode: 'default' },
+      claude: { anything: 'no' },
+    }, null);
+    expect(picked).toEqual({
+      codex: { model: 'gpt-5', permission: 'auto', effort: 'high' },
+      gemini: { model: 'g', approvalMode: 'yolo', conversationMode: 'fast' },
+      kimi: { approvalMode: 'default' },
+      remoteCeiling: null,
+    });
   });
 
   it('a repeated app.settings does not double the pushes', async () => {

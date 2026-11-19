@@ -1,32 +1,24 @@
-// Placeholder phone entry. Task 9 replaces this with the real phone app
-// (shared chat components + src/styles/phone.css).
-import React from 'react';
-import ReactDOM from 'react-dom/client';
+// The phone entry. Order matters:
+// 1. mark <html> as the phone (isPhone() / phone.css);
+// 2. install window.sai (the shim host): the chat graph calls
+//    window.sai.settingsGet at import time (themes.ts, useMessageStampPref, …);
+// 3. styles: fonts, globals.css, phone.css, the shell's own;
+// 4. paint the cached appearance (bootstrapAppearance);
+// 5. only then import the shell, which pulls in the shared chat graph.
+import { installSai } from './shell/connection';
 
-declare const __MOBILE__: boolean;
+document.documentElement.dataset.saiPhone = '1';
+installSai();
 
-function App() {
-  return (
-    <div
-      style={{
-        minHeight: '100vh',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        background: '#090c0e',
-        color: '#e6e6e6',
-        fontFamily: 'system-ui, sans-serif',
-        fontSize: 32,
-      }}
-      data-mobile={__MOBILE__ ? '1' : '0'}
-    >
-      SAI
-    </div>
-  );
+async function boot(): Promise<void> {
+  await import('../../src/styles/fonts');
+  await import('../../src/styles/globals.css');
+  await import('../../src/styles/phone.css');
+  await import('./shell/shell.css');
+  const { bootstrapAppearance } = await import('../../src/themes');
+  await bootstrapAppearance().catch(() => { /* CSS defaults */ });
+  const { mountApp } = await import('./shell/App');
+  mountApp(document.getElementById('root')!);
 }
 
-ReactDOM.createRoot(document.getElementById('root')!).render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>,
-);
+void boot();
