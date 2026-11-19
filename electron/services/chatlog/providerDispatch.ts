@@ -2,7 +2,7 @@
 // provider backend the way ChatPanel's handleSend/handleApprove do today
 // (settings → per-provider send args). Gemini and Kimi take the chat id as
 // scope; Claude sends carry logged:true (the user message is already logged).
-import { getClaudeBackend } from '../claudeBackend';
+import { getClaudeBackend, getClaudeBackendSetting } from '../claudeBackend';
 import { getCodexBackend } from '../codexBackend';
 import type { CodexPermission, CodexReasoningEffort } from '../codexBackend/types';
 import { getGeminiCommands } from '../gemini';
@@ -104,10 +104,16 @@ export function createProviderDispatch(devlog: (event: string, data: Record<stri
     },
 
     canDispatch(p, projectPath) {
-      // The CLI, Antigravity and ACP handlers drop a send for a project with no
-      // workspace (the renderer creates it when the project opens). Codex keeps
-      // its own per-scope sessions.
-      return p === 'codex' || !!getWorkspace(projectPath);
+      // Backends that silently drop a send for a project with no workspace (the
+      // renderer creates it when the project opens): the Claude CLI backend
+      // (sendImpl), Antigravity (gemini:send) and ACP/Kimi (kimi:send). The
+      // default Claude SDK backend creates the workspace itself
+      // (getOrCreateWorkspace in SdkBackend.send); Codex keeps its own sessions.
+      switch (p) {
+        case 'codex': return true;
+        case 'claude': return getClaudeBackendSetting() === 'sdk' || !!getWorkspace(projectPath);
+        default: return !!getWorkspace(projectPath);
+      }
     },
 
     isLoadPaused() {

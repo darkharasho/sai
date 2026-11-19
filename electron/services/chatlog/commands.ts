@@ -260,9 +260,14 @@ export class ChatCommands {
       };
       this.log.appendClient(cmd.chatId, { type: 'queue_added', item });
       this.queuedChats.add(cmd.chatId);
-      if (!ready) this.devlog('chatcmd.notReady', { chatId: cmd.chatId, provider });
-      // Queued behind other items while idle: nothing else will wake the drain.
-      if (!paused && ready && !busy) this.scheduleDrain(cmd.chatId, 0, 0);
+      if (!ready) {
+        // Nothing logs an event when the workspace appears: poll with the bounded backoff.
+        this.devlog('chatcmd.notReady', { chatId: cmd.chatId, provider });
+        if (!paused) this.scheduleDrain(cmd.chatId, this.retryBaseMs, 1);
+      } else if (!paused && !busy) {
+        // Queued behind other items while idle: nothing else will wake the drain.
+        this.scheduleDrain(cmd.chatId, 0, 0);
+      }
       return { seq: entry.seq };
     }
 
@@ -317,7 +322,10 @@ export class ChatCommands {
       if (this.dispatch.isLoadPaused()) return; // onLoadResumed drains
       const { projectPath, provider } = this.chat(chatId);
       if (!this.canDispatch(provider, projectPath, chatId)) {
-        this.devlog('chatcmd.drainNotReady', { chatId, provider });
+        // Bounded backoff; after it gives up, the chat's next send or turn end retries.
+        if (attempt < this.maxRetries) this.scheduleDrain(chatId, this.retryBaseMs * 2 ** attempt, attempt + 1);
+        else this.devlog('chatcmd.drainGaveUp', { chatId, attempts: attempt, reason: 'notReady' });
+        this.devlog('chatcmd.drainNotReady', { chatId, provider, attempt });
         return;
       }
       if (this.isBusy(projectPath, chatId)) {
