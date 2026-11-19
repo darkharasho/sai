@@ -7,7 +7,11 @@
 // - linkMachine: one send secret (POST /v1/secrets) and one seal key per
 //   desktop, sent to it in push.register. Idempotent: reconnects resend the
 //   stored secret and key; nothing new is minted.
-// - unlinkMachine: push.unregister, DELETE /v1/secrets, forget the key.
+// - unlinkMachine: push.unregister, DELETE /v1/secrets, forget the key. A
+//   revoke the relay didn't confirm is kept (Keychain, PENDING_REVOKES_KEY)
+//   and retried by every ensurePushRegistration until the relay answers;
+//   otherwise the desktop's secret stays valid with its seal key gone, and
+//   every push it sends shows the generic fallback alert.
 //
 // Push is best effort. The relay can be down, rate limited or not configured
 // yet: every failure is logged quietly and retried on the next auth_ok or
@@ -29,6 +33,12 @@ export const SHARED_ACCESS_GROUP = 'com.project96.sai.shared';
 export const sealKeyName = (keyId: string) => `seal:${keyId}`;
 /** This desktop's relay send secret ({pushId, secretId, sendSecret} JSON, default group). */
 export const secretKeyName = (machineId: string) => `push.secret:${machineId}`;
+/**
+ * Revokes the relay hasn't confirmed: [{pushId, ownerToken, secretId}] JSON,
+ * default group (never the shared one), never logged. Newest last.
+ */
+export const PENDING_REVOKES_KEY = 'push.pendingRevokes';
+export const PENDING_REVOKES_MAX = 32;
 
 // Mirrors relay/src/index.ts and electron/services/push/registry.ts.
 const ID_RE = /^[A-Za-z0-9_-]{22}$/;
@@ -36,8 +46,6 @@ const TOKEN_RE = /^[A-Za-z0-9_-]{43}$/;
 const APNS_TOKEN_RE = /^[0-9a-fA-F]{64,200}$/;
 const KEY_ID_RE = /^[A-Za-z0-9_-]{8,64}$/;
 const SEAL_KEY_RE = /^[A-Za-z0-9+/]{42}[AEIMQUYcgkosw048]=$/;
-const CONTROL_RE = /[\u0000-\u001f\u007f]/g;
-const LABEL_MAX = 64;
 
 const RELAY_TIMEOUT_MS = 10_000;
 /** Removing a machine waits on the revoke: keep it short. */
@@ -49,6 +57,7 @@ const RETRY_AFTER_MS = 60_000;
 
 export interface PushIdentity { pushId: string; ownerToken: string; env: PushEnv }
 interface StoredSecret { pushId: string; secretId: string; sendSecret: string }
+interface PendingRevoke { pushId: string; ownerToken: string; secretId: string }
 
 interface State {
   identity: PushIdentity | null;
@@ -60,13 +69,16 @@ interface State {
   /** machine id → when minting its send secret last failed (unforced retries wait RETRY_AFTER_MS). */
   mintFailedAt: Map<string, number>;
   listeners: Set<(id: PushIdentity) => void>;
+  /** Serializes every read-modify-write of PENDING_REVOKES_KEY. */
+  revokes: Promise<void>;
+  retrying: boolean;
 }
 
 const states = new WeakMap<FullNativeApi, State>();
 function stateOf(native: FullNativeApi): State {
   let s = states.get(native);
   if (!s) {
-    s = { identity: null, listening: false, inflight: null, waiters: [], failedAt: 0, linking: new Map(), mintFailedAt: new Map(), listeners: new Set() };
+    s = { identity: null, listening: false, inflight: null, waiters: [], failedAt: 0, linking: new Map(), mintFailedAt: new Map(), listeners: new Set(), revokes: Promise.resolve(), retrying: false };
     states.set(native, s);
   }
   return s;
@@ -83,14 +95,68 @@ async function relay(native: FullNativeApi, method: 'POST' | 'DELETE', path: str
   return native.http({ method, url: `${PUSH_RELAY_URL}${path}`, body, timeoutMs });
 }
 
-/** The relay label: at most 64 UTF-16 units, no control characters, never a split surrogate pair. */
-export function relayLabel(label: string): string {
-  let out = '';
-  for (const ch of Array.from(label.replace(CONTROL_RE, ''))) {
-    if (out.length + ch.length > LABEL_MAX) break;
-    out += ch;
+function parsePending(raw: string | null): PendingRevoke[] {
+  if (!raw) return [];
+  try {
+    const list = JSON.parse(raw) as unknown;
+    if (!Array.isArray(list)) return [];
+    return list.flatMap((o) => (o && typeof o === 'object'
+      && typeof o.pushId === 'string' && ID_RE.test(o.pushId)
+      && typeof o.ownerToken === 'string' && TOKEN_RE.test(o.ownerToken)
+      && typeof o.secretId === 'string' && ID_RE.test(o.secretId)
+      ? [{ pushId: o.pushId, ownerToken: o.ownerToken, secretId: o.secretId }] : []));
+  } catch { return []; }
+}
+
+/** Runs `fn` on the pending-revoke list under the state's lock and stores what it returns. */
+function updatePending(native: FullNativeApi, fn: (list: PendingRevoke[]) => Promise<PendingRevoke[]> | PendingRevoke[]): Promise<void> {
+  const s = stateOf(native);
+  const run = s.revokes.then(async () => {
+    const before = parsePending(await kcGet(native, PENDING_REVOKES_KEY));
+    const after = (await fn(before)).slice(-PENDING_REVOKES_MAX);
+    if (after.length === 0) {
+      if (before.length) await native.keychainRemove(PENDING_REVOKES_KEY).catch(() => {});
+    } else if (JSON.stringify(after) !== JSON.stringify(before)) {
+      await native.keychainSet(PENDING_REVOKES_KEY, JSON.stringify(after));
+    }
+  }).catch((err) => { warn(`pending revokes: ${errText(err)}`); });
+  s.revokes = run;
+  return run;
+}
+
+/**
+ * DELETE /v1/secrets. True once the relay has answered for good: 2xx, or its
+ * own unknown_push_id (404) / unauthorized (401), after which nothing can
+ * use that secret anyway. Anything else (offline, 5xx, a route-level 404) is
+ * worth retrying. Logs statuses only, never the ids or tokens.
+ */
+async function revokeAtRelay(native: FullNativeApi, r: PendingRevoke): Promise<boolean> {
+  try {
+    const res = await relay(native, 'DELETE', '/v1/secrets', { pushId: r.pushId, ownerToken: r.ownerToken, secretId: r.secretId }, REVOKE_TIMEOUT_MS);
+    if (res.status >= 200 && res.status < 300) return true;
+    const code = res.data && typeof res.data === 'object' ? (res.data as { error?: unknown }).error : undefined;
+    if ((res.status === 404 && code === 'unknown_push_id') || (res.status === 401 && code === 'unauthorized')) return true;
+    warn(`relay revoke failed (${res.status})`);
+  } catch (err) {
+    warn(`relay unreachable: ${errText(err)}`);
   }
-  return out;
+  return false;
+}
+
+/** Retries every revoke the relay hasn't confirmed. Never rejects. */
+export async function retryPendingRevokes(native: FullNativeApi): Promise<void> {
+  const s = stateOf(native);
+  if (s.retrying) return;
+  s.retrying = true;
+  try {
+    await updatePending(native, async (list) => {
+      const keep: PendingRevoke[] = [];
+      for (const r of list) if (!(await revokeAtRelay(native, r))) keep.push(r);
+      return keep;
+    });
+  } finally {
+    s.retrying = false;
+  }
 }
 
 /** Called when the identity changes (first registration, a new pushId or env); desktops need a fresh push.register. */
@@ -167,6 +233,8 @@ export function ensurePushRegistration(
   opts: { prompt?: boolean; force?: boolean; timeoutMs?: number } = {},
 ): Promise<PushIdentity | null> {
   const s = stateOf(native);
+  // Called on launch, resume and every auth_ok: a good moment to finish old revokes.
+  void retryPendingRevokes(native);
   const push = native.push;
   if (!push) return Promise.resolve(null);
   if (s.inflight) return s.inflight;
@@ -219,7 +287,8 @@ function parseSecret(raw: string | null): StoredSecret | null {
 async function mintSecret(native: FullNativeApi, machine: Machine, id: PushIdentity): Promise<StoredSecret | 'stale' | null> {
   let res;
   try {
-    res = await relay(native, 'POST', '/v1/secrets', { pushId: id.pushId, ownerToken: id.ownerToken, label: relayLabel(machine.label) });
+    // No label: the relay sees only ids, sealed blobs and timestamps.
+    res = await relay(native, 'POST', '/v1/secrets', { pushId: id.pushId, ownerToken: id.ownerToken });
   } catch (err) {
     warn(`relay unreachable: ${errText(err)}`);
     return null;
@@ -294,35 +363,49 @@ export function linkMachine(machine: Machine, client: V2Client, native: FullNati
   return run;
 }
 
-/**
- * Unlinks a desktop being removed: push.unregister over `client` (when
- * connected), revokes its send secret at the relay, forgets the secret and
- * seal key. Never rejects; a relay failure leaves an orphan secret the
- * desktop can no longer use for anything readable (the seal key is gone).
- */
-export async function unlinkMachine(machine: Pick<Machine, 'id'>, client: V2Client | null, native: FullNativeApi): Promise<void> {
-  const s = stateOf(native);
+/** Revokes the machine's stored secret (queued for retry on failure) and forgets its secret and seal key. */
+async function purgeMachine(machineId: string, native: FullNativeApi): Promise<void> {
   try {
-    // Synchronous, before any await: the caller closes the socket right after.
-    if (client?.connected) client.request({ type: 'push.unregister' }).catch(() => { /* closing anyway */ });
-    // A link still minting would write the secret and seal key back after we delete them.
-    const running = s.linking.get(machine.id);
-    if (running) await running.catch(() => false);
-    s.mintFailedAt.delete(machine.id);
-    const secret = parseSecret(await kcGet(native, secretKeyName(machine.id)));
+    const secret = parseSecret(await kcGet(native, secretKeyName(machineId)));
     const pushId = await kcGet(native, PUSH_ID_KEY);
     const ownerToken = await kcGet(native, OWNER_TOKEN_KEY);
     if (secret && pushId && ownerToken && secret.pushId === pushId && TOKEN_RE.test(ownerToken)) {
-      try {
-        const res = await relay(native, 'DELETE', '/v1/secrets', { pushId, ownerToken, secretId: secret.secretId }, REVOKE_TIMEOUT_MS);
-        if (res.status !== 200) warn(`relay revoke failed (${res.status})`);
-      } catch (err) {
-        warn(`relay unreachable: ${errText(err)}`);
+      const r: PendingRevoke = { pushId, ownerToken, secretId: secret.secretId };
+      if (!(await revokeAtRelay(native, r))) {
+        await updatePending(native, (list) => [...list.filter((x) => x.secretId !== r.secretId), r]);
       }
     }
   } catch (err) {
     warn(`unlink failed: ${errText(err)}`);
   }
-  await native.keychainRemove(secretKeyName(machine.id)).catch(() => {});
-  await native.keychainRemove(sealKeyName(machine.id), { accessGroup: SHARED_ACCESS_GROUP }).catch(() => {});
+  await native.keychainRemove(secretKeyName(machineId)).catch(() => {});
+  await native.keychainRemove(sealKeyName(machineId), { accessGroup: SHARED_ACCESS_GROUP }).catch(() => {});
+}
+
+/**
+ * Unlinks a desktop being removed: push.unregister over `client` (when
+ * connected), revokes its send secret at the relay (kept for retry when the
+ * relay doesn't confirm), forgets the secret and seal key. Never rejects.
+ */
+export async function unlinkMachine(machine: Pick<Machine, 'id'>, client: V2Client | null, native: FullNativeApi): Promise<void> {
+  const s = stateOf(native);
+  // Synchronous, before any await: the caller closes the socket right after.
+  try {
+    if (client?.connected) client.request({ type: 'push.unregister' }).catch(() => { /* closing anyway */ });
+  } catch { /* closing anyway */ }
+  // A link still minting would write the secret and seal key back after we
+  // delete them: wait for it, but never longer than a revoke. If it's still
+  // running then, purge again once it settles.
+  const running = s.linking.get(machine.id);
+  if (running) {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const settled = await Promise.race([
+      running.then(() => true, () => true),
+      new Promise<false>((resolve) => { timer = setTimeout(() => resolve(false), REVOKE_TIMEOUT_MS); }),
+    ]);
+    clearTimeout(timer);
+    if (!settled) void running.finally(() => purgeMachine(machine.id, native));
+  }
+  s.mintFailedAt.delete(machine.id);
+  await purgeMachine(machine.id, native);
 }

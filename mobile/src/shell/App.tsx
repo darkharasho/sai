@@ -18,7 +18,7 @@ import { useMachines } from '../machines/hooks';
 import { MachineList } from '../machines/MachineList';
 import { PairScreen } from '../machines/PairScreen';
 import { getToken, listMachines, type Machine } from '../machines/store';
-import { currentPushIdentity, ensurePushRegistration, linkMachine, onPushIdentity } from '../push/registration';
+import { currentPushIdentity, ensurePushRegistration, linkMachine, onPushIdentity, retryPendingRevokes } from '../push/registration';
 import { getPresence } from '../push/presence';
 import { parseTap, routeTap } from '../push/routing';
 import {
@@ -150,6 +150,8 @@ export function PhoneApp() {
     else setView(list.length ? 'machines' : 'pair');
     // Push: only once something is paired (the permission prompt follows a pairing, never precedes it).
     if (list.length) void ensurePushRegistration(getNative(), { prompt: true });
+    // Revokes a removed machine left unconfirmed (ensure retries them too).
+    else void retryPendingRevokes(getNative());
   }, [openMachine]);
 
   // Push link: (re)send push.register on every auth_ok and whenever the relay identity changes.

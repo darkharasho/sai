@@ -8,7 +8,8 @@ import type { FullNativeApi, HttpRequest, PushPermission } from '../../../mobile
 import { V2Client } from '../../../mobile/src/v2/client';
 import { addMachine, listMachines, removeMachine, type Machine } from '../../../mobile/src/machines/store';
 import {
-  OWNER_TOKEN_KEY, PUSH_ID_KEY, SHARED_ACCESS_GROUP, ensurePushRegistration, linkMachine, sealKeyName, secretKeyName,
+  OWNER_TOKEN_KEY, PENDING_REVOKES_KEY, PENDING_REVOKES_MAX, PUSH_ID_KEY, SHARED_ACCESS_GROUP, ensurePushRegistration, linkMachine,
+  sealKeyName, secretKeyName,
 } from '../../../mobile/src/push/registration';
 import { createPresence } from '../../../mobile/src/push/presence';
 import { parseTap, routeTap } from '../../../mobile/src/push/routing';
@@ -46,6 +47,8 @@ function fakeDevice(opts: { perm?: PushPermission } = {}) {
   const tap = (d: Record<string, unknown>) => { for (const cb of actionListeners) cb(d); };
   const relayCalls: HttpRequest[] = [];
   let relayDown = false;
+  /** Overrides DELETE /v1/secrets (every call while set); null = 200. */
+  let deleteReply: (() => { status: number; data: unknown }) | null = null;
   /** Overrides POST /v1/secrets (once per call); undefined = the normal answer. */
   let secretsReply: (() => Promise<{ status: number; data: unknown }> | { status: number; data: unknown }) | null = null;
 
@@ -64,7 +67,7 @@ function fakeDevice(opts: { perm?: PushPermission } = {}) {
       secSeq++;
       return { status: 200, data: { secretId: b64url(22, 30 + secSeq), sendSecret: b64url(43, 40 + secSeq) } };
     }
-    if (req.method === 'DELETE' && path === '/v1/secrets') return { status: 200, data: { ok: true } };
+    if (req.method === 'DELETE' && path === '/v1/secrets') return deleteReply ? deleteReply() : { status: 200, data: { ok: true } };
     return { status: 404, data: { error: 'not_found' } };
   });
 
@@ -89,6 +92,7 @@ function fakeDevice(opts: { perm?: PushPermission } = {}) {
     setPerm(p: PushPermission) { perm = p; },
     setRelayDown(v: boolean) { relayDown = v; },
     replyToSecretsOnce(r: NonNullable<typeof secretsReply>) { secretsReply = r; },
+    replyToDeletes(r: typeof deleteReply) { deleteReply = r; },
     /** iOS hands the app a new APNs token. */
     rotate(token: string) { nextToken = token; for (const cb of regListeners) cb(token); },
   };
@@ -141,7 +145,8 @@ describe('push registration', () => {
 
     const sec = relayTo(dev.relayCalls, 'POST', '/v1/secrets');
     expect(sec).toHaveLength(1);
-    expect(sec[0].body).toEqual({ pushId: id!.pushId, ownerToken: id!.ownerToken, label: 'desk' });
+    // No machine label: the relay sees only ids, sealed blobs and timestamps.
+    expect(sec[0].body).toEqual({ pushId: id!.pushId, ownerToken: id!.ownerToken });
     const sealKey = dev.kc.get(dev.k(sealKeyName(m.id), { accessGroup: SHARED_ACCESS_GROUP }));
     expect(sealKey).toBeTruthy();
     // Not in the default group: the Notification Service Extension reads the shared one.
@@ -437,5 +442,145 @@ describe('PhoneApp permission granted in Settings', () => {
     await act(async () => { onState({ isActive: false }); onState({ isActive: true }); await flush(); });
     await waitFor(() => expect(relayTo(dev.relayCalls, 'POST', '/v1/register')).toHaveLength(1));
     expect(dev.native.push!.requestPermission).not.toHaveBeenCalled();
+  });
+});
+
+describe('Capacitor push config', () => {
+  it('shows pushes while the app is in the foreground (banner, list, sound)', async () => {
+    const { default: config } = await import('../../../capacitor.config');
+    expect(config.plugins?.PushNotifications).toEqual({ presentationOptions: ['banner', 'list', 'sound'] });
+    // Merged with the existing plugin config, not replacing it.
+    expect(config.plugins?.Keyboard).toEqual({ resize: 'native', resizeOnFullScreen: true });
+  });
+});
+
+describe('push fix round 2: pending revokes', () => {
+  const pending = (dev: ReturnType<typeof fakeDevice>) => {
+    const raw = dev.kc.get(dev.k(PENDING_REVOKES_KEY));
+    return raw ? (JSON.parse(raw) as Array<Record<string, string>>) : [];
+  };
+
+  it('a failed revoke is kept in the Keychain and retried on the next ensure', async () => {
+    const dev = fakeDevice({ perm: 'granted' });
+    const m = await pairedMachine(dev.native);
+    const id = await ensurePushRegistration(dev.native);
+    const { client, sock } = connectedClient();
+    await linkMachine(m, client, dev.native);
+    const secretId = sock().sent.find((f) => f.type === 'push.register')!.secretId;
+
+    dev.setRelayDown(true);
+    await removeMachine(m.id, dev.native, client);
+    expect(listMachines()).toEqual([]);
+    // Default group only: the extension never needs it.
+    expect(pending(dev)).toEqual([{ pushId: id!.pushId, ownerToken: id!.ownerToken, secretId }]);
+    expect([...dev.kc.keys()].some((key) => key.startsWith(`${SHARED_ACCESS_GROUP}|push.pending`))).toBe(false);
+    // Never logged.
+    const logged = JSON.stringify((console.warn as unknown as { mock: { calls: unknown[] } }).mock.calls);
+    expect(logged).not.toContain(id!.ownerToken);
+    expect(logged).not.toContain(secretId);
+
+    // A plain relay error (500, or a route-level 404) keeps it.
+    dev.setRelayDown(false);
+    dev.replyToDeletes(() => ({ status: 500, data: { error: 'internal' } }));
+    await ensurePushRegistration(dev.native, { force: true });
+    await flush();
+    expect(pending(dev)).toHaveLength(1);
+    dev.replyToDeletes(() => ({ status: 404, data: { error: 'not_found' } }));
+    await ensurePushRegistration(dev.native, { force: true });
+    await flush();
+    expect(pending(dev)).toHaveLength(1);
+
+    // The relay answers: dropped.
+    dev.replyToDeletes(null);
+    await ensurePushRegistration(dev.native, { force: true });
+    await flush();
+    const dels = relayTo(dev.relayCalls, 'DELETE', '/v1/secrets');
+    expect(dels.at(-1)!.body).toEqual({ pushId: id!.pushId, ownerToken: id!.ownerToken, secretId });
+    expect(dev.kc.has(dev.k(PENDING_REVOKES_KEY))).toBe(false);
+    client.close();
+  });
+
+  it("the relay's own unknown_push_id / unauthorized answers drop a pending revoke", async () => {
+    for (const reply of [{ status: 404, data: { error: 'unknown_push_id' } }, { status: 401, data: { error: 'unauthorized' } }]) {
+      const dev = fakeDevice({ perm: 'granted' });
+      const entry = { pushId: b64url(22, 1), ownerToken: b64url(43, 2), secretId: b64url(22, 3) };
+      dev.kc.set(dev.k(PENDING_REVOKES_KEY), JSON.stringify([entry]));
+      dev.replyToDeletes(() => reply);
+      await ensurePushRegistration(dev.native);
+      await flush();
+      expect(relayTo(dev.relayCalls, 'DELETE', '/v1/secrets')).toHaveLength(1);
+      expect(dev.kc.has(dev.k(PENDING_REVOKES_KEY))).toBe(false);
+    }
+  });
+
+  it('the pending list is bounded (newest kept)', async () => {
+    const dev = fakeDevice({ perm: 'granted' });
+    const old = Array.from({ length: PENDING_REVOKES_MAX }, (_, i) => ({
+      pushId: b64url(22, i), ownerToken: b64url(43, i), secretId: b64url(22, i + 1),
+    }));
+    dev.kc.set(dev.k(PENDING_REVOKES_KEY), JSON.stringify(old));
+    dev.setRelayDown(true);
+    const m = await pairedMachine(dev.native);
+    // Registered from an earlier launch: the stored identity is reused while the relay is down.
+    dev.kc.set(dev.k(PUSH_ID_KEY), b64url(22, 50));
+    dev.kc.set(dev.k(OWNER_TOKEN_KEY), b64url(43, 51));
+    dev.kc.set(dev.k(secretKeyName(m.id)), JSON.stringify({ pushId: b64url(22, 50), secretId: b64url(22, 52), sendSecret: b64url(43, 53) }));
+    await removeMachine(m.id, dev.native);
+    const list = pending(dev);
+    expect(list).toHaveLength(PENDING_REVOKES_MAX);
+    expect(list.at(-1)).toEqual({ pushId: b64url(22, 50), ownerToken: b64url(43, 51), secretId: b64url(22, 52) });
+    expect(list[0]).toEqual(old[1]);
+  });
+
+  it('launch retries pending revokes even with no machine left', async () => {
+    const dev = fakeDevice({ perm: 'granted' });
+    holder.native = dev.native;
+    vi.stubGlobal('WebSocket', FakeSocket);
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('offline'); }));
+    installSai();
+    const entry = { pushId: b64url(22, 1), ownerToken: b64url(43, 2), secretId: b64url(22, 3) };
+    dev.kc.set(dev.k(PENDING_REVOKES_KEY), JSON.stringify([entry]));
+    render(createElement(PhoneApp));
+    await waitFor(() => expect(dev.kc.has(dev.k(PENDING_REVOKES_KEY))).toBe(false));
+    expect(relayTo(dev.relayCalls, 'DELETE', '/v1/secrets').map((c) => c.body)).toEqual([entry]);
+    expect(dev.native.push!.requestPermission).not.toHaveBeenCalled();
+  });
+
+  it('a hung link does not hang removal; its late writes are cleaned up', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const dev = fakeDevice({ perm: 'granted' });
+      const m = await pairedMachine(dev.native);
+      const regDone = ensurePushRegistration(dev.native);
+      await vi.advanceTimersByTimeAsync(0);
+      const id = await regDone;
+      const { client } = connectedClient();
+      let release!: () => void;
+      const gate = new Promise<void>((r) => { release = r; });
+      const secretId = b64url(22, 77);
+      dev.replyToSecretsOnce(async () => { await gate; return { status: 200, data: { secretId, sendSecret: b64url(43, 78) } }; });
+      const linking = linkMachine(m, client, dev.native);
+      await vi.advanceTimersByTimeAsync(0);
+
+      let removed = false;
+      const removing = removeMachine(m.id, dev.native, client).then(() => { removed = true; });
+      await vi.advanceTimersByTimeAsync(4_999);
+      expect(removed).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      await removing;
+      expect(listMachines()).toEqual([]);
+
+      // The link finishes late: what it wrote is removed and its secret revoked.
+      release();
+      await linking;
+      await vi.advanceTimersByTimeAsync(0);
+      expect(dev.kc.has(dev.k(secretKeyName(m.id)))).toBe(false);
+      expect(dev.kc.has(dev.k(sealKeyName(m.id), { accessGroup: SHARED_ACCESS_GROUP }))).toBe(false);
+      const del = relayTo(dev.relayCalls, 'DELETE', '/v1/secrets');
+      expect(del.at(-1)!.body).toEqual({ pushId: id!.pushId, ownerToken: id!.ownerToken, secretId });
+      client.close();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
