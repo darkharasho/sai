@@ -72,28 +72,37 @@ function isStale(turnSeq: unknown, s: ChatState): boolean {
 }
 
 /**
- * Turn end: collapse live reasoning, stamp every unstamped text bubble of the
- * turn with its cumulative duration from turn start, and go idle.
+ * Stamp every unstamped text bubble of the turn with its cumulative duration
+ * from turn start, then stop the turn clock (startedAt/startIndex reset). Runs
+ * at the first turn end — `result` (App's busy flag falls there) or, failing
+ * that, `done`/`process_exit`. With the clock stopped it is a no-op, so a done
+ * after a result never re-stamps, and a later streaming_start (wait/resume)
+ * starts a fresh clock.
  */
-function closeTurn(s: ChatState, ts: number): ChatState {
-  s = finalizeReasoning(s, ts);
-  let messages = s.messages;
-  if (s.turn.streaming) {
-    const startIdx = s.turn.startIndex ?? 0;
-    const turnStart = s.turn.startedAt;
-    let changed = false;
-    const next = messages.map((m, i) => {
-      if (i >= startIdx && m.role === 'assistant' && m.content && m.content.length > 0 && typeof m.durationMs !== 'number') {
-        changed = true;
-        return { ...m, durationMs: ts - (turnStart ?? m.startedAt ?? m.timestamp), completedAt: ts };
-      }
-      return m;
-    });
-    if (changed) messages = next;
-  }
+function stampTurnDurations(s: ChatState, ts: number): ChatState {
+  if (!s.turn.streaming || s.turn.startIndex == null) return s;
+  const startIdx = s.turn.startIndex;
+  const turnStart = s.turn.startedAt;
+  let changed = false;
+  const next = s.messages.map((m, i) => {
+    if (i >= startIdx && m.role === 'assistant' && m.content && m.content.length > 0 && typeof m.durationMs !== 'number') {
+      changed = true;
+      return { ...m, durationMs: ts - (turnStart ?? m.startedAt ?? m.timestamp), completedAt: ts };
+    }
+    return m;
+  });
   return {
     ...s,
-    messages,
+    messages: changed ? next : s.messages,
+    turn: { ...s.turn, startIndex: null, startedAt: null },
+  };
+}
+
+/** Turn end: collapse live reasoning, stamp durations (if not yet) and go idle. */
+function closeTurn(s: ChatState, ts: number): ChatState {
+  s = stampTurnDurations(finalizeReasoning(s, ts), ts);
+  return {
+    ...s,
     streamHint: null,
     pendingApproval: null,
     pendingCodexUserInput: null,
@@ -244,7 +253,9 @@ function apply(s: ChatState, entry: ChatLogEntry): ChatState {
 
     case 'result':
       if (isStale(ev.turnSeq, s)) return s;
-      return reduceResultText({ ...s, pendingApproval: null }, entry);
+      // App treats result as the turn end (busy clears here), so durations
+      // are stamped now; done still ends streaming and retires turnSeq.
+      return stampTurnDurations(reduceResultText({ ...s, pendingApproval: null }, entry), ts);
 
     case 'done':
       return reduceDone(s, ev, ts);

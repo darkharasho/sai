@@ -56,6 +56,36 @@ describe('turn boundaries', () => {
     expect(d.turn.turnSeq).toBe(-1);
   });
 
+  it('result stamps durations at result time; a later done does not re-stamp', () => {
+    const s = reduceMany(claude(), [
+      e(1, { type: 'streaming_start', turnSeq: 1 }, 1000),
+      e(2, assistant(1, delta('Hi')), 1100),
+      e(3, { type: 'result', turnSeq: 1 }, 3000),
+      e(4, { type: 'prompt_suggestion', suggestion: 'next' }, 4000),
+      e(5, { type: 'done', turnSeq: 1 }, 9000),
+    ]);
+    expect(s.messages[0]).toMatchObject({ durationMs: 2000, completedAt: 3000 });
+    expect(s.turn.streaming).toBe(false);
+    expect(s.turn.turnSeq).toBe(-1);
+  });
+
+  it('a result then a resumed streaming_start measures the next bubble from the resume', () => {
+    let s = reduceMany(claude(), [
+      e(1, { type: 'streaming_start', turnSeq: 1 }, 1000),
+      e(2, assistant(1, delta('Waiting')), 1100),
+      e(3, { type: 'result', turnSeq: 1 }, 2000),
+    ]);
+    // Result stops the clock but does not end the turn.
+    expect(s.turn).toMatchObject({ streaming: true, startedAt: null, startIndex: null, turnSeq: 1 });
+    s = reduceMany(s, [
+      e(4, { type: 'streaming_start', turnSeq: 1 }, 60_000),
+      e(5, assistant(1, delta('Resumed')), 60_500),
+      e(6, { type: 'done', turnSeq: 1 }, 61_000),
+    ]);
+    expect(s.messages[0]).toMatchObject({ content: 'Waiting', durationMs: 1000, completedAt: 2000 });
+    expect(s.messages[1]).toMatchObject({ content: 'Resumed', startedAt: 60_000, durationMs: 1000, completedAt: 61_000 });
+  });
+
   it('done finalizes a live reasoning row', () => {
     const s = reduceMany(started(1), [
       e(2, { type: 'reasoning_delta', text: 'r' }),
