@@ -6,7 +6,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { act, render, screen, fireEvent } from '@testing-library/react';
 import type { ComponentProps } from 'react';
 import { installMockSai } from '../../../helpers/ipc-mock';
-import { installMockChatlog, flushChatlog, type MockChatlog } from '../../../helpers/chatlogMock';
+import { installMockChatlog, flushChatlog, emitChat, type MockChatlog } from '../../../helpers/chatlogMock';
 
 vi.mock('../../../../src/lib/chat/migrateToLog', () => ({ ensureChatInLog: vi.fn(async () => {}), isChatImported: () => true, forgetChatImported: vi.fn() }));
 vi.mock('../../../../src/components/Chat/ChatMessage', () => ({
@@ -108,6 +108,31 @@ describe('ChatPanel scroll-follow', () => {
     g.writes.length = 0;
     grow(g, 1400);
     expect(g.writes.length).toBeGreaterThan(0);
+  });
+
+  it('small upward events after a release do not re-pin (touch momentum tail inside the threshold)', async () => {
+    const { el, g } = await mountScroller();
+    scrollTo(el, g, 470); // within 60px of the bottom; drop of 30 releases
+    scrollTo(el, g, 468); // small upward events, still within the threshold
+    scrollTo(el, g, 466);
+    scrollTo(el, g, 466);
+    g.writes.length = 0;
+    grow(g, 1200);
+    expect(g.writes).toEqual([]);
+    expect(g.top).toBe(466);
+  });
+
+  it('touchstart during the follow tween cancels it and releases follow', async () => {
+    const { el, g } = await mountScroller();
+    g.top = 100; // far from the bottom so the tween runs, but still following
+    await emitChat(sai, { type: 'streaming_start', projectPath: '/project', scope: 'c1', turnSeq: 1 });
+    await emitChat(sai, { type: 'assistant', projectPath: '/project', scope: 'c1', turnSeq: 1, message: { content: [{ type: 'text', text: 'more', delta: true }] } });
+    fireEvent.touchStart(el);
+    g.writes.length = 0;
+    await act(async () => { await new Promise(r => setTimeout(r, 80)); });
+    expect(g.writes).toEqual([]);
+    grow(g, 1200);
+    expect(g.writes).toEqual([]);
   });
 
   it('wheel up still releases follow', async () => {

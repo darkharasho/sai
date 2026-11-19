@@ -40,28 +40,39 @@ function programmaticWrite(flag: { current: boolean } | undefined, write: () => 
   else flag.current = false;
 }
 
-function tweenScrollToBottom(container: HTMLElement, durationMs = 280, flag?: { current: boolean }) {
-  if (typeof window === 'undefined') return;
+/** Returns a cancel function (null when no tween started). Each step also bails once follow is released. */
+function tweenScrollToBottom(container: HTMLElement, durationMs = 280, flag?: { current: boolean }, stillFollowing?: () => boolean): (() => boolean) | null {
+  if (typeof window === 'undefined') return null;
   if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
     programmaticWrite(flag, () => { container.scrollTop = container.scrollHeight; });
-    return;
+    return null;
   }
   const start = container.scrollTop;
   const initialTarget = container.scrollHeight - container.clientHeight;
-  if (initialTarget <= start) return;
+  if (initialTarget <= start) return null;
+  let cancelled = false;
+  let finished = false;
   const t0 = performance.now();
   // Approximate ease-out cubic-bezier with a power curve: 1 - (1-t)^p
   const p = 1 / (EASING.out[3] || 1);
   const ease = (t: number) => 1 - Math.pow(1 - t, p);
   const step = (t: number) => {
+    if (cancelled || (stillFollowing && !stillFollowing())) return;
     const k = Math.min(1, (t - t0) / durationMs);
     // Recompute target each frame so we follow content that grows mid-tween
     // (e.g. tool output cards expanding via a height animation).
     const target = container.scrollHeight - container.clientHeight;
     programmaticWrite(flag, () => { container.scrollTop = start + (target - start) * ease(k); });
-    if (k < 1) requestAnimationFrame(step);
+    if (k < 1) requestAnimationFrame(step); else finished = true;
   };
   requestAnimationFrame(step);
+  /** Cancels a running tween; false when it had already ended. */
+  return () => {
+    if (cancelled || finished) return false;
+    cancelled = true;
+    if (flag) flag.current = false;
+    return true;
+  };
 }
 
 function ContextMeter({ used, total }: { used: number; total: number }) {
@@ -807,6 +818,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode:
   const isAtBottomRef = useRef(true);
   // True while a scrollTop write came from us (tween / ResizeObserver pin), so handleScroll doesn't read it as the user.
   const programmaticScroll = useRef(false);
+  const tweenCancelRef = useRef<(() => boolean) | null>(null);
   const lastScrollTopRef = useRef(0);
   const lastScrollMaxRef = useRef(0);
   // Set by "Load earlier": the layout effect below keeps the viewport on the same message after the prepend.
@@ -1322,8 +1334,18 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode:
         setFollowOn(false);
       }
     };
+    // A finger down during the follow tween takes over: stop the tween and release follow.
+    const onTouchStart = () => {
+      const cancel = tweenCancelRef.current;
+      tweenCancelRef.current = null;
+      if (!cancel || !cancel()) return;
+      jumpingRef.current = false;
+      isAtBottomRef.current = false;
+      setFollowOn(false);
+    };
     el.addEventListener('wheel', onWheel, { passive: true });
-    return () => el.removeEventListener('wheel', onWheel);
+    el.addEventListener('touchstart', onTouchStart, { passive: true });
+    return () => { el.removeEventListener('wheel', onWheel); el.removeEventListener('touchstart', onTouchStart); };
   }, []);
 
   // Scroll to bottom on mount (session switch remounts via key change)
@@ -1392,7 +1414,8 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode:
         if (lastTweenProjectRef.current !== projectPath) {
           programmaticWrite(programmaticScroll, () => { el.scrollTop = el.scrollHeight; });
         } else {
-          tweenScrollToBottom(el, 280, programmaticScroll);
+          tweenCancelRef.current?.();
+          tweenCancelRef.current = tweenScrollToBottom(el, 280, programmaticScroll, () => isAtBottomRef.current);
         }
       }
     } else if (messages[messages.length - 1]?.role === 'assistant') {
@@ -1405,7 +1428,10 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode:
     isAtBottomRef.current = true;
     setFollowOn(true);
     setUnreadCount(0);
-    if (chatContainerRef.current) tweenScrollToBottom(chatContainerRef.current, 280, programmaticScroll);
+    if (chatContainerRef.current) {
+      tweenCancelRef.current?.();
+      tweenCancelRef.current = tweenScrollToBottom(chatContainerRef.current, 280, programmaticScroll, () => isAtBottomRef.current);
+    }
   };
 
   // Smooth-scroll a mounted message into view, holding the jump guard until the
@@ -1527,7 +1553,9 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode:
       released = true;
     }
     const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 60;
-    if (atBottom && !released) {
+    // Once released, only a downward move (or the true bottom) re-pins: small upward events and momentum
+    // tails inside the threshold must not undo the release.
+    if (atBottom && !released && (dropped < 0 || max - top <= 2)) {
       isAtBottomRef.current = true;
       setFollowOn(true);
       setUnreadCount(0);
