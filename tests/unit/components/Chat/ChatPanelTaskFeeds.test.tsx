@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { ComponentProps } from 'react';
 import { installMockSai } from '../../../helpers/ipc-mock';
+import { bridgeClaudeOnMessageToLog, flushChatlog, installSyncFrames, seedPanelHistory } from '../../../helpers/chatlogMock';
 
 // Mirrors the real renderer's one rule that matters here: a message holding
 // only sai_task calls (an empty "shell") renders nothing (TaskFeedView tests
@@ -27,9 +28,15 @@ vi.mock('../../../../src/components/Chat/MessageQueue', () => ({ default: () => 
 vi.mock('../../../../src/components/ThinkingAnimation', () => ({ default: () => <div /> }));
 
 import { directAtTask } from '../../../../src/components/Chat/tasks/taskFeed';
-import ChatPanel from '../../../../src/components/Chat/ChatPanel';
+import RealChatPanel from '../../../../src/components/Chat/ChatPanel';
 
-type Props = ComponentProps<typeof ChatPanel>;
+// History given as initialMessages is seeded into the chat log the panel renders from.
+function ChatPanel(props: any) {
+  seedPanelHistory(props);
+  return <RealChatPanel {...props} />;
+}
+
+type Props = ComponentProps<typeof RealChatPanel> & { initialMessages?: any[] };
 
 const taskCall = (id: string, input: unknown) => ({ id, name: 'mcp__sai__sai_task', input: JSON.stringify(input) });
 
@@ -86,6 +93,8 @@ describe('ChatPanel task feeds integration', () => {
     inputProps = undefined;
     mockSai.settingsGet.mockImplementation((_k: string, f: unknown) => Promise.resolve(f));
     mockSai.claudeOnMessage.mockImplementation(() => () => {});
+    bridgeClaudeOnMessageToLog(mockSai as any);
+    installSyncFrames();
     (window.sai as any).loadGuardGetState = vi.fn().mockResolvedValue(null);
     (window.sai as any).loadGuardOnState = vi.fn(() => () => {});
     (window.sai as any).claudeSubagentTranscript = vi.fn().mockResolvedValue(null);
@@ -98,6 +107,7 @@ describe('ChatPanel task feeds integration', () => {
   const mount = async (props: Props) => {
     const r = render(<ChatPanel {...props} />);
     await waitFor(() => expect(inputProps).toBeTruthy());
+    await flushChatlog();
     return r;
   };
   const msgTexts = () => screen.queryAllByTestId('msg').map((el) => el.textContent);
@@ -288,7 +298,10 @@ describe('ChatPanel task feeds integration', () => {
         ...taskHistory(),
         { id: 'a5', role: 'assistant', content: '', timestamp: 6, toolCalls: [{ id: 'toolu_bash', name: 'Bash', input: JSON.stringify({ command: 'rm -rf build' }) }] },
       ] as any,
-      initialPendingApproval: { toolName: 'Bash', toolUseId: 'toolu_bash', command: 'rm -rf build', description: '', input: { command: 'rm -rf build' } },
+    });
+    // The pending approval is chat state from the log.
+    await act(async () => {
+      mockSai.chatlog.record({ type: 'approval_needed', projectPath: '/project', scope: 'chat', toolName: 'Bash', toolUseId: 'toolu_bash', command: 'rm -rf build', description: '', input: { command: 'rm -rf build' } });
     });
     expect(tabFor('Alpha task').closest('.task-tabs__item')!.className).toContain('task-status--waiting');
     fireEvent.click(tabFor('Alpha task'));

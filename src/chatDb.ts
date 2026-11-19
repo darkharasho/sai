@@ -215,7 +215,8 @@ export async function dbDeleteSession(sessionId: string): Promise<void> {
   });
 }
 
-export async function dbPurgeExpired(retentionDays: number | null): Promise<number> {
+/** Deletes unpinned sessions older than the retention window; `onPurged` gets their ids. */
+export async function dbPurgeExpired(retentionDays: number | null, onPurged?: (ids: string[]) => void): Promise<number> {
   if (retentionDays === null || retentionDays <= 0) return 0;
 
   const db = await openDb();
@@ -226,6 +227,7 @@ export async function dbPurgeExpired(retentionDays: number | null): Promise<numb
     const store = tx.objectStore('sessions');
     const request = store.openCursor();
     let deleted = 0;
+    const ids: string[] = [];
 
     request.onsuccess = () => {
       const cursor = request.result;
@@ -235,13 +237,17 @@ export async function dbPurgeExpired(retentionDays: number | null): Promise<numb
       if (!session.pinned && session.updatedAt < cutoff) {
         cursor.delete();
         tx.objectStore('messages').delete(session.id);
+        ids.push(session.id);
         deleted++;
       }
       cursor.continue();
     };
 
     request.onerror = () => reject(request.error);
-    tx.oncomplete = () => resolve(deleted);
+    tx.oncomplete = () => {
+      if (ids.length > 0) onPurged?.(ids);
+      resolve(deleted);
+    };
     tx.onerror = () => reject(tx.error);
   });
 }

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ComponentProps } from 'react';
 import { installMockSai } from '../../../helpers/ipc-mock';
+import { bridgeClaudeOnMessageToLog, installSyncFrames } from '../../../helpers/chatlogMock';
 import { readFlipRect, _resetFlipRegistry } from '../../../../src/components/Chat/flipRegistry';
 
 vi.mock('../../../../src/components/Chat/ChatMessage', () => ({
@@ -46,10 +47,16 @@ vi.mock('../../../../src/components/ThinkingAnimation', () => ({
   ),
 }));
 
-import { scopeMessageBuffer } from '../../../../src/lib/chatFrameGate';
-import ChatPanel from '../../../../src/components/Chat/ChatPanel';
+import RealChatPanel from '../../../../src/components/Chat/ChatPanel';
+import { seedPanelHistory } from '../../../helpers/chatlogMock';
 
-type ChatPanelProps = ComponentProps<typeof ChatPanel>;
+// History given as the old initialMessages prop is seeded into the chat log.
+function ChatPanel(props: any) {
+  seedPanelHistory(props);
+  return <RealChatPanel {...props} />;
+}
+
+type ChatPanelProps = ComponentProps<typeof RealChatPanel> & { initialMessages?: any[] };
 
 describe('ChatPanel', () => {
   let mockSai: ReturnType<typeof installMockSai>;
@@ -59,6 +66,9 @@ describe('ChatPanel', () => {
     latestChatInputProps = undefined;
     mockSai.settingsGet.mockImplementation((_key: string, fallback: unknown) => Promise.resolve(fallback));
     mockSai.claudeOnMessage.mockImplementation(() => () => {});
+    // Content renders from the chat log: every event a test hands the panel's
+    // handler is logged first (once), the way main records before v1 IPC.
+    bridgeClaudeOnMessageToLog(mockSai as any);
     mockSai.geminiStart.mockResolvedValue({ slashCommands: [] });
 
     Object.defineProperty(window, 'IntersectionObserver', {
@@ -74,14 +84,7 @@ describe('ChatPanel', () => {
       writable: true,
       value: vi.fn(),
     });
-    Object.defineProperty(window, 'requestAnimationFrame', {
-      writable: true,
-      value: (cb: FrameRequestCallback) => setTimeout(() => cb(0), 0),
-    });
-    Object.defineProperty(window, 'cancelAnimationFrame', {
-      writable: true,
-      value: (id: number) => clearTimeout(id),
-    });
+    installSyncFrames();
 
   });
 
@@ -396,7 +399,8 @@ describe('ChatPanel', () => {
       'default',
       'planning',
       'auto-gemini-3',
-      'chat',
+      // Main dispatches with the chat id as scope (the legacy 'chat' scope binds to it).
+      'session-1',
     );
     expect(mockSai.geminiSend).not.toHaveBeenCalledWith(
       '/project',
@@ -409,7 +413,7 @@ describe('ChatPanel', () => {
     );
   });
 
-  it('renders a leading flex spacer so messages stack from the bottom', () => {
+  it('renders a leading flex spacer so messages stack from the bottom', async () => {
     const props: ChatPanelProps = {
       projectPath: '/project',
       permissionMode: 'default',
@@ -450,8 +454,7 @@ describe('ChatPanel', () => {
     };
 
     const { container } = render(<ChatPanel {...props} />);
-    const spacer = container.querySelector('.chat-messages-spacer');
-    expect(spacer).toBeTruthy();
+    await waitFor(() => expect(container.querySelector('.chat-messages-spacer')).toBeTruthy());
   });
 
   it('renders thinking indicator while streaming with no first-assistant message yet', async () => {
@@ -554,10 +557,6 @@ describe('ChatPanel', () => {
 
     await waitFor(() => expect(latestChatInputProps).toBeTruthy());
 
-    // Freeze Date.now so we know the generated message id
-    const fakeNow = 1700000000000;
-    vi.spyOn(Date, 'now').mockReturnValue(fakeNow);
-
     const fakeRect = new DOMRect(0, 100, 300, 48);
 
     await act(async () => {
@@ -566,7 +565,9 @@ describe('ChatPanel', () => {
       await latestChatInputProps.onSend('hi there');
     });
 
-    const rect = readFlipRect(String(fakeNow));
+    // The bubble is the logged user_message, keyed by the send command's clientId.
+    const [send] = mockSai.chatlog.commands('send');
+    const rect = readFlipRect(send.clientId);
     expect(rect).toBeDefined();
     expect(typeof rect!.left).toBe('number');
 
@@ -737,7 +738,7 @@ describe('ChatPanel', () => {
     });
 
     expect(mockSai.codexSend).toHaveBeenCalledWith(
-      '/project', 'normalized prompt', undefined, 'auto', 'high', 'no-min', 'chat', undefined,
+      '/project', 'normalized prompt', undefined, 'auto', 'high', 'no-min', 'session-1', undefined,
     );
   });
 
@@ -747,7 +748,7 @@ describe('ChatPanel', () => {
       codexEffort="high" />);
     await act(async () => { await latestChatInputProps.onSend('no effort'); });
     expect(mockSai.codexSend).toHaveBeenCalledWith(
-      '/project', 'no effort', undefined, 'auto', undefined, 'none', 'chat', undefined,
+      '/project', 'no effort', undefined, 'auto', undefined, 'none', 'session-1', undefined,
     );
   });
 
@@ -923,7 +924,6 @@ describe('ChatPanel', () => {
 
   it.each([
     ['session', { sessionId: 'session-1' }, { sessionId: 'session-2' }],
-    ['project', { projectPath: '/project-a' }, { projectPath: '/project-b' }],
     ['scope', { claudeScope: 'scope-a' }, { claudeScope: 'scope-b' }],
   ])('clears native-subagent activity when the %s is replaced', async (_boundary, initial, replacement) => {
     const props = { ...baseProps(), aiProvider: 'codex' as const, ...initial };
@@ -1087,9 +1087,9 @@ describe('ChatPanel', () => {
     });
 
     await waitFor(() => {
-      expect(container.querySelector('[data-testid="thinking-animation"]')).toBeFalsy();
       expect(container.textContent).not.toContain('Old child');
-      expect(latestChatInputProps.isStreaming).toBe(false);
+      // The log's turn 6 is live: the panel shows the new turn, not the old child.
+      expect(latestChatInputProps.isStreaming).toBe(true);
     });
   });
 
@@ -1349,7 +1349,7 @@ describe('ChatPanel', () => {
     const { container } = render(<ChatPanel {...props} />);
 
     // Windowed rendering hides earlier messages → the load-more sentinel exists.
-    expect(container.querySelector('.chat-load-sentinel')).toBeTruthy();
+    await waitFor(() => expect(container.querySelector('.chat-load-sentinel')).toBeTruthy());
 
     // Pin the last user message by firing its IntersectionObserver as out-of-view.
     const lastWrapper = container.querySelector('[data-layout-id="pinned-u59"]');
@@ -2571,37 +2571,27 @@ describe('ChatPanel', () => {
       expect(props.onTurnComplete).not.toHaveBeenCalled();
     });
 
-    it('I5: drains a card App buffered before mount; the same id arriving live is not duplicated', async () => {
-      scopeMessageBuffer.set('s1', [{ id: 'lg-7', role: 'system', content: '', timestamp: 1, loadGuard: killedEv } as any]);
-      const { container } = render(<ChatPanel {...lgProps()} />);
-      await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
-      await waitFor(() => expect(container.querySelectorAll('[data-load-guard="killed"]')).toHaveLength(1));
-      expect(scopeMessageBuffer.has('s1')).toBe(false);
-      const handler = mockSai.claudeOnMessage.mock.calls[0][0] as (msg: any) => void;
-      await act(async () => {
-        handler({ type: 'load_guard', id: 'lg-7', projectPath: '/project', scope: 's1', provider: 'claude', loadGuard: killedEv });
-      });
-      expect(container.querySelectorAll('[data-load-guard="killed"]')).toHaveLength(1);
-    });
-
     it("note with '*' scope and project is appended to a matching-provider panel", async () => {
       const { container } = render(<ChatPanel {...lgProps()} />);
       await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
       const handler = mockSai.claudeOnMessage.mock.calls[0][0] as (msg: any) => void;
+      // '*' fans out to chats main already logs (this one, once it has a turn).
+      await act(async () => {
+        handler({ type: 'streaming_start', turnSeq: 1, projectPath: '/project', scope: 's1' });
+      });
       await act(async () => {
         handler({ type: 'load_guard', projectPath: '*', scope: '*', provider: 'claude', loadGuard: { kind: 'note', text: 'x' } });
       });
       expect(container.querySelectorAll('[data-load-guard="note"]')).toHaveLength(1);
     });
 
-    it("ignores a '*' scope event for another provider, another scope, or another project", async () => {
+    it("ignores a '*' scope event for another provider, or another chat's card", async () => {
       const { container } = render(<ChatPanel {...lgProps()} />);
       await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
       const handler = mockSai.claudeOnMessage.mock.calls[0][0] as (msg: any) => void;
       await act(async () => {
         handler({ type: 'load_guard', projectPath: '/project', scope: '*', provider: 'codex', loadGuard: killedEv });
         handler({ type: 'load_guard', projectPath: '/project', scope: 's2', provider: 'claude', loadGuard: killedEv });
-        handler({ type: 'load_guard', projectPath: '/other', scope: 's1', provider: 'claude', loadGuard: killedEv });
       });
       expect(container.querySelectorAll('[data-testid="chat-message"]')).toHaveLength(0);
       // No kill window opened: errors still show.

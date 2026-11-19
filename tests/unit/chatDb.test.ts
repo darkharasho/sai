@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import 'fake-indexeddb/auto';
 import {
   dbGetSessions,
@@ -365,6 +365,17 @@ describe('dbPurgeExpired', () => {
     const sessions = await dbGetSessions('/project/a');
     expect(sessions).toHaveLength(1);
     expect(sessions[0].title).toBe('Recent');
+  });
+
+  it('reports the purged session ids (their chat logs are deleted too)', async () => {
+    const now = Date.now();
+    const old = makeSession({ title: 'Old', updatedAt: now - 31 * 24 * 60 * 60 * 1000 });
+    const recent = makeSession({ title: 'Recent', updatedAt: now });
+    await dbSaveSession('/project/a', old);
+    await dbSaveSession('/project/a', recent);
+    const onPurged = vi.fn();
+    await dbPurgeExpired(30, onPurged);
+    expect(onPurged).toHaveBeenCalledWith([old.id]);
   });
 
   it('skips pinned sessions', async () => {

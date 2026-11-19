@@ -435,6 +435,15 @@ describe('App: persistence on session swap', () => {
       fireEvent.click(screen.getByText('Chat A'));
     });
 
+    // The panel (mocked here) loads A from the chat log and hands App its
+    // messages for the IndexedDB mirror — plus one the user just sent.
+    await act(async () => {
+      chatPanelPropsLog.at(-1)!.onMessagesChange([
+        ...(messagesBySessionId.get('session-A') ?? []),
+        makeMsg({ id: 'msg-new', content: 'a new message in A' }),
+      ]);
+    });
+
     // Clear the save log; we only care about what happens during the A→B swap
     saveOrder.length = 0;
 
@@ -455,6 +464,24 @@ describe('App: persistence on session swap', () => {
     // lives only in the DB and dbSaveSession would clobber it. lastViewedAt
     // is patched via dbPatchSessionMeta instead (asserted below).
     expect(saveOrder).not.toContain('session-B');
+  });
+
+  it('deleting a chat also deletes its durable log; retention purges do too', async () => {
+    const { dbPurgeExpired } = await import('../../src/chatDb');
+    vi.mocked(dbPurgeExpired).mockImplementation(async (_days: any, onPurged?: (ids: string[]) => void) => {
+      onPurged?.(['old-chat']);
+      return 1;
+    });
+    render(<App />);
+    await waitFor(() => expect(mockSai.chatlog.delete).toHaveBeenCalledWith(['old-chat']));
+    const chatsBtn = await waitFor(() => screen.getByTitle('Chats'));
+    await act(async () => { fireEvent.click(chatsBtn); });
+    await waitFor(() => expect(screen.getByText('Chat A')).toBeInTheDocument());
+    await act(async () => { fireEvent.contextMenu(screen.getByText('Chat A')); });
+    await act(async () => { fireEvent.click(screen.getByText('Delete')); });
+    await act(async () => { fireEvent.click(screen.getByText('Delete')); });
+    await waitFor(() => expect(mockSai.chatlog.delete).toHaveBeenCalledWith(['session-A']));
+    vi.mocked(dbPurgeExpired).mockResolvedValue(undefined as any);
   });
 
   it('patches lastViewedAt on the incoming session via dbPatchSessionMeta', async () => {
@@ -634,7 +661,9 @@ describe('App: persistence on session swap', () => {
     await act(async () => { fireEvent.click(screen.getByText('Chat B')); });
     await waitFor(() => expect(chatPanelPropsLog.at(-1)?.claudeScope).toBe('session-B'));
 
-    const onMessage = mockSai.claudeOnMessage.mock.calls.at(-1)?.[0] as (msg: any) => void;
+    const appOnMessage = mockSai.claudeOnMessage.mock.calls.at(-1)?.[0] as (msg: any) => void;
+    // Main logs every event before the v1 IPC delivery.
+    const onMessage = (msg: any) => { mockSai.chatlog.record(msg); appOnMessage(msg); };
     await act(async () => {
       onMessage({ type: 'session_id', projectPath: PROJECT_PATH, scope: 'session-A', sessionId: 'codex-thread-A' });
       onMessage({
@@ -672,10 +701,12 @@ describe('App: persistence on session swap', () => {
       await waitFor(() => expect(screen.getByText('Chat B')).toBeInTheDocument());
       await act(async () => { fireEvent.click(screen.getByText('Chat B')); });
       await waitFor(() => expect(chatPanelPropsLog.at(-1)?.claudeScope).toBe('session-B'));
-      return mockSai.claudeOnMessage.mock.calls.at(-1)?.[0] as (msg: any) => void;
+      const appOnMessage = mockSai.claudeOnMessage.mock.calls.at(-1)?.[0] as (msg: any) => void;
+      // Main logs every event before the v1 IPC delivery.
+      return (msg: any) => { mockSai.chatlog.record(msg); appOnMessage(msg); };
     };
 
-    it('an agent kill is persisted to the chat by the background done flush', async () => {
+    it('an agent kill is mirrored from the log by the background turn end', async () => {
       const onMessage = await openChatB();
       savedSessions.length = 0;
       await act(async () => {
@@ -688,7 +719,7 @@ describe('App: persistence on session swap', () => {
       )).toBe(true));
     });
 
-    it('a kill with no done after it shows once after selecting the chat', async () => {
+    it('a kill with no done after it is in the chat log once; selecting the chat loads it from there', async () => {
       const onMessage = await openChatB();
       await act(async () => {
         onMessage({ type: 'load_guard', id: 'lg-kill-2', projectPath: PROJECT_PATH, scope: 'session-A', provider: 'claude', loadGuard: commandKill });
@@ -696,9 +727,11 @@ describe('App: persistence on session swap', () => {
       });
       await act(async () => { fireEvent.click(screen.getByText('Chat A')); });
       await waitFor(() => expect(chatPanelPropsLog.at(-1)?.claudeScope).toBe('session-A'));
-      const shown = (chatPanelPropsLog.at(-1)?.initialMessages ?? []) as ChatMessage[];
-      expect(shown.filter(m => m.id === 'lg-kill-2')).toHaveLength(1);
-      expect(shown.find(m => m.id === 'lg-kill-2')).toMatchObject({ role: 'system', loadGuard: commandKill });
+      // The panel renders the chat from the log; App no longer hands it history.
+      expect(chatPanelPropsLog.at(-1)?.initialMessages).toBeUndefined();
+      const logged = mockSai.chatlog.state('session-A')!.messages;
+      expect(logged.filter(m => m.id === 'lg-kill-2')).toHaveLength(1);
+      expect(logged.find(m => m.id === 'lg-kill-2')).toMatchObject({ role: 'system', loadGuard: commandKill });
     });
   });
 

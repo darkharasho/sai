@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import type { ComponentProps } from 'react';
 import { installMockSai } from '../../../helpers/ipc-mock';
+import { flushChatlog, seedPanelHistory } from '../../../helpers/chatlogMock';
 
 vi.mock('../../../../src/components/Chat/ChatMessage', () => ({ default: () => <div /> }));
 
@@ -15,9 +16,14 @@ vi.mock('../../../../src/components/Chat/ChatInput', () => ({
 vi.mock('../../../../src/components/Chat/MessageQueue', () => ({ default: () => <div /> }));
 vi.mock('../../../../src/components/ThinkingAnimation', () => ({ default: () => <div /> }));
 
-import ChatPanel from '../../../../src/components/Chat/ChatPanel';
+import RealChatPanel from '../../../../src/components/Chat/ChatPanel';
 
-type Props = ComponentProps<typeof ChatPanel>;
+function ChatPanel(props: any) {
+  seedPanelHistory(props);
+  return <RealChatPanel {...props} />;
+}
+
+type Props = ComponentProps<typeof RealChatPanel> & { initialMessages?: any[] };
 
 const state = (paused: boolean) => ({
   level: paused ? 'critical' : 'normal', paused, override: false, saiCaused: false, saiAppHeavy: false,
@@ -62,6 +68,7 @@ describe('ChatPanel load guard pause', () => {
   const mount = async (props: Props) => {
     const r = render(<ChatPanel {...props} />);
     await waitFor(() => expect((window.sai as any).loadGuardOnState).toHaveBeenCalled());
+    await flushChatlog();
     return r;
   };
 

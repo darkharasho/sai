@@ -34,7 +34,7 @@ import { toolCallDetail } from './lib/toolCallDetail';
 import { findLatestTodos } from './components/Chat/TodoProgress';
 import { dropLegacySwarmData } from './lib/dropLegacySwarmData';
 import { migrateChatsToLog } from './lib/chat/migrateToLog';
-import { dbGetSessions, dbGetAllSessions, dbGetMessages, dbGetMessagesTail, dbPatchSessionMeta, dbPurgeExpired, dbExternalizeStoredImages, dbCollectReferencedImagePaths, dbCollectReferencedModelKeys, migrateFromLocalStorage } from './chatDb';
+import { dbGetSessions, dbGetAllSessions, dbPatchSessionMeta, dbPurgeExpired, dbExternalizeStoredImages, dbCollectReferencedImagePaths, dbCollectReferencedModelKeys, migrateFromLocalStorage } from './chatDb';
 import { queueSaveSession } from './lib/sessionSaveQueue';
 import type { ChatSession, ChatMessage, GitFile, OpenFile, WorkspaceContext, QueuedMessage, TerminalTab, PendingApproval, EffortLevel, CodexEffort, CodexModelOption, ModelChoice, ClaudeModelOption, AIProvider } from './types';
 import type { MetaWorkspaceListItem, MetaWorkspaceRuntime } from './types';
@@ -69,9 +69,7 @@ import type { WaitMeta } from '../electron/services/waitClassifier';
 import type { FollowUpState } from '../electron/services/followupState';
 import { isTerminalDetail, type BackgroundTaskDetail } from '../electron/services/claudeBackend/backgroundTasks';
 import { WAKEUP_GRACE_MS } from '../electron/services/waitClassifier';
-import { hasChatListener, scopeMessageBuffer } from './lib/chatFrameGate';
-import { convertAssistantEnvelope, appendAssistantChunk, mergePersistedWithBuffer } from './lib/backgroundMessageBuffer';
-import { bufferLoadGuardEvent } from './lib/loadGuardBuffer';
+import { readChatMessages } from './lib/chat/readChat';
 import { isImageFile } from './utils/imageFiles';
 import { isModelFile } from './model3d/modelFiles';
 import { getMonacoEditorFor } from './utils/monacoEditorRegistry';
@@ -217,10 +215,6 @@ const isModelChoice = (v: unknown): v is ModelChoice => typeof v === 'string' &&
 const isEffortLevel = (v: unknown): v is EffortLevel => v === 'low' || v === 'medium' || v === 'high' || v === 'xhigh' || v === 'max';
 const isCodexEffort = (v: unknown): v is CodexEffort => v === 'minimal' || v === 'low' || v === 'medium' || v === 'high' || v === 'xhigh' || v === 'max' || v === 'ultra';
 
-// Cap the in-memory active-session message window. Older messages stay in
-// IndexedDB and are paginated in via ChatPanel's startReached callback.
-const MESSAGE_TAIL_LIMIT = 100;
-const MESSAGE_PAGE_SIZE = 100;
 type GeminiApprovalMode = 'default' | 'auto_edit' | 'yolo' | 'plan';
 type GeminiConversationMode = 'planning' | 'fast';
 type CodexPermission = 'auto' | 'read-only' | 'full-access';
@@ -279,6 +273,11 @@ function WelcomeTypewriter() {
       `}</style>
     </span>
   );
+}
+
+/** Retention purges drop the chats' durable logs along with their IndexedDB rows. */
+function purgeChatLogs(ids: string[]): void {
+  void window.sai.chatlog?.delete(ids).catch(() => {});
 }
 
 export default function App() {
@@ -418,10 +417,6 @@ export default function App() {
   const [suspendedScopes, setSuspendedScopes] = useState<Set<string>>(new Set());
   const [notificationCounts, setNotificationCounts] = useState<Map<string, number>>(new Map());
   const wsTurnSeqRef = useRef<Map<string, number>>(new Map());
-  // Monotonic token for async session loads (select/new/delete). A resolved
-  // tail load only applies if it's still the newest activation — see
-  // handleSelectSession.
-  const sessionLoadSeqRef = useRef(0);
   const [focusedChat, setFocusedChat] = useState(false);
   const [overlayEnabled, setOverlayEnabled] = useState(false);
   // Task tabs (Claude SDK chats only). claudeBackendSetting is a load-time
@@ -964,7 +959,7 @@ export default function App() {
   // Track which workspaces are currently mounted in the chat panel render.
   // When a workspace transitions out of the mounted set (no longer active
   // and no longer busy), persist its in-flight messages into session state
-  // so the next remount restores them via initialMessages, then drop the
+  // (the IndexedDB mirror; the panel itself reloads from the log), then drop the
   // ref entry to free memory.
   const mountedChatRef = useRef<Set<string>>(new Set());
   useEffect(() => {
@@ -1651,7 +1646,7 @@ export default function App() {
     (async () => {
       await migrateFromLocalStorage();
       const retentionDays = await window.sai.settingsGet('historyRetention', 14);
-      await dbPurgeExpired(retentionDays);
+      await dbPurgeExpired(retentionDays, purgeChatLogs);
       void migrateChatsToLog().catch(e => console.warn('[chatlog] migration failed', e));
       await externalizeStoredImagesOnce();
       void pruneOrphanToolImagesOnce();
@@ -1960,13 +1955,6 @@ export default function App() {
       });
     }
   }, []);
-  // Per-scope assistant message buffer for background chats.
-  // Keyed by sessionId (msg.scope). Flushed to chatDb on done/result so
-  // background chats (whose ChatPanel isn't mounted) still persist the
-  // reply. Lives in the chatFrameGate
-  // module (not a ref) so ChatPanel can drain its scope's buffer directly
-  // when it subscribes — see chatFrameGate.ts for the gap-closing protocol.
-  const taskMessagesBufferRef = { current: scopeMessageBuffer };
   useEffect(() => {
     const cleanup = window.sai.claudeOnMessage((msg: any) => {
       if (!msg.projectPath) return;
@@ -2022,41 +2010,6 @@ export default function App() {
       }
       // Use composite key (projectPath:scope) for turnSeq tracking
       const scopeKey = `${msg.projectPath}:${msg.scope || 'chat'}`;
-      // Background-session assistant message capture. When a session streams
-      // while its ChatPanel isn't mounted (user swapped to another session),
-      // accumulate assistant chunks here so we can flush them to chatDb on
-      // done/result. We skip when the focused workspace's active session IS
-      // this scope — in that case
-      // ChatPanel's own onTurnComplete handles persistence and a parallel write
-      // would race / duplicate.
-      // A load-guard card for a chat with no listening panel would otherwise be lost
-      // (a kill there would end the turn with no explanation): buffer it like background
-      // assistant content — merged on select, drained on mount, persisted by the done flush.
-      if (msg.type === 'load_guard') {
-        bufferLoadGuardEvent(msg, workspacesRef.current);
-      }
-      if (msg.type === 'assistant' && msg.message?.content) {
-        const scope = msg.scope || 'chat';
-        if (scope !== 'chat') {
-          const focusedWs = workspacesRef.current.get(msg.projectPath);
-          const isFocusedHere =
-            msg.projectPath === activeProjectPathRef.current
-            && focusedWs?.activeSession.id === scope;
-          // There is a race window between when the session becomes active
-          // (isFocusedHere=true) and when ChatPanel's useEffect registers its
-          // claudeOnMessage listener — messages arriving in that gap would be
-          // lost by both paths. chatFrameGate closes it: buffer until the panel
-          // REGISTERS its listener; the panel then drains the buffer
-          // synchronously right after subscribing (reconciled by id).
-          if (!isFocusedHere || !hasChatListener(scope)) {
-            const converted = convertAssistantEnvelope(msg);
-            if (converted) {
-              const prev = taskMessagesBufferRef.current.get(scope) ?? [];
-              taskMessagesBufferRef.current.set(scope, appendAssistantChunk(prev, converted));
-            }
-          }
-        }
-      }
       if (msg.type === 'followup') {
         // Never turnSeq-guarded: 'none' carries the judged (older) turn's seq and
         // the backend already drops stale verdicts.
@@ -2272,66 +2225,44 @@ export default function App() {
           const next = new Map(prev); next.delete(scopeKey); return next;
         });
         wsTurnSeqRef.current.set(scopeKey, -1);
-        // Flush any buffered assistant messages for this background session to
-        // chatDb. Merged with the persisted prefix (user prompt + earlier turns)
-        // so the session shows the full exchange when the user opens it.
-        // ChatPanel's onTurnComplete handles the focused case; the buffer is
-        // only populated when the session wasn't focused.
+        // Mirror a background chat's turn into IndexedDB (session row, sidebar
+        // counts, search/export/titles). Its content comes from the durable
+        // log — the source of truth — never from renderer buffers. The visible
+        // chat's panel hands App its own state via onTurnComplete.
         {
           const scope = msg.scope || 'chat';
-          if (scope !== 'chat') {
-            const buffered = taskMessagesBufferRef.current.get(scope);
+          const visible = msg.projectPath === activeProjectPathRef.current
+            && workspacesRef.current.get(msg.projectPath)?.activeSession.id === scope;
+          if (scope !== 'chat' && !visible) {
             const turnErrored = isTurnErrored(msg);
-            if (buffered && buffered.length > 0) {
-              taskMessagesBufferRef.current.delete(scope);
-              const wsPath = msg.projectPath;
-              void (async () => {
-                try {
-                  const existing = await dbGetMessages(scope);
-                  const merged = mergePersistedWithBuffer(existing, buffered);
-                  const sessions = await dbGetSessions(wsPath);
-                  const targetSession = sessions.find(s => s.id === scope);
-                  if (!targetSession) return;
-                  const scopedCodexSessionId = codexSessionIdByScopeRef.current.get(`${wsPath}:${scope}`);
-                  await queueSaveSession(wsPath, {
-                    ...targetSession,
-                    ...(scopedCodexSessionId
-                      ? { aiProvider: 'codex' as const, codexSessionId: scopedCodexSessionId }
-                      : {}),
-                    messages: merged,
-                    messageCount: merged.length,
-                    updatedAt: Date.now(),
-                    lastTurnErrored: turnErrored ? true : false,
-                  }, 0);
-                  // Refresh sessions list so sidebar message counts update.
-                  await refreshWorkspaceSessions(wsPath);
-                } catch (err) {
-                  // eslint-disable-next-line no-console
-                  console.error('background-session: persist messages failed', err);
+            const wsPath = msg.projectPath;
+            void (async () => {
+              try {
+                const messages = await readChatMessages(scope).catch(() => null);
+                const sessions = await dbGetSessions(wsPath);
+                const targetSession = sessions.find(s => s.id === scope);
+                if (!targetSession) return;
+                const scopedCodexSessionId = codexSessionIdByScopeRef.current.get(`${wsPath}:${scope}`);
+                const patch = {
+                  ...(scopedCodexSessionId
+                    ? { aiProvider: 'codex' as const, codexSessionId: scopedCodexSessionId }
+                    : {}),
+                  updatedAt: Date.now(),
+                  lastTurnErrored: turnErrored ? true : false,
+                };
+                if (messages && messages.length > 0) {
+                  await queueSaveSession(wsPath, { ...targetSession, ...patch, messages, messageCount: messages.length }, 0);
+                } else {
+                  // List rows are messageless: a full save would wipe the stored messages.
+                  await dbPatchSessionMeta(wsPath, scope, patch);
                 }
-              })();
-            } else if (turnErrored) {
-              // No buffered assistant content (e.g. immediate error) — still
-              // stamp the session so the sidebar shows the error indicator.
-              const wsPath = msg.projectPath;
-              void (async () => {
-                try {
-                  const sessions = await dbGetSessions(wsPath);
-                  const targetSession = sessions.find(s => s.id === scope);
-                  if (!targetSession) return;
-                  const scopedCodexSessionId = codexSessionIdByScopeRef.current.get(`${wsPath}:${scope}`);
-                  await queueSaveSession(wsPath, {
-                    ...targetSession,
-                    ...(scopedCodexSessionId
-                      ? { aiProvider: 'codex' as const, codexSessionId: scopedCodexSessionId }
-                      : {}),
-                    updatedAt: Date.now(),
-                    lastTurnErrored: true,
-                  }, 0);
-                  await refreshWorkspaceSessions(wsPath);
-                } catch { /* best-effort */ }
-              })();
-            }
+                // Refresh sessions list so sidebar message counts update.
+                await refreshWorkspaceSessions(wsPath);
+              } catch (err) {
+                // eslint-disable-next-line no-console
+                console.error('background-session: persist messages failed', err);
+              }
+            })();
           }
         }
         if ((msg.scope || 'chat') === 'chat') {
@@ -2942,9 +2873,6 @@ export default function App() {
       ? providerOverride
       : aiProvider;
     const outgoingScope = workspacesRef.current.get(activeProjectPath)?.activeSession.id;
-    // Invalidate any in-flight session tail load so it can't resolve late and
-    // swap the panel back off the fresh chat.
-    sessionLoadSeqRef.current++;
     flushAndPersist(activeProjectPath);
     // Clear backend sessions so next message starts fresh
     if (outgoingScope) {
@@ -2974,10 +2902,6 @@ export default function App() {
     const selected = authoritativeCodexSessionId
       ? { ...storedSelected, aiProvider: 'codex' as const, codexSessionId: authoritativeCodexSessionId }
       : storedSelected;
-    // Guard the async tail load against rapid re-selection: two quick clicks
-    // raced their dbGetMessagesTail promises and whichever resolved LAST won,
-    // even when it was the first click — leaving the panel on the wrong chat.
-    const loadSeq = ++sessionLoadSeqRef.current;
     // Rebind the backend Claude scope to the persisted CLI session id so
     // `--resume` is passed on the next spawn. The scope cache is in-memory only
     // and empty after an app restart, so without this the CLI starts a fresh
@@ -2993,23 +2917,14 @@ export default function App() {
     // sessions list so the indicator clears immediately, without waiting for
     // the refresh round-trip.
     void dbPatchSessionMeta(activeProjectPath, selected.id, { lastViewedAt: viewedAt }).catch(() => {});
-    // Load the tail from IndexedDB (full messages live there, not in the sessions list).
-    dbGetMessagesTail(selected.id, MESSAGE_TAIL_LIMIT).then(({ messages, totalCount }) => {
-      if (loadSeq !== sessionLoadSeqRef.current) return; // superseded by a newer selection
-      // Merge any in-flight buffered assistant content from background streaming.
-      // Without this, clicking a chat that is streaming in the background shows
-      // stale content because the buffer hasn't been flushed to IndexedDB yet.
-      const buffered = taskMessagesBufferRef.current.get(selected.id);
-      const merged = buffered && buffered.length > 0
-        ? mergePersistedWithBuffer(messages, buffered)
-        : messages;
-      wsFirstLoadedIdxRef.current.set(activeProjectPath!, totalCount - messages.length);
-      updateWorkspace(activeProjectPath!, ws => ({
-        ...ws,
-        activeSession: { ...selected, messages: merged, lastViewedAt: viewedAt },
-        sessions: ws.sessions.map(s => s.id === selected.id ? { ...s, lastViewedAt: viewedAt } : s),
-      }));
-    });
+    // The panel loads the chat itself from the durable log; the mirror it
+    // hands back is the whole chat, so saves never merge with a stored prefix.
+    wsFirstLoadedIdxRef.current.delete(activeProjectPath);
+    updateWorkspace(activeProjectPath, ws => ({
+      ...ws,
+      activeSession: { ...selected, messages: [], lastViewedAt: viewedAt },
+      sessions: ws.sessions.map(s => s.id === selected.id ? { ...s, lastViewedAt: viewedAt } : s),
+    }));
   };
 
   const handleUpdateSessions = useCallback((updated: ChatSession[]) => {
@@ -3029,13 +2944,12 @@ export default function App() {
     for (const id of Array.from(firstUserPersistRef.current)) {
       if (!nextIds.has(id)) firstUserPersistRef.current.delete(id);
     }
-    for (const id of Array.from(taskMessagesBufferRef.current.keys())) {
-      if (!nextIds.has(id)) taskMessagesBufferRef.current.delete(id);
-    }
     // Purge a deleted session's runtime status so it can't linger as a
     // phantom: an un-resolved approval kept inflating the Chats badge
     // forever, and stale waiting/suspended/streaming scope keys survived
     // until app restart.
+    // Deleted chats leave the durable log too.
+    if (removedIds.length > 0) void window.sai.chatlog?.delete(removedIds).catch(() => {});
     if (removedIds.length > 0) {
       const removedKeys = removedIds.map(id => `${wsPath}:${id}`);
       const removedIdSet = new Set(removedIds);
@@ -3106,7 +3020,6 @@ export default function App() {
     // in the DB. Side effects stay out of the updater (StrictMode).
     const activeDeleted = !!prevWs && removedIds.includes(prevWs.activeSession.id);
     if (activeDeleted) {
-      sessionLoadSeqRef.current++; // cancel any in-flight tail load for the deleted chat
       (window.sai as any).codexSetSessionId?.(wsPath, undefined, prevWs!.activeSession.id);
       window.sai.geminiSetSessionId?.(wsPath, undefined, prevWs!.activeSession.id);
       (window.sai as any).kimiSetSessionId?.(wsPath, undefined, prevWs!.activeSession.id);
@@ -3407,8 +3320,6 @@ export default function App() {
                   onKimiApprovalModeChange={handleKimiApprovalModeChange}
                   geminiConversationMode={geminiConversationMode}
                   onGeminiConversationModeChange={handleGeminiConversationModeChange}
-                                    initialMessages={ws.activeSession.messages}
-                  initialPendingApproval={approvalSessions.get(wsPath)?.get(ws.activeSession.id) ?? null}
                   activeFilePath={ws.activeFilePath}
                   onFileOpen={handleFileOpen}
                   isActive={wsPath === activeProjectPath}
@@ -4078,7 +3989,7 @@ export default function App() {
         onOpenWhatsNew={openWhatsNew}
         onNewProject={() => setShowNewProject(true)}
         onHistoryRetentionChange={(days) => {
-          dbPurgeExpired(days).then(count => {
+          dbPurgeExpired(days, purgeChatLogs).then(count => {
             if (count > 0) {
               // Sessions were retired — reclaim their now-orphaned tool images.
               void pruneOrphanToolImages().catch(() => {});

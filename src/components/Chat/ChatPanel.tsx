@@ -11,9 +11,10 @@ import SaiLogo from '../SaiLogo';
 import { SPRING, DISTANCE, EASING, useReducedMotionTransition } from './motion';
 import { useSaiAnimationPref } from './useSaiAnimationPref';
 import { markRevealed } from './revealRegistry';
-import { parseToolResultBlocks } from '../../lib/toolResultContent';
-import { registerChatListener, unregisterChatListener, takeBufferedMessages, reconcileDrainedMessages } from '../../lib/chatFrameGate';
-import { loadGuardCard } from '../../lib/loadGuardBuffer';
+import { useChatLog } from '../../hooks/useChatLog';
+import { reduceChat, persistableState } from '../../lib/chat/reducer';
+import type { ChatLogEntry, ChatSettings, ChatState } from '../../lib/chat/types';
+import { itemKey } from './tasks/declaredCards';
 import { buildPendingQuestionAnswer } from '../../lib/pendingQuestionAnswer';
 import { normalizeSlashCommands, type SlashCommandInfo } from '../../lib/slashCommands';
 import WaitingIndicator from './WaitingIndicator';
@@ -87,6 +88,55 @@ const EMPTY_URL_SET: Set<string> = new Set();
 const NO_CHIPS: Map<string, TaskChipInfo> = new Map();
 const NO_LABELS: Map<string, MessageTaskLabels> = new Map();
 const HIDDEN_STYLE = { display: 'none' } as const;
+const EMPTY_MESSAGES: ChatMessageType[] = [];
+
+/** Re-applies task tags stamped on earlier renders (the log never carries them). */
+function applyTaskStamps(messages: ChatMessageType[], stamps: Map<string, string | null>): ChatMessageType[] {
+  if (stamps.size === 0) return messages;
+  let changed = false;
+  const out = messages.map(m => {
+    let nm = m;
+    const own = stamps.get(itemKey(m.id));
+    if (own !== undefined && m.taskId === undefined) nm = { ...nm, taskId: own };
+    if (m.toolCalls) {
+      let calls = m.toolCalls;
+      m.toolCalls.forEach((tc, i) => {
+        const tag = stamps.get(itemKey(m.id, tc.id, i));
+        if (tag === undefined || tc.taskId !== undefined) return;
+        if (calls === m.toolCalls) calls = [...m.toolCalls];
+        calls[i] = { ...tc, taskId: tag };
+      });
+      if (calls !== m.toolCalls) nm = { ...nm, toolCalls: calls };
+    }
+    if (nm !== m) changed = true;
+    return nm;
+  });
+  return changed ? out : messages;
+}
+
+function recordTaskStamps(messages: ChatMessageType[], stamps: Map<string, string | null>): void {
+  for (const m of messages) {
+    if (m.taskId !== undefined) stamps.set(itemKey(m.id), m.taskId);
+    m.toolCalls?.forEach((tc, i) => {
+      if (tc.taskId !== undefined) stamps.set(itemKey(m.id, tc.id, i), tc.taskId);
+    });
+  }
+}
+
+function newClientId(): string {
+  return crypto.randomUUID();
+}
+
+/** Text-only assistant output (not an API-error envelope): the stream-idle gate's activity signal. */
+function isStreamingText(ev: Record<string, any>): boolean {
+  if (ev.type !== 'assistant' || !Array.isArray(ev.message?.content)) return false;
+  let text = '';
+  for (const b of ev.message.content) {
+    if (b?.type === 'tool_use') return false;
+    if (b?.type === 'text' && typeof b.text === 'string') text += b.text;
+  }
+  return !!text && !looksLikeApiError(text);
+}
 import ChatInput, { type ContextItem } from './ChatInput';
 import type { ChatMessage as ChatMessageType, ToolCall, PendingApproval, PendingSudoPrompt, PendingCodexUserInput, PendingCodexMcpElicitation, QueuedMessage, TerminalTab } from '../../types';
 import type { MetaWorkspaceRuntime, CodexEffort, CodexModelOption } from '../../types';
@@ -95,7 +145,6 @@ import { buildHelpMessage } from './helpText';
 import McpAuthNudge from './McpAuthNudge';
 import { buildTaskRegistry, TaskRegistryContext } from './taskRegistry';
 import { parseAiError, looksLikeApiError } from './parseAiError';
-import { classifyToolType } from './tasks/toolType';
 import { useTaskBoard } from './tasks/useTaskBoard';
 import { TaskTabs, TASK_TABS_SLOT_ID } from './tasks/TaskTabs';
 import { TaskFeedView } from './tasks/TaskFeedView';
@@ -161,7 +210,7 @@ interface ChatPanelProps {
   kimiModels: { id: string; name: string }[];
   kimiApprovalMode: 'default' | 'auto_edit' | 'yolo' | 'plan';
   onKimiApprovalModeChange: (m: 'default' | 'auto_edit' | 'yolo' | 'plan') => void;
-  initialMessages?: ChatMessageType[];
+  /** The chat's messages (from the log) for the parent's IndexedDB mirror; persistable state at turn end. */
   onMessagesChange?: (messages: ChatMessageType[]) => void;
   onTurnComplete?: () => void;
   onClaudeSessionId?: (sessionId: string) => void;
@@ -193,10 +242,6 @@ interface ChatPanelProps {
   claudeScope?: string;
   /** Opens the MCP sidebar (chat sign-in nudge "Review"). */
   onOpenMcpPanel?: () => void;
-  /** Optional: seed the pending-approval state on mount. Lets App.tsx hand off
-   *  an already-pending approval when the user swaps into a session that
-   *  fired approval_needed while its ChatPanel was unmounted. */
-  initialPendingApproval?: PendingApproval | null;
   /**
    * Optional: override how individual tool calls in messages are rendered.
    * Return `null` to fall back to the default `<ToolCallCard>`. App uses it to
@@ -458,26 +503,53 @@ const THINKING_ROW_MOTION = {
   style: { overflow: 'hidden', flexShrink: 0 },
 } as const;
 const LOAD_MORE_CHUNK = 30; // messages to load when scrolling up
-/** After the load guard kills this chat's agent, its crash errors are swallowed this long. */
-const LOAD_GUARD_ERROR_QUIET_MS = 15_000;
 
 
-export default function ChatPanel({ projectPath, overlayControl, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, availableModels, claudeOverrideState, aiProvider, codexModel, onCodexModelChange, codexModels, onCodexModelsRefresh, codexPermission, onCodexPermissionChange, codexEffort, onCodexEffortChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, kimiModel, onKimiModelChange, kimiModels, kimiApprovalMode, onKimiApprovalModeChange, initialMessages, onMessagesChange, onTurnComplete, onClaudeSessionId, onGeminiSessionId, onKimiSessionId, onCodexSessionId, activeFilePath, onFileOpen, isActive, isStreaming = false, awaitingQuestion = false, initialDraft, onDraftChange, initialContextItems, onContextItemsChange, messageQueue = [], onQueueAdd, onQueueRemove, onQueueShift, onQueuePromote, sessionId, terminalTabs = [], onSlashCommandsUpdate, claudeScope = 'chat', onOpenMcpPanel, initialPendingApproval = null, renderToolCall, activeMetaRuntime, mentionInsertRef: mentionInsertRefProp, waiting = null, followUp = null, onDismissFollowUp, liveBackgroundTaskCount, onToggleBackgroundTasks, backgroundTasksOpen, taskUiEnabled = false, backgroundTasks, onStopBackgroundTask, claudeSessionId }: ChatPanelProps) {
-  const [messages, setMessagesRaw] = useState<ChatMessageType[]>(() => {
-    const initial = initialMessages || [];
-    // Anything present at mount is history, not a fresh arrival — a workspace/
-    // chat swap must never replay typing/reveal animations for it. (Messages
-    // still streaming remount with empty-or-partial content and keep going
-    // live; see StreamingAssistantHead's liveShown seeding.)
-    for (const m of initial) {
+export default function ChatPanel({ projectPath, overlayControl, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, availableModels, claudeOverrideState, aiProvider, codexModel, onCodexModelChange, codexModels, onCodexModelsRefresh, codexPermission, onCodexPermissionChange, codexEffort, onCodexEffortChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, kimiModel, onKimiModelChange, kimiModels, kimiApprovalMode, onKimiApprovalModeChange, onMessagesChange, onTurnComplete, onClaudeSessionId, onGeminiSessionId, onKimiSessionId, onCodexSessionId, activeFilePath, onFileOpen, isActive, isStreaming = false, awaitingQuestion = false, initialDraft, onDraftChange, initialContextItems, onContextItemsChange, messageQueue = [], onQueueAdd, onQueueRemove, onQueueShift, onQueuePromote, sessionId, terminalTabs = [], onSlashCommandsUpdate, claudeScope = 'chat', onOpenMcpPanel, renderToolCall, activeMetaRuntime, mentionInsertRef: mentionInsertRefProp, waiting = null, followUp = null, onDismissFollowUp, liveBackgroundTaskCount, onToggleBackgroundTasks, backgroundTasksOpen, taskUiEnabled = false, backgroundTasks, onStopBackgroundTask, claudeSessionId }: ChatPanelProps) {
+  // The chat renders from the durable main-process log (useChatLog): every
+  // provider stamps the chat id as scope; the legacy 'chat' scope stands for
+  // the session main binds it to (bindLegacyScope below).
+  const chatId = claudeScope !== 'chat' ? claudeScope : (sessionId ?? null);
+  const fallbackSettings = useMemo<ChatSettings>(() => ({ provider: aiProvider }), [aiProvider]);
+  const { state: logState, lastApplied } = useChatLog(chatId, fallbackSettings);
+  const chatIdRef = useRef(chatId);
+  chatIdRef.current = chatId;
+  useEffect(() => {
+    if (claudeScope === 'chat' && projectPath && sessionId) {
+      void window.sai.chatlog?.bindLegacyScope(projectPath, sessionId);
+    }
+  }, [claudeScope, projectPath, sessionId]);
+  const logMessages = logState?.messages ?? EMPTY_MESSAGES;
+  const historyLoaded = !chatId || logState != null;
+  // Persist task tags on first arrival (display-only): the log never carries
+  // them, so stamps are kept per item and re-applied to every new list.
+  const tagStampsRef = useRef<{ prev: ChatMessageType[]; stamps: Map<string, string | null> }>({ prev: [], stamps: new Map() });
+  const messages = useMemo(() => {
+    if (!taskUiEnabled) return logMessages;
+    const memo = tagStampsRef.current;
+    const carried = applyTaskStamps(logMessages, memo.stamps);
+    const next = stampTaskTags(memo.prev, carried);
+    recordTaskStamps(next, memo.stamps);
+    memo.prev = next;
+    return next;
+  }, [logMessages, taskUiEnabled]);
+  // Anything present when the history first loads is history, not a fresh
+  // arrival — a workspace/chat swap must never replay typing/reveal
+  // animations for it. (A reply still streaming keeps going live; see
+  // StreamingAssistantHead's liveShown seeding.)
+  const revealedForRef = useRef<string | null | undefined>(undefined);
+  if (logState && revealedForRef.current !== chatId) {
+    revealedForRef.current = chatId;
+    for (const m of logState.messages) {
       if (m.role === 'assistant' && m.content) markRevealed(m.id);
     }
-    return initial;
-  });
+  }
   const taskRegistry = useMemo(() => buildTaskRegistry(messages), [messages]);
-  const messagesRef = useRef<ChatMessageType[]>(initialMessages || []);
+  // Latest rendered list, for callbacks that must not re-subscribe per message.
+  const messagesRef = useRef<ChatMessageType[]>(messages);
+  messagesRef.current = messages;
   // "Newest" model card = the last sai_render_model call in this chat. Read from
-  // the eager ref at card-render time (only matters at card mount: it decides
+  // the ref at card-render time (only matters at card mount: it decides
   // who claims the single live WebGL viewer), so the wrapper stays stable and
   // doesn't invalidate memoized ChatMessages.
   const renderToolCallRef = useRef(renderToolCall);
@@ -501,29 +573,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
     }
     return renderToolCallRef.current?.(tc, expanded, seedGrow, { isNewestModel }) ?? null;
   } : undefined), [!!renderToolCall]);
-  // Apply updates to the ref EAGERLY, then hand React the result. Computing
-  // inside a React updater made the ref lag every queued-but-unrendered
-  // update, so the done-time flushMessagesToParent persisted a stale list —
-  // a reply streamed into a hidden workspace saved only its first delta, and
-  // the turn end unmounted the panel before the queued updates could apply.
-  // Read through a ref so the callback identity stays stable ([] deps).
-  const taskUiEnabledRef = useRef(taskUiEnabled);
-  taskUiEnabledRef.current = taskUiEnabled;
-  const setMessages = useCallback((updater: ChatMessageType[] | ((prev: ChatMessageType[]) => ChatMessageType[])) => {
-    let next = typeof updater === 'function' ? updater(messagesRef.current) : updater;
-    // Persist task tags on first arrival (display-only); stamp before the ref.
-    if (taskUiEnabledRef.current) next = stampTaskTags(messagesRef.current, next);
-    messagesRef.current = next;
-    setMessagesRaw(next);
-  }, []);
 
-  // Coalesce streaming text-delta appends to one React state update per animation
-  // frame. Per-chunk setMessages triggered re-tokenization of the entire growing
-  // assistant message on every stdout chunk and was the main driver of RAM spikes
-  // while Claude is coding. Non-delta events (tool calls, new bubbles, errors,
-  // result/done) flush the pending buffer before mutating state to preserve order.
-  const streamPendingRef = useRef<string>('');
-  const streamRafRef = useRef<number | null>(null);
   // Stream-idle gate for the in-flight last assistant bubble. While true, the
   // bubble renders as plain text; flips to true (settled) when no delta has
   // arrived for STREAM_IDLE_MS, letting markdown/highlight render mid-turn
@@ -544,124 +594,41 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
     const t = window.setTimeout(() => setPostSettleHold(false), SETTLE_HOLD_MS);
     return () => window.clearTimeout(t);
   }, [postSettleHold]);
-  // Secondary label on the thinking indicator explaining SILENT pauses — the
-  // SDK emits progress signals (thinking token counts, API retry backoff,
-  // context compaction) during stretches with no text/tool output. Cleared as
-  // soon as real output flows or the turn ends.
-  const [streamHint, setStreamHint] = useState<string | null>(null);
-  const clearStreamHint = useCallback(() => setStreamHint(prev => (prev == null ? prev : null)), []);
-  // Collaboration items are transient runtime state, not transcript content:
-  // Codex can finish the parent turn before a delegated child reports its
-  // terminal status. Keep each child here so the UI remains visibly active
-  // until every child has actually stopped.
-  const [activeSubagents, setActiveSubagents] = useState<Map<string, string>>(new Map());
-  const activeSubagentTurnsRef = useRef<Map<string, number | null>>(new Map());
-  useEffect(() => {
-    // Activity belongs to the live backend session only. A session/workspace
-    // replacement must never inherit a stale child and look permanently busy.
-    activeSubagentTurnsRef.current.clear();
-    setActiveSubagents(prev => (prev.size === 0 ? prev : new Map()));
-  }, [sessionId, projectPath, claudeScope]);
-  // Summarized reasoning ("Show reasoning" setting; SDK backend streams it as
-  // reasoning_delta). Rendered as a REAL transcript row: while the model thinks
-  // it streams in-place as italic text (reasoningLive), then collapses into an
-  // expandable "Reasoning" disclosure on the same row — scrolling and
-  // persisting with the rest of the history.
-  const reasoningPendingRef = useRef<string>('');
-  const reasoningRafRef = useRef<number | null>(null);
-  // True while a live reasoning row is on screen — thinking_tokens counts are
-  // routed onto that card instead of the thinking-indicator hint.
-  const reasoningActiveRef = useRef(false);
-  // Force the next text to open a NEW bubble instead of merging into the last
-  // one. Set at every turn boundary (streaming_start, including wait-resume
-  // re-arms) — merging a resumed turn's text into the previous segment's
-  // bubble is how completed messages were getting overwritten/absorbed.
-  const forceNewBubbleRef = useRef(true);
-  // Predicted next prompt from the SDK (prompt_suggestion, arrives after
-  // result). Rendered as a one-tap chip above the composer while idle.
-  const [promptSuggestion, setPromptSuggestion] = useState<string | null>(null);
+  // Transcript-side live state comes from the log; only the SDK login hint is
+  // panel-local (auth_status is not a transcript event).
+  const [authHint, setAuthHint] = useState<string | null>(null);
+  const streamHint = logState?.streamHint ?? authHint;
+  const promptSuggestionFromLog = logState?.promptSuggestion ?? null;
+  // The chip's ×: hides this suggestion until the log offers another one.
+  const [dismissedSuggestion, setDismissedSuggestion] = useState<string | null>(null);
+  const promptSuggestion = promptSuggestionFromLog && promptSuggestionFromLog !== dismissedSuggestion ? promptSuggestionFromLog : null;
+  const activeSubagents = useMemo(
+    () => new Map(Object.entries(logState?.activeSubagents ?? {}).map(([id, a]) => [id, a.summary])),
+    [logState?.activeSubagents],
+  );
   const saiAnimationEnabled = useSaiAnimationPref();
   const streamIdleTimerRef = useRef<number | null>(null);
-  const flushStreamingText = useCallback(() => {
-    if (streamRafRef.current != null) {
-      cancelAnimationFrame(streamRafRef.current);
-      streamRafRef.current = null;
-    }
-    const pending = streamPendingRef.current;
-    if (!pending) return;
-    streamPendingRef.current = '';
-    setMessages(prev => {
-      const last = prev[prev.length - 1];
-      // Reasoning rows are their own transcript entries — never merge reply
-      // text into them; open a fresh bubble instead of dropping the pending.
-      if (last?.role === 'assistant' && !last.toolCalls && !last.reasoning && !last.reasoningLive) {
-        const updated = [...prev];
-        updated[updated.length - 1] = { ...last, content: (last.content || '') + pending };
-        return updated;
-      }
-      return [...prev, {
-        id: `${Date.now()}-${Math.random()}`,
-        role: 'assistant' as const,
-        content: pending,
-        timestamp: Date.now(),
-        startedAt: Date.now(),
-      }];
-    });
-  }, [setMessages]);
-
-  // Flush buffered reasoning deltas into the live reasoning row (creating it
-  // on first flush). Coalesced per animation frame like reply text.
-  const flushReasoning = useCallback(() => {
-    if (reasoningRafRef.current != null) {
-      cancelAnimationFrame(reasoningRafRef.current);
-      reasoningRafRef.current = null;
-    }
-    const pending = reasoningPendingRef.current;
-    if (!pending) return;
-    reasoningPendingRef.current = '';
-    reasoningActiveRef.current = true;
-    setMessages(prev => {
-      const last = prev[prev.length - 1];
-      if (last?.role === 'assistant' && last.reasoningLive) {
-        const updated = [...prev];
-        updated[updated.length - 1] = { ...last, reasoning: (last.reasoning || '') + pending };
-        return updated;
-      }
-      return [...prev, {
-        id: `${Date.now()}-reasoning-${Math.random()}`,
-        role: 'assistant' as const,
-        content: '',
-        reasoning: pending,
-        reasoningLive: true,
-        timestamp: Date.now(),
-      }];
-    });
-  }, [setMessages]);
-
-  // The reasoning segment is over (reply text/tools arrived, or the turn
-  // ended): collapse the live italic row into its expandable disclosure.
-  const finalizeReasoning = useCallback(() => {
-    flushReasoning();
-    reasoningActiveRef.current = false;
-    setMessages(prev => {
-      for (let i = prev.length - 1; i >= 0; i--) {
-        const m = prev[i];
-        if (m.reasoningLive) {
-          const updated = [...prev];
-          updated[i] = {
-            ...m,
-            reasoningLive: undefined,
-            reasoningDurationMs: Date.now() - (m.timestamp ?? Date.now()),
-          };
-          return updated;
-        }
-        if (m.role === 'user') break;
-      }
-      return prev;
-    });
-  }, [flushReasoning, setMessages]);
+  // Mark the assistant bubble as actively streaming and (re)arm the idle timer
+  // so markdown renders mid-turn on a pause and the thinking head stays in its
+  // thinking phase.
+  const markStreamingActive = useCallback(() => {
+    setStreamSettled(s => s ? false : s);
+    // Drop while streaming so the settle below is always a fresh
+    // false→true edge (re-arming the hold effect's timer).
+    setPostSettleHold(h => h ? false : h);
+    if (streamIdleTimerRef.current != null) clearTimeout(streamIdleTimerRef.current);
+    streamIdleTimerRef.current = window.setTimeout(() => {
+      streamIdleTimerRef.current = null;
+      setStreamSettled(true);
+      setPostSettleHold(true);
+    }, STREAM_IDLE_MS);
+  }, []);
+  useEffect(() => () => {
+    if (streamIdleTimerRef.current != null) clearTimeout(streamIdleTimerRef.current);
+  }, []);
   const emptyPrompt = useMemo(() => EMPTY_PROMPTS[Math.floor(Math.random() * EMPTY_PROMPTS.length)], []);
-  const [turnStartIndex, setTurnStartIndex] = useState<number | null>(null);
+  // The turn's first message index (null between turns) — the reducer owns it.
+  const turnStartIndex = logState?.turn.startIndex ?? null;
   // Height collapse/grow for the tail thinking rows: a tween, not a spring —
   // overshoot on height reads as a bounce of the whole transcript tail.
   const rowTransition = useReducedMotionTransition({ duration: 0.22, ease: EASING.out });
@@ -673,14 +640,6 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
   const prevRowShownRef = useRef(false);
   const dockTransition = useReducedMotionTransition(SPRING.dock);
   const followBtnTransition = useReducedMotionTransition(SPRING.flick);
-  const turnSeqRef = useRef(0); // tracks the active turn's sequence number
-  // Open after the load guard killed this panel's agent (see LOAD_GUARD_ERROR_QUIET_MS).
-  const loadGuardKillRef = useRef<{ until: number; ended: boolean } | null>(null);
-  useEffect(() => {
-    // Incoming events are scoped by project/scope, not session. Retire the
-    // old sequence so late child activity cannot revive a selected new chat.
-    turnSeqRef.current = -1;
-  }, [sessionId, projectPath, claudeScope]);
   const [ready, setReady] = useState(false);
   // True from the moment a queued follow-up is shifted for sending until the new
   // turn's `streaming_start` arrives. Bridges the gap where the prior turn's
@@ -720,10 +679,35 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
       .then((cmds: unknown) => applySlashCommands(cmds))
       .catch(() => { /* backend unavailable — cached list stands */ });
   }, [aiProvider, projectPath, claudeScope, applySlashCommands]);
-  const [pendingApproval, setPendingApproval] = useState<PendingApproval | null>(initialPendingApproval);
-  const [pendingCodexUserInput, setPendingCodexUserInput] = useState<PendingCodexUserInput | null>(null);
-  const [pendingCodexMcpElicitation, setPendingCodexMcpElicitation] = useState<PendingCodexMcpElicitation | null>(null);
-  const [pendingSudoPrompt, setPendingSudoPrompt] = useState<PendingSudoPrompt | null>(null);
+  // Pending prompts come from the log. A local dismissal hides a card the
+  // user already answered until its resolution event lands in the log (and
+  // keeps a stale request from flashing back on a late re-render).
+  const [dismissedPrompts, setDismissedPrompts] = useState<ReadonlySet<string>>(() => new Set());
+  const dismissPrompt = useCallback((key: string) => {
+    setDismissedPrompts(prev => (prev.has(key) ? prev : new Set(prev).add(key)));
+  }, []);
+  const approvalKey = (a: PendingApproval) => `approval:${a.requestHandle ?? a.toolUseId}`;
+  const logApproval = logState?.pendingApproval ?? null;
+  const pendingApproval: PendingApproval | null = logApproval && !dismissedPrompts.has(approvalKey(logApproval)) ? logApproval : null;
+  const logUserInput = logState?.pendingCodexUserInput ?? null;
+  const pendingCodexUserInput: PendingCodexUserInput | null = logUserInput && !dismissedPrompts.has(`input:${logUserInput.requestHandle}`) ? logUserInput : null;
+  const logElicitation = logState?.pendingCodexMcpElicitation ?? null;
+  const pendingCodexMcpElicitation: PendingCodexMcpElicitation | null = logElicitation && !dismissedPrompts.has(`elicit:${logElicitation.requestHandle}`) ? logElicitation : null;
+  // A logged sudo prompt only counts while the broker still holds it: the
+  // broker's prompts die with the app (and time out), the log's copy does not.
+  const logSudo = logState?.pendingSudo ?? null;
+  const logSudoId = logSudo?.promptId ?? null;
+  useEffect(() => {
+    if (!logSudoId) return;
+    let cancelled = false;
+    const check = (window.sai as any).claudeSudoPending;
+    if (typeof check !== 'function') return;
+    void Promise.resolve(check(projectPath, claudeScope)).then((p: { promptId?: string } | null) => {
+      if (!cancelled && p?.promptId !== logSudoId) dismissPrompt(`sudo:${logSudoId}`);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [logSudoId, projectPath, claudeScope, dismissPrompt]);
+  const pendingSudoPrompt: PendingSudoPrompt | null = logSudo && !dismissedPrompts.has(`sudo:${logSudo.promptId}`) ? logSudo : null;
   const [fileContextEnabled, setFileContextEnabled] = useState(true);
   // Provider-neutral telemetry state. Null/empty until a provider actually
   // reports real numbers — never seed Claude-shaped defaults for Codex/Gemini,
@@ -752,10 +736,15 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
   // Windowed rendering: only render messages from renderStart onward.
   // Initialize to the tail so the first render after mount doesn't pay the
   // cost of rendering the entire history before the windowing effect runs.
-  const [renderStart, setRenderStart] = useState(() => {
-    const len = initialMessages?.length ?? 0;
-    return len > RENDER_CHUNK ? len - RENDER_CHUNK : 0;
-  });
+  const [renderStart, setRenderStart] = useState(0);
+  // Start the window at the tail the moment history first loads, so the
+  // first render doesn't mount the entire history before the effect runs.
+  const windowedForRef = useRef<string | null | undefined>(undefined);
+  if (logState && windowedForRef.current !== chatId) {
+    windowedForRef.current = chatId;
+    const tail = logState.messages.length > RENDER_CHUNK ? logState.messages.length - RENDER_CHUNK : 0;
+    if (tail !== renderStart) setRenderStart(tail);
+  }
   const sentinelRef = useRef<HTMLDivElement>(null);
   // True while a user-initiated "jump to message" smooth scroll is in flight.
   // The load-more sentinel must not rewrite scrollTop during this window or it
@@ -922,80 +911,31 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
 
       // One-shot brainstorm seed consumption. Server-side read+delete avoids
       // the renderer ever calling fs:readFile on a missing path (which would
-      // log a noisy ENOENT in the main process). We push the seed into the
-      // chat transcript so the user sees it as their first message — just
-      // calling claudeSend would deliver it to the model invisibly.
+      // log a noisy ENOENT in the main process). The seed goes through the
+      // chat's send command so the user sees it as their first message.
       if (aiProvider === 'claude' && projectPath && !consumedBrainstormSeeds.has(projectPath)) {
         consumedBrainstormSeeds.add(projectPath);
         (window.sai as any).brainstormConsumeSeed(projectPath).then((r: { ok: boolean; content?: string }) => {
           if (!r?.ok || !r.content) return;
           const seedContent = r.content.trim();
           if (!seedContent) return;
-          const seedMessageId = `seed-${Date.now()}`;
-          setMessages(prev => [...prev, {
-            id: seedMessageId,
-            role: 'user',
-            content: seedContent,
-            timestamp: Date.now(),
-          }]);
-          window.sai.claudeSend(
-            projectPath,
-            seedContent,
-            undefined,
-            permissionMode,
-            effortLevel,
-            modelChoice,
-            claudeScope,
-          );
+          void sendToLogRef.current(seedContent, { clientId: newClientId() });
         }).catch(() => { /* ignore */ });
       }
     });
 
-    // Gap-closing gate (chatFrameGate.ts): register BEFORE subscribing so App
-    // stops buffering for this scope, then drain what accumulated in the mount
-    // gap right after subscribing. All synchronous — no frame can interleave
-    // between these statements. Every provider's chat is scoped by its chat
-    // id; only the legacy `chat` default has no gate.
-    const gateScope = claudeScope !== 'chat' ? claudeScope : null;
-    if (gateScope) registerChatListener(gateScope);
+    // Side effects only: transcript content (messages, pending prompts,
+    // streaming state, subagents, hints) is rendered from the chat log.
     const onMessage = (msg: any) => {
-      // Every provider stamps the chat id as scope (Gemini/Kimi included).
-      const expectedScope = claudeScope;
-      // Load-guard events carry '*' wildcards for project and scope (Ruling R5),
-      // so they're matched before the generic filter. Provider must match.
-      if (msg.type === 'load_guard') {
-        const ev = msg.loadGuard;
-        if (msg.provider !== aiProvider) return;
-        if (msg.projectPath !== '*' && msg.projectPath !== projectPath) return;
-        if (msg.scope !== '*' && msg.scope !== expectedScope) return;
-        const card = loadGuardCard(msg);
-        if (!card) return;
-        flushStreamingText();
-        // A killed agent's process dies mid-turn: its crash error is expected
-        // noise. Swallow errors for a while and end the turn as a normal done.
-        if (ev.kind === 'killed' && ev.unitKind === 'agent') {
-          loadGuardKillRef.current = { until: Date.now() + LOAD_GUARD_ERROR_QUIET_MS, ended: false };
-        }
-        // Deduped by id: App may have buffered this card in the mount gap.
-        setMessages(prev => (prev.some(m => m.id === card.id) ? prev : [...prev, card]));
-        // A command/service kill has no done of its own; hand the card to the
-        // parent so the unmount/quit flushes persist it.
-        flushMessagesToParent();
-        return;
-      }
+      // Load-guard cards are transcript content (logged); nothing to do here.
+      if (msg.type === 'load_guard') return;
       // Only process messages for this workspace and chat scope.
       // Every provider uses the chat id as scope, so parallel sessions cannot
       // consume each other's events.
       if (msg.projectPath && msg.projectPath !== projectPath) return;
-      if (msg.scope && msg.scope !== expectedScope) return;
-
-      // Flush any buffered streaming text before processing a non-delta event,
-      // so the pending content is committed to state in the correct order.
-      const isPureTextDelta = msg.type === 'assistant'
-        && Array.isArray(msg.message?.content)
-        && msg.message.content.length > 0
-        && msg.message.content.every((b: any) => b.type === 'text' && b.delta && typeof b.text === 'string');
-      if (!isPureTextDelta) flushStreamingText();
+      // Commands dispatch with the chat id as scope, so a legacy 'chat' panel
+      // also owns events stamped with its bound chat id.
+      if (msg.scope && msg.scope !== claudeScope && msg.scope !== chatIdRef.current) return;
 
       if (msg.type === 'ready') {
         setReady(true);
@@ -1015,187 +955,14 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
         return;
       }
 
-      if (msg.type === 'streaming_start') {
-        // A new turn's errors are its own, never the killed agent's.
-        loadGuardKillRef.current = null;
-        if (msg.turnSeq != null) turnSeqRef.current = msg.turnSeq;
-        // A new stream boundary supersedes any child state that did not get a
-        // terminal lifecycle event (for example, an interrupted parent turn).
-        activeSubagentTurnsRef.current.clear();
-        setActiveSubagents(prev => (prev.size === 0 ? prev : new Map()));
-        clearStreamHint();
-        // A fresh turn (or a wait-resume re-arm) must show its thinking row
-        // immediately — never inherit the previous reply's post-settle hold.
-        setPostSettleHold(h => h ? false : h);
-        finalizeReasoning();
-        forceNewBubbleRef.current = true;
-        setPromptSuggestion(null);
-        setTurnStartIndex(messagesRef.current.length);
-        if (turnStartedAtRef.current === null) {
-          turnStartedAtRef.current = Date.now();
-        }
-        nextSegmentStartRef.current = Date.now();
+      if (msg.type === 'streaming_start' || msg.type === 'done') {
+        setAuthHint(null);
         return;
-      }
-
-      if (msg.type === 'subagent_activity' && typeof msg.agentId === 'string') {
-        const terminal = msg.status === 'completed' || msg.status === 'failed' || msg.status === 'cancelled';
-        const trackedTurn = activeSubagentTurnsRef.current.get(msg.agentId);
-        if (msg.turnSeq != null && msg.turnSeq !== turnSeqRef.current
-          && (!terminal || trackedTurn !== msg.turnSeq)) return;
-        if (terminal) {
-          activeSubagentTurnsRef.current.delete(msg.agentId);
-        } else {
-          activeSubagentTurnsRef.current.set(msg.agentId, msg.turnSeq ?? null);
-        }
-        setActiveSubagents(prev => {
-          const next = new Map(prev);
-          if (terminal) {
-            next.delete(msg.agentId);
-          } else {
-            const summary = typeof msg.summary === 'string' && msg.summary.trim()
-              ? msg.summary.trim()
-              : 'Working';
-            next.set(msg.agentId, summary);
-          }
-          return next;
-        });
-        return;
-      }
-
-      // Mobile remote: append the user bubble for phone-originated prompts.
-      // Desktop-originated prompts already do an optimistic add in the send path,
-      // so only echo when origin === 'remote'.
-      if (msg.type === 'user_message' && msg.origin === 'remote') {
-        setMessages(prev => [...prev, {
-          id: crypto.randomUUID(),
-          role: 'user',
-          content: msg.text ?? '',
-          timestamp: Date.now(),
-        }]);
-        return;
-      }
-
-      // End-of-turn: clear streaming immediately for both 'result' and 'done',
-      // matching App.tsx's workspace busy indicator pattern.
-      if (msg.type === 'result' || msg.type === 'done') {
-        // Ignore stale messages from a previous turn — e.g. when the user sends a new
-        // message while the CLI is still finishing the old response, the old result/done
-        // arrives tagged with the old turnSeq and should not affect the new turn's state.
-        if (msg.turnSeq != null && msg.turnSeq !== turnSeqRef.current) return;
-        if (msg.type === 'done') {
-          // A normal parent completion can precede native child terminal
-          // activity. A forced termination or physical SDK EOF proves no
-          // trailing child event can arrive; otherwise preserve working state.
-          if (msg.subagentsAborted === true || msg.subagentsSettled === true) {
-            activeSubagentTurnsRef.current.clear();
-            setActiveSubagents(prev => (prev.size === 0 ? prev : new Map()));
-          }
-          turnSeqRef.current = -1;
-          clearStreamHint();
-          finalizeReasoning();
-          setTurnStartIndex(null);
-          // App Server normally sends correlated resolution events before
-          // done. Clear any surviving cards as a defensive terminal boundary.
-          setPendingCodexUserInput(null);
-          setPendingCodexMcpElicitation(null);
-          flushMessagesToParent();
-          onTurnComplete?.();
-        }
-        setPendingApproval(null);
-        // Don't return for 'result' — fall through to process usage data below
-        if (msg.type === 'done') return;
       }
 
       if (msg.type === 'process_exit') {
         setReady(false);
-        activeSubagentTurnsRef.current.clear();
-        setActiveSubagents(prev => (prev.size === 0 ? prev : new Map()));
-        setPendingApproval(null);
-        setPendingCodexUserInput(null);
-        setPendingCodexMcpElicitation(null);
-        flushMessagesToParent();
-        onTurnComplete?.();
-        return;
-      }
-
-      if (msg.type === 'error') {
-        const kill = loadGuardKillRef.current;
-        if (kill && Date.now() < kill.until) {
-          // Deliberate load-guard stop, not a crash. End the turn once through
-          // the normal done path: turnSeq null is never stale-dropped, and the
-          // dead process can't send trailing child events.
-          if (!kill.ended) {
-            kill.ended = true;
-            onMessage({ type: 'done', projectPath: msg.projectPath, scope: msg.scope, turnSeq: null, subagentsAborted: true });
-          }
-          return;
-        }
-        const error = parseAiError(msg.text || 'Unknown error');
-        setMessages(prev => [...prev, {
-          id: Date.now().toString(),
-          role: 'system',
-          content: error.message,
-          timestamp: Date.now(),
-          error,
-        }]);
-        // Don't set isStreaming=false here — errors can be non-fatal stderr warnings.
-        // The authoritative end-of-turn signal is 'done' or 'process_exit'.
-        return;
-      }
-
-      // Summarized reasoning stream ("Show reasoning" setting). Accumulate for
-      // the segment's bubble and mirror a bounded tail into the live italic
-      // block rendered above the thinking animation.
-      if (msg.type === 'reasoning_delta') {
-        if (typeof msg.text === 'string' && msg.text) {
-          reasoningPendingRef.current += msg.text;
-          if (reasoningRafRef.current == null) {
-            reasoningRafRef.current = requestAnimationFrame(() => {
-              reasoningRafRef.current = null;
-              flushReasoning();
-            });
-          }
-        }
-        return;
-      }
-
-      // Silent-pause signals from the SDK: surface WHY nothing is streaming.
-      // thinking_tokens fires during adaptive thinking (whose text is omitted
-      // by default on Opus 4.7+), api_retry during rate-limit/overload backoff,
-      // and status:compacting while the runtime compacts context.
-      if (msg.type === 'system' && msg.subtype === 'thinking_tokens') {
-        const n = msg.estimated_tokens;
-        if (typeof n === 'number' && n > 0) {
-          // A live reasoning card owns the count — putting it on the thinking
-          // indicator too duplicates the signal (and lingers after the card).
-          if (reasoningActiveRef.current) {
-            clearStreamHint();
-            setMessages(prev => {
-              for (let i = prev.length - 1; i >= 0; i--) {
-                const m = prev[i];
-                if (m.reasoningLive) {
-                  const updated = [...prev];
-                  updated[i] = { ...m, reasoningTokens: n };
-                  return updated;
-                }
-                if (m.role === 'user') break;
-              }
-              return prev;
-            });
-          } else {
-            const label = n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
-            setStreamHint(`thinking · ${label} tokens`);
-          }
-        }
-        return;
-      }
-
-      // AI-generated subagent progress ("Analyzing authentication module").
-      if (msg.type === 'system' && msg.subtype === 'task_progress') {
-        const summary = (typeof msg.summary === 'string' && msg.summary) ? msg.summary
-          : (typeof msg.description === 'string' && msg.description) ? msg.description : '';
-        if (summary) setStreamHint(`agent · ${summary}`);
+        setAuthHint(null);
         return;
       }
 
@@ -1209,15 +976,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
 
       // Login flow in progress on the SDK subprocess.
       if (msg.type === 'auth_status') {
-        setStreamHint(msg.isAuthenticating ? 'authenticating…' : null);
-        return;
-      }
-
-      // Predicted next prompt — arrives after the turn's result.
-      if (msg.type === 'prompt_suggestion') {
-        if (typeof msg.suggestion === 'string' && msg.suggestion.trim()) {
-          setPromptSuggestion(msg.suggestion.trim());
-        }
+        setAuthHint(msg.isAuthenticating ? 'authenticating…' : null);
         return;
       }
 
@@ -1229,17 +988,6 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
             ? { ...prev, used: msg.totalTokens, total: msg.maxTokens }
             : { used: msg.totalTokens, total: msg.maxTokens, inputTokens: 0, cachedInputTokens: 0, cacheCreationTokens: 0, outputTokens: 0 });
         }
-        return;
-      }
-      if (msg.type === 'system' && msg.subtype === 'api_retry') {
-        const secs = Math.max(1, Math.ceil((msg.retry_delay_ms ?? 0) / 1000));
-        const attempt = typeof msg.attempt === 'number' && typeof msg.max_retries === 'number'
-          ? ` ${msg.attempt}/${msg.max_retries}` : '';
-        setStreamHint(`api error · retrying${attempt} in ${secs}s`);
-        return;
-      }
-      if (msg.type === 'system' && msg.subtype === 'status') {
-        setStreamHint(msg.status === 'compacting' ? 'compacting context…' : null);
         return;
       }
 
@@ -1285,395 +1033,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
         return;
       }
 
-      // Surface context compaction notifications and update context meter
-      if (msg.type === 'system' && (msg.subtype === 'context_compacted' || msg.subtype === 'auto_compact' || msg.subtype === 'compact')) {
-        const summary = msg.summary ? ` Summary: ${msg.summary.slice(0, 100)}` : '';
-        setMessages(prev => [...prev, {
-          id: `compact-${Date.now()}`,
-          role: 'system',
-          content: `Context auto-compacted.${summary}`,
-          timestamp: Date.now(),
-        }]);
-        // Don't guess post-compaction size — the next result message will have accurate numbers
-        return;
-      }
-
-      // AskUserQuestion answered — merge answers into the matching tool call's input JSON
-      if (msg.type === 'question_answered') {
-        const { toolUseId, answers } = msg;
-        setMessages(prev => prev.map(m => {
-          if (m.role !== 'assistant' || !m.toolCalls) return m;
-          let touched = false;
-          const newToolCalls = m.toolCalls.map(tc => {
-            if (tc.id !== toolUseId) return tc;
-            try {
-              const parsed = JSON.parse(tc.input || '{}');
-              const merged = { ...parsed, answers };
-              touched = true;
-              return { ...tc, input: JSON.stringify(merged, null, 2) };
-            } catch {
-              return tc;
-            }
-          });
-          return touched ? { ...m, toolCalls: newToolCalls } : m;
-        }));
-        return;
-      }
-
-      // ExitPlanMode answered — stamp resolved state into the tool call's output
-      // so PlanReviewCard re-renders in its collapsed resolved state.
-      if (msg.type === 'plan_review_answered') {
-        const { toolUseId, approved } = msg;
-        setMessages(prev => prev.map(m => {
-          if (m.role !== 'assistant' || !m.toolCalls) return m;
-          let touched = false;
-          const newToolCalls = m.toolCalls.map(tc => {
-            if (tc.id !== toolUseId) return tc;
-            touched = true;
-            return { ...tc, output: approved ? 'Plan approved' : 'Plan rejected' };
-          });
-          return touched ? { ...m, toolCalls: newToolCalls } : m;
-        }));
-        return;
-      }
-
-      // Interactive App Server requests are capability-gated: never render
-      // them for SDK Codex or another provider, and keep each panel tied to
-      // the message subscription's workspace/scope.
-      if (msg.type === 'user_input_needed') {
-        if (aiProvider !== 'codex' || msg.provider !== 'codex'
-          || typeof msg.requestHandle !== 'string' || !Array.isArray(msg.questions)) return;
-        setPendingCodexUserInput({
-          provider: 'codex', requestHandle: msg.requestHandle, questions: msg.questions,
-          ...(typeof msg.autoResolutionMs === 'number' ? { autoResolutionMs: msg.autoResolutionMs } : {}),
-        });
-        return;
-      }
-      if (msg.type === 'mcp_elicitation_needed') {
-        if (aiProvider !== 'codex' || msg.provider !== 'codex'
-          || typeof msg.requestHandle !== 'string' || typeof msg.serverName !== 'string' || typeof msg.message !== 'string') return;
-        if (msg.mode === 'form' && msg.requestedSchema && typeof msg.requestedSchema === 'object') {
-          setPendingCodexMcpElicitation({ provider: 'codex', requestHandle: msg.requestHandle, mode: 'form', serverName: msg.serverName, message: msg.message, requestedSchema: msg.requestedSchema });
-        } else if (msg.mode === 'url' && typeof msg.url === 'string') {
-          setPendingCodexMcpElicitation({ provider: 'codex', requestHandle: msg.requestHandle, mode: 'url', serverName: msg.serverName, message: msg.message, url: msg.url, ...(typeof msg.elicitationId === 'string' ? { elicitationId: msg.elicitationId } : {}) });
-        }
-        return;
-      }
-      // Main process sends one of these only after the server has resolved the
-      // request. This is intentionally the only event-driven dismissal path.
-      if (msg.type === 'user_input_resolved' && msg.provider === 'codex' && typeof msg.requestHandle === 'string') {
-        setPendingCodexUserInput(current => current?.requestHandle === msg.requestHandle ? null : current);
-        return;
-      }
-      if (msg.type === 'mcp_elicitation_resolved' && msg.provider === 'codex' && typeof msg.requestHandle === 'string') {
-        setPendingCodexMcpElicitation(current => current?.requestHandle === msg.requestHandle ? null : current);
-        return;
-      }
-
-      // Tool approval request from main process
-      if (msg.type === 'approval_needed') {
-        // Legacy SDK Codex approvals do not have a matching response bridge.
-        // Only App Server's structured, validated approval requests may render
-        // in a Codex chat; likewise, never leak one into another provider's UI.
-        if ((aiProvider === 'codex' && msg.provider !== 'codex') || (aiProvider !== 'codex' && msg.provider === 'codex')) return;
-        setPendingApproval({
-          toolName: msg.toolName,
-          toolUseId: msg.toolUseId,
-          command: msg.command,
-          description: msg.description,
-          input: msg.input,
-          ...(msg.provider === 'codex' ? {
-            provider: 'codex' as const,
-            requestHandle: msg.requestHandle,
-            kind: msg.kind,
-            availableDecisions: msg.availableDecisions,
-            reason: msg.reason,
-            cwd: msg.cwd,
-            network: msg.network,
-            grantRoot: msg.grantRoot,
-            permissionsSummary: msg.permissionsSummary,
-            requestedPermissions: msg.requestedPermissions,
-            proposedExecpolicyAmendment: msg.proposedExecpolicyAmendment,
-          } : {}),
-        });
-        return;
-      }
-
-      // Approval was resolved (possibly from the mobile remote). For local
-      // tools the follow-up tool_result clears the card too, but for MCP /
-      // CLI-retried tools the retry can take seconds — clear immediately so
-      // the desktop card doesn't sit stale when mobile already decided.
-      if (msg.type === 'approval_resolved') {
-        setPendingApproval(null);
-        return;
-      }
-
-      // Sudo elevation prompt from the main-process broker. A retry after a
-      // wrong password arrives as a fresh sudo-prompt (new promptId + error)
-      // and replaces the current one.
-      if (msg.type === 'sudo-prompt') {
-        setPendingSudoPrompt({
-          promptId: msg.promptId,
-          toolUseId: msg.toolUseId,
-          command: msg.command,
-          error: msg.error,
-        });
-        return;
-      }
-      if (msg.type === 'sudo-resolved') {
-        setPendingSudoPrompt(null);
-        return;
-      }
-
-      // Skip system noise
-      if (msg.type === 'system' || msg.type === 'rate_limit_event') {
-        return;
-      }
-
-      // Tool results come back as user messages with tool_result content blocks
-      if (msg.type === 'user' && Array.isArray(msg.message?.content)) {
-        const resultTurnSeq = msg.turnSeq ?? turnSeqRef.current;
-        const results: Array<{ tool_use_id: string; output: string; images?: import('../../types').ToolResultImage[]; partial: boolean }> = [];
-        for (const block of msg.message.content) {
-          if (block.type === 'tool_result' && block.tool_use_id) {
-            const { text, images } = parseToolResultBlocks(block.content);
-            results.push({ tool_use_id: block.tool_use_id, output: text, images, partial: block.partial === true });
-          }
-        }
-        if (results.length > 0) {
-          setPendingApproval(null);
-          setMessages(prev => {
-            const next = [...prev];
-            for (let i = next.length - 1; i >= 0; i--) {
-              const msg = next[i];
-              if (msg.role === 'assistant' && msg.toolCalls) {
-                let updated = false;
-                const now = Date.now();
-                const newToolCalls = msg.toolCalls.map(tc => {
-                  const result = tc.turnSeq === resultTurnSeq
-                    ? results.find(r => r.tool_use_id === tc.id)
-                    : undefined;
-                  if (result) {
-                    // Never let a delayed progress notification reopen or
-                    // overwrite a settled tool card.
-                    if (result.partial && tc.liveOutput === false) return tc;
-                    updated = true;
-                    if (result.partial) {
-                      const previous = tc.output ?? '';
-                      // ACP implementations may send either a fresh chunk or
-                      // the cumulative output so far. Preserve both shapes
-                      // without duplicating content.
-                      const output = result.output.startsWith(previous)
-                        ? result.output
-                        : previous.endsWith(result.output)
-                          ? previous
-                          : previous + result.output;
-                      return { ...tc, output, liveOutput: true };
-                    }
-                    const durationMs = typeof tc.startedAt === 'number' ? now - tc.startedAt : undefined;
-                    return {
-                      ...tc,
-                      output: result.output,
-                      liveOutput: false,
-                      ...(result.images ? { resultImages: result.images } : {}),
-                      ...(durationMs != null ? { durationMs } : {}),
-                    };
-                  }
-                  return tc;
-                });
-                if (updated) { next[i] = { ...msg, toolCalls: newToolCalls }; }
-              }
-            }
-            return next;
-          });
-          nextSegmentStartRef.current = Date.now();
-        }
-        return;
-      }
-
-      if (msg.type === 'user') return;
-
-      // Assistant message — streaming content + tool calls
-      if (msg.type === 'assistant' && Array.isArray(msg.message?.content)) {
-        const textParts: string[] = [];
-        const tools: ToolCall[] = [];
-        const toolTurnSeq = msg.turnSeq ?? turnSeqRef.current;
-
-        for (const block of msg.message.content) {
-          if (block.type === 'text' && block.text) {
-            textParts.push(block.text);
-          }
-          if (block.type === 'tool_use') {
-            tools.push({
-              id: block.id,
-              turnSeq: toolTurnSeq,
-              type: classifyToolType(block.name),
-              name: block.name || 'tool',
-              input: typeof block.input === 'string' ? block.input :
-                     typeof block.input === 'object' ? JSON.stringify(block.input, null, 2) : '',
-              startedAt: Date.now(),
-            });
-          }
-        }
-
-        const text = textParts.join('');
-        // SDK reconcile frame: the complete message's text, re-sent after its
-        // deltas with a `final` tag. Authoritative — REPLACES the accumulated
-        // delta text, healing any deltas lost in transit (the focus-swap
-        // listener gap used to leave replies truncated mid-word).
-        const isFinalText = msg.message.content.some((block: any) => block.type === 'text' && block.final);
-        // Real output is flowing — any silent-pause hint is stale.
-        if (text) clearStreamHint();
-
-        if (text && tools.length === 0 && looksLikeApiError(text)) {
-          const error = parseAiError(text);
-          setMessages(prev => {
-            const next = [...prev];
-            const last = next[next.length - 1];
-            if (last?.role === 'assistant' && !last.toolCalls) {
-              next.pop();
-            }
-            next.push({
-              id: `${Date.now()}-${Math.random()}`,
-              role: 'system',
-              content: error.message,
-              timestamp: Date.now(),
-              error,
-            });
-            return next;
-          });
-          return;
-        }
-
-        if (text || tools.length > 0) {
-          // Real output starts: the current reasoning segment (if any) collapses
-          // into its expandable transcript row.
-          finalizeReasoning();
-          // Streaming text-delta fast path: buffer into the rAF accumulator and
-          // skip the setMessages entirely. Only applies when the last message is
-          // already a pure-text assistant bubble we can append to.
-          const lastNow = messagesRef.current[messagesRef.current.length - 1];
-          // Mark the assistant bubble as actively streaming and (re)arm the idle timer
-          // so markdown renders mid-turn on a pause and the thinking head stays in its
-          // thinking phase. Used by both the fast path and the slow path's text branch.
-          const markStreamingActive = () => {
-            setStreamSettled(s => s ? false : s);
-            // Drop while streaming so the settle below is always a fresh
-            // false→true edge (re-arming the hold effect's timer).
-            setPostSettleHold(h => h ? false : h);
-            if (streamIdleTimerRef.current != null) {
-              clearTimeout(streamIdleTimerRef.current);
-            }
-            streamIdleTimerRef.current = window.setTimeout(() => {
-              streamIdleTimerRef.current = null;
-              setStreamSettled(true);
-              setPostSettleHold(true);
-            }, STREAM_IDLE_MS);
-          };
-          if (
-            isPureTextDelta
-            && tools.length === 0
-            && lastNow?.role === 'assistant'
-            && !lastNow.toolCalls
-            && !lastNow.reasoning
-            && !lastNow.reasoningLive
-            && !forceNewBubbleRef.current
-          ) {
-            streamPendingRef.current += text;
-            if (streamRafRef.current == null) {
-              streamRafRef.current = requestAnimationFrame(() => {
-                streamRafRef.current = null;
-                flushStreamingText();
-              });
-            }
-            markStreamingActive();
-            return;
-          }
-          // Codex's SDK wraps each turn in a fresh `codex exec` process, whose
-          // item IDs start at item_0 again. Scope upserts to the turn: TodoWrite
-          // can update in place within one turn, while item_0 in a later turn
-          // must create a new transcript card.
-          const existingToolKeys = new Set<string>();
-          for (const m of messagesRef.current) {
-            if (m.toolCalls) for (const tc of m.toolCalls) {
-              if (tc.id) existingToolKeys.add(`${tc.turnSeq ?? ''}:${tc.id}`);
-            }
-          }
-          const toolKey = (tool: ToolCall) => `${tool.turnSeq ?? ''}:${tool.id ?? ''}`;
-          const updateTools = tools.filter(t => t.id && existingToolKeys.has(toolKey(t)));
-          const newTools = tools.filter(t => !t.id || !existingToolKeys.has(toolKey(t)));
-          if (updateTools.length > 0) {
-            setMessages(prev => prev.map(m => {
-              if (m.role !== 'assistant' || !m.toolCalls) return m;
-              let touched = false;
-              const nextToolCalls = m.toolCalls.map(tc => {
-                const update = updateTools.find(u => u.id === tc.id && u.turnSeq === tc.turnSeq);
-                if (!update) return tc;
-                touched = true;
-                return { ...tc, input: update.input };
-              });
-              return touched ? { ...m, toolCalls: nextToolCalls } : m;
-            }));
-          }
-          if (text || newTools.length > 0) {
-            setMessages(prev => {
-              const last = prev[prev.length - 1];
-              // Merge into the last assistant message only when it's a pure text
-              // bubble (no tool calls, not a reasoning row):
-              //  - delta text APPENDS, unless a turn boundary demands a new bubble
-              //    (streaming_start / wait-resume re-arm — merging a resumed
-              //    turn's text into the previous segment overwrote/absorbed it);
-              //  - non-delta full text REPLACES only for snapshot transports
-              //    (gemini). Claude full frames are distinct segments — a resumed
-              //    turn or subagent message must never clobber the previous reply.
-              const shouldAppend = msg.message.content.some((block: any) => block.type === 'text' && block.delta);
-              const lastIsMergeableText = last?.role === 'assistant' && !last.toolCalls && !last.reasoning && !last.reasoningLive;
-              // Claude full frames never merge (distinct segments) — EXCEPT the
-              // final-tagged reconcile frame, whose text replaces the delta
-              // accumulation on the same bubble.
-              if (lastIsMergeableText && text && !tools.length
-                  && (shouldAppend ? !forceNewBubbleRef.current : (aiProvider !== 'claude' || isFinalText))) {
-                const updated = [...prev];
-                const newContent = shouldAppend ? last.content + text : text;
-                updated[updated.length - 1] = { ...last, content: newContent };
-                return updated;
-              }
-              // Before pushing a new assistant message, stamp durationMs on the most recent
-              // unstamped assistant text bubble so each bubble records its own duration.
-              const turnStart = turnStartedAtRef.current ?? Date.now();
-              const stamped = [...prev];
-              for (let i = stamped.length - 1; i >= 0; i--) {
-                const m = stamped[i];
-                if (m.role === 'assistant' && m.content && m.content.length > 0 && typeof m.durationMs !== 'number') {
-                  const now = Date.now();
-                  stamped[i] = { ...m, durationMs: now - turnStart, completedAt: now };
-                  break;
-                }
-              }
-              const startedAt = nextSegmentStartRef.current ?? Date.now();
-              nextSegmentStartRef.current = null;
-              forceNewBubbleRef.current = false;
-              return [...stamped, {
-                id: `${Date.now()}-${Math.random()}`,
-                role: 'assistant',
-                content: text,
-                timestamp: Date.now(),
-                startedAt,
-                toolCalls: newTools.length > 0 ? newTools : undefined,
-              }];
-            });
-          }
-          // A text segment created/updated via the slow path (e.g. the first delta of a
-          // turn, or follow-up text after a tool) must also flip streamSettled=false so
-          // its head stays in the thinking phase — otherwise the head reveals the first
-          // chunk prematurely and the pending row briefly double-shows. Tool-only events
-          // (no text) intentionally leave streamSettled alone so the pending row keeps a
-          // thinking indicator alive while the tool runs.
-          if (text && tools.length === 0) markStreamingActive();
-        }
-      }
-
-      // Result — usage data processing (isStreaming already cleared at top of handler)
+      // Result — usage data processing (the transcript side lives in the reducer).
       if (msg.type === 'result') {
         if (msg.usage && aiProvider === 'codex') {
           // Codex: prefer the static catalog's context window (from the model
@@ -1724,62 +1084,64 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
           setSessionCost(msg.total_cost_usd);
         }
       }
-      if (msg.type === 'result' && msg.result) {
-        const text = typeof msg.result === 'string' ? msg.result : '';
-        if (text) {
-          // Replace the last assistant message with the final clean result
-          setMessages(prev => {
-            const last = prev[prev.length - 1];
-            if (last?.role === 'assistant') {
-              return [...prev.slice(0, -1), { ...last, content: text }];
-            }
-            const startedAt = nextSegmentStartRef.current ?? Date.now();
-            nextSegmentStartRef.current = null;
-            return [...prev, {
-              id: `result-${Date.now()}`,
-              role: 'assistant',
-              content: text,
-              timestamp: Date.now(),
-              startedAt,
-            }];
-          });
-        }
-      }
     };
     const cleanup = window.sai.claudeOnMessage(onMessage);
 
-    // A sudo prompt that fired while this chat was unmounted would otherwise
-    // be lost until its 5-minute timeout — re-seed it from the broker.
-    if (aiProvider === 'claude') {
-      void window.sai.claudeSudoPending?.(projectPath, claudeScope).then(
-        (p: { promptId: string; toolUseId: string; command: string; error?: string } | null) => {
-          if (p) setPendingSudoPrompt(p);
-        },
-      );
-    }
-
-    // Drain frames App buffered while no listener was registered for this
-    // scope (the select→subscribe mount gap). Reconciled by id so entries the
-    // select-time merge already seeded are updated in place, not duplicated.
-    if (gateScope) {
-      const pending = takeBufferedMessages(gateScope);
-      if (pending.length > 0) {
-        setMessages(prev => reconcileDrainedMessages(prev, pending));
-      }
-    }
-
     return () => {
-      // The window belongs to this subscription's scope; a scope switch drops it.
-      loadGuardKillRef.current = null;
-      flushStreamingText();
-      if (streamIdleTimerRef.current != null) {
-        clearTimeout(streamIdleTimerRef.current);
-        streamIdleTimerRef.current = null;
-      }
-      if (gateScope) unregisterChatListener(gateScope);
       cleanup();
     };
-  }, [projectPath, aiProvider, activeMetaRuntime, claudeScope, flushStreamingText, applyCodexLimits]);
+  }, [projectPath, aiProvider, activeMetaRuntime, claudeScope, applyCodexLimits]);
+
+  // Side effects of newly applied log entries (never of loaded history): the
+  // stream-idle gate, the parent's turn-end callbacks and its IndexedDB
+  // mirror. lastApplied accumulates until drained here; each entry is replayed
+  // through the reducer from the previous state so turn edges are judged by
+  // the reducer's own turnSeq rules, never re-derived.
+  const prevLogStateRef = useRef<ChatState | null>(null);
+  const turnEndRef = useRef<() => void>(() => {});
+  useEffect(() => {
+    const drained: ChatLogEntry[] = lastApplied.current;
+    lastApplied.current = [];
+    const before = prevLogStateRef.current;
+    prevLogStateRef.current = logState;
+    if (!logState || drained.length === 0) return;
+    let turnEnded = false;
+    let cardAdded = false;
+    if (!before) {
+      // Live entries applied in the same batch as the initial history: no
+      // prior state to replay from, so judge by the entries and the result.
+      for (const entry of drained) {
+        const ev = entry.ev as Record<string, any>;
+        if (isStreamingText(ev)) markStreamingActive();
+        if ((ev.type === 'done' || ev.type === 'process_exit') && !logState.turn.streaming) turnEnded = true;
+        if (ev.type === 'load_guard') cardAdded = true;
+      }
+      if (turnEnded) turnEndRef.current();
+      else if (cardAdded) flushMessagesToParentRef.current();
+      return;
+    }
+    let s = before;
+    for (const entry of drained) {
+      const next = reduceChat(s, entry);
+      const ev = entry.ev as Record<string, any>;
+      if (ev.type === 'streaming_start') {
+        // A fresh turn (or a wait-resume re-arm) must show its thinking row
+        // immediately — never inherit the previous reply's post-settle hold.
+        setPostSettleHold(h => h ? false : h);
+      } else if (isStreamingText(ev)) {
+        markStreamingActive();
+      }
+      if ((s.turn.streaming && !next.turn.streaming)
+        || ((ev.type === 'done' || ev.type === 'process_exit') && next.turn !== s.turn)) {
+        turnEnded = true;
+      }
+      // A command/service kill has no done of its own: persist its card now.
+      if (ev.type === 'load_guard' && next.messages.length > s.messages.length) cardAdded = true;
+      s = next;
+    }
+    if (turnEnded) turnEndRef.current();
+    else if (cardAdded) flushMessagesToParentRef.current();
+  }, [logState, chatId, lastApplied, markStreamingActive]);
 
   // Real utilization percentages arrive on usage:update from two sources:
   // the main-process OAuth poller (60s) and the SDK backend's post-turn
@@ -2112,7 +1474,10 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
     return `agent · ${entries[0]}${more}`;
   }, [activeSubagents]);
   const thinkingHint = subagentHint ?? streamHint;
-  const streamingForDisplay = isStreaming || drainInFlight || messageQueue.length > 0 || subagentThinking;
+  // The log's turn is authoritative for this chat (it survives remounts and
+  // reloads); App's busy flag still covers the gap before the log catches up.
+  const turnLive = isStreaming || (logState?.turn.streaming ?? false);
+  const streamingForDisplay = turnLive || drainInFlight || messageQueue.length > 0 || subagentThinking;
   const isWaiting = !!waiting && waiting.wait.kind !== 'none';
   // While waiting we are NOT thinking — suppress the thinking indicator.
   const showThinking = streamingForDisplay && !awaitingQuestion && !isWaiting;
@@ -2125,7 +1490,15 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
   // to keep a thinking indicator alive while the turn continues (e.g. during a tool
   // call after a typed response). The first-text-delta no longer leaves a stale window
   // here because the slow path now clears streamSettled when it creates a text segment.
-  const hasStreamingAssistantSegment = !streamSettled && lastMsg?.role === 'assistant';
+  // Entries this render applied but the side-effect pass hasn't drained yet:
+  // judged here too, so the first delta's render already hides the tail row
+  // (no one-frame thinking flash before the effect flips the gate).
+  const undrained = lastApplied.current;
+  const pendingText = undrained.some(e => isStreamingText(e.ev as Record<string, any>));
+  const pendingStart = undrained.some(e => e.ev.type === 'streaming_start');
+  const textSettled = streamSettled && !pendingText;
+  const settleHold = postSettleHold && !pendingText && !pendingStart;
+  const hasStreamingAssistantSegment = !textSettled && lastMsg?.role === 'assistant';
   // A live reasoning card is already the working signal (shimmering label, its
   // own elapsed timer) — a thinking row below it would be a duplicate spinner.
   const hasLiveReasoning = lastMsg?.role === 'assistant' && !!lastMsg.reasoningLive;
@@ -2138,7 +1511,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
   // end-of-turn wrap-up (result frame in flight) doesn't flash a thinking row
   // under a reply the user just watched finish.
   const showPendingSaiThinking = showThinking && saiMorphActive && !hasStreamingAssistantSegment
-    && !hasLiveReasoning && (!hasRunningTailTool || subagentThinking) && (!postSettleHold || subagentThinking);
+    && !hasLiveReasoning && (!hasRunningTailTool || subagentThinking) && (!settleHold || subagentThinking);
   // Detached banner: non-SAI providers, OR SAI with the animation pref off (today's
   // fallback). No grow-in here, so it only yields to the reasoning card, keeping the
   // legacy always-on banner during tool runs.
@@ -2153,27 +1526,30 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
   prevRowShownRef.current = rowShown;
   const hasHiddenMessages = renderStart > 0;
 
+  // The parent mirrors the chat into IndexedDB (session rows, search, export,
+  // titles) — always from log state, never the other way round.
+  // Before history loads this hands [] (never a previous chat's list).
   useEffect(() => {
     onMessagesChange?.(messages);
   }, [messages]);
 
-  // Flush messages ref to parent synchronously before save — called by onTurnComplete
+  // Persistable log state (live reasoning collapsed, live tool output
+  // settled) for the mirror — at turn end, on unmount, and for a kill card.
   const flushMessagesToParent = useCallback(() => {
-    // Strip the transient live-reasoning flag so persisted history always
-    // reloads as the collapsed disclosure, never the streaming italic style.
-    onMessagesChange?.(messagesRef.current.map(m => (m.reasoningLive ? { ...m, reasoningLive: undefined } : m)));
-  }, [onMessagesChange]);
+    if (!historyLoaded) return;
+    const base = logState ?? prevLogStateRef.current;
+    if (!base) return;
+    onMessagesChange?.(persistableState({ ...base, messages: messagesRef.current }).messages);
+  }, [onMessagesChange, historyLoaded, logState]);
+  const flushMessagesToParentRef = useRef(flushMessagesToParent);
+  flushMessagesToParentRef.current = flushMessagesToParent;
+  turnEndRef.current = () => { flushMessagesToParent(); onTurnComplete?.(); };
 
-  // Unmount flush. `result` clears the workspace's busy flag, which can unmount
-  // a hidden panel BEFORE the separate `done` frame arrives — so the done-time
-  // flush above never runs, and App's unmount save would persist the last
-  // COMMITTED report, which lags queued updates (the reply's tail, the final
-  // reconcile frame). Hand App the eager ref on the way out. Passive-effect
-  // cleanups of a deleted subtree run before App's own effects in the same
-  // commit, so App's unmount flush sees this report.
-  const unmountFlushRef = useRef(() => {});
-  unmountFlushRef.current = () => { flushStreamingText(); flushMessagesToParent(); };
-  useEffect(() => () => unmountFlushRef.current(), []);
+  // Unmount flush: a hidden panel can unmount between a turn's result (which
+  // clears the workspace's busy flag) and its done. Hand App the latest
+  // rendered state on the way out; anything still in flight is in the log,
+  // and App mirrors a background chat's turn end from there.
+  useEffect(() => () => flushMessagesToParentRef.current(), []);
 
   // GitHubWatcherCard dispatches a snapshot event on phase transitions. We attach
   // the snapshot to the owning message so it persists with chat history and cards
@@ -2181,28 +1557,93 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
   useEffect(() => {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent<{ messageId: string; snapshot: import('../../types').GitHubWatcherSnapshot }>).detail;
-      if (!detail?.messageId || !detail.snapshot) return;
-      setMessages(prev => {
-        let changed = false;
-        const next = prev.map(m => {
-          if (m.id !== detail.messageId) return m;
-          const existing = m.githubWatchers ?? [];
-          const otherUrls = existing.filter(s => s.url !== detail.snapshot.url);
-          // Skip the write when the phase hasn't actually changed (defensive — the card already
-          // dedupes, but stale events from remounts could otherwise churn the message ref).
-          const prior = existing.find(s => s.url === detail.snapshot.url);
-          if (prior && prior.phase === detail.snapshot.phase) return m;
-          changed = true;
-          return { ...m, githubWatchers: [...otherUrls, detail.snapshot] };
-        });
-        return changed ? next : prev;
-      });
+      if (!detail?.messageId || !detail.snapshot || !chatId) return;
+      // Only the chat that owns the message records it; the reducer skips an unchanged phase.
+      if (!messagesRef.current.some(m => m.id === detail.messageId)) return;
+      const prior = messagesRef.current.find(m => m.id === detail.messageId)?.githubWatchers?.find(w => w.url === detail.snapshot.url);
+      if (prior && prior.phase === detail.snapshot.phase) return;
+      void window.sai.chatlog?.appendClient(chatId, { type: 'watcher_snapshot', messageId: detail.messageId, snapshot: detail.snapshot })
+        .catch(() => { /* chat not logged (yet): the card re-dispatches on its next phase */ });
     };
     window.addEventListener('sai-github-watcher-snapshot', handler);
     return () => window.removeEventListener('sai-github-watcher-snapshot', handler);
+  }, [chatId]);
+
+  // ─── Commands: every send, answer, approval and stop goes through main's
+  // idempotent chat command path (which logs and dispatches), never straight
+  // to a provider.
+  type ChatCommandInput = Parameters<NonNullable<typeof window.sai.chatlog>['command']>[0];
+  const runCommand = useCallback(async (cmd: ChatCommandInput) => {
+    const api = window.sai.chatlog;
+    if (!api) throw new Error('chat log unavailable');
+    const res = await api.command(cmd);
+    if (!res?.ok) {
+      window.sai.devlog?.('chatPanel.commandFailed', { kind: cmd.kind, chatId: cmd.chatId, error: res?.error ?? null });
+      throw new Error(res?.error ?? `${cmd.kind} failed`);
+    }
+    return res;
   }, []);
 
+  /** The composer's current picks for this chat's provider (settings move to main in Task 9). */
+  const composerSettings = useMemo<ChatSettings>(() => {
+    const base: ChatSettings = aiProvider === 'codex'
+      ? {
+        provider: 'codex', model: codexModel, permMode: codexPermission,
+        effort: normalizeCodexEffort(codexEffort ?? 'high', codexModels.find(m => m.id === codexModel)),
+      }
+      : aiProvider === 'gemini'
+        ? { provider: 'gemini', model: geminiModel, approvalMode: geminiApprovalMode, conversationMode: geminiConversationMode }
+        : aiProvider === 'kimi'
+          ? { provider: 'kimi', model: kimiModel, approvalMode: kimiApprovalMode }
+          : { provider: 'claude', model: modelChoice, permMode: permissionMode, effort: effortLevel };
+    for (const k of Object.keys(base) as Array<keyof ChatSettings>) if (base[k] === undefined) delete base[k];
+    return base;
+  }, [aiProvider, codexModel, codexPermission, codexEffort, codexModels, geminiModel, geminiApprovalMode, geminiConversationMode, kimiModel, kimiApprovalMode, modelChoice, permissionMode, effortLevel]);
+
+  /**
+   * Send through the chat's command (main logs the user_message — the bubble —
+   * then dispatches or queues). Bridge until Task 9 moves composer settings to
+   * main: if the composer's picks differ from the chat's logged settings, one
+   * settings command goes first so the dispatch uses what the user picked.
+   */
+  const sendToLog = async (text: string, opts: { clientId: string; images?: string[]; imagePaths?: string[]; prompt?: string; taskId?: string; now?: boolean }) => {
+    if (!chatId || !projectPath) return;
+    const current = logState?.settings;
+    const differs = !current || (Object.keys(composerSettings) as Array<keyof ChatSettings>)
+      .some(k => current[k] !== composerSettings[k]);
+    try {
+      if (differs) {
+        await runCommand({ kind: 'settings', chatId, clientId: newClientId(), settings: composerSettings, origin: 'desktop', projectPath });
+      }
+      await runCommand({
+        kind: 'send', chatId, clientId: opts.clientId, text, origin: 'desktop',
+        // The workspace's own path spelling: main keys backends by it.
+        projectPath, provider: aiProvider,
+        ...(opts.images?.length ? { images: opts.images } : {}),
+        ...(opts.imagePaths?.length ? { imagePaths: opts.imagePaths } : {}),
+        ...(opts.prompt !== undefined && opts.prompt !== text ? { promptOverride: opts.prompt } : {}),
+        ...(opts.taskId ? { taskId: opts.taskId } : {}),
+        ...(opts.now ? { now: true } : {}),
+      });
+    } catch { /* logged to devlog by runCommand; the composer stays usable */ }
+  };
+  const sendToLogRef = useRef(sendToLog);
+  sendToLogRef.current = sendToLog;
+
+  /** Appends a client event (creating the chat in the log if it isn't there yet). */
+  const appendToLog = useCallback((ev: { type: string; [k: string]: unknown }) => {
+    if (!chatId || !window.sai.chatlog) return Promise.resolve(null);
+    return window.sai.chatlog.appendClient(chatId, ev, projectPath ? { projectPath, provider: aiProvider } : undefined)
+      .catch((err: unknown) => {
+        window.sai.devlog?.('chatPanel.appendFailed', { type: ev.type, chatId, error: err instanceof Error ? err.message : String(err) });
+        return null;
+      });
+  }, [chatId, projectPath, aiProvider]);
+
   const submitCodexApproval = async (approval: NonNullable<typeof pendingApproval>, decision: import('../../../electron/services/codexBackend').CodexApprovalDecision) => {
+    // App Server decisions (permissions, session-wide, amendments) are richer
+    // than the approve command's yes/no, so they keep their own bridge; the
+    // server's approval_resolved clears the logged card.
     try {
       const result = await window.sai.codexAppServerApprove?.(
         projectPath,
@@ -2210,16 +1651,20 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
         approval.requestHandle ?? approval.toolUseId,
         decision,
       );
-      if (result?.ok) {
-        // A late completion must never dismiss a newer approval card.
-        setPendingApproval(current => current?.provider === 'codex'
-          && (current.requestHandle ?? current.toolUseId) === (approval.requestHandle ?? approval.toolUseId)
-          ? null
-          : current);
-      }
+      // Keyed by the request: a late completion never dismisses a newer card.
+      if (result?.ok) dismissPrompt(approvalKey(approval));
     } catch {
       // Keep the card actionable if the preview process is no longer reachable.
     }
+  };
+
+  const approveViaLog = (approval: PendingApproval, approved: boolean, modifiedCommand?: string) => {
+    if (!chatId) return;
+    dismissPrompt(approvalKey(approval));
+    return runCommand({
+      kind: 'approve', chatId, clientId: newClientId(), toolUseId: approval.toolUseId, approved,
+      ...(modifiedCommand !== undefined ? { modifiedCommand } : {}),
+    }).catch(() => { /* devlogged */ });
   };
 
   const handleApprove = async (modifiedCommand?: string) => {
@@ -2230,13 +1675,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
         : { type: 'decision', value: 'accept' });
       return;
     }
-    if (aiProvider === 'gemini' || aiProvider === 'kimi') {
-      const approve = aiProvider === 'kimi' ? (window.sai as any).kimiApprove : (window.sai as any).geminiApprove;
-      approve?.(projectPath, pendingApproval.toolUseId, true, modifiedCommand, claudeScope);
-    } else {
-      window.sai.claudeApprove(projectPath, pendingApproval.toolUseId, true, modifiedCommand, claudeScope);
-    }
-    setPendingApproval(null);
+    await approveViaLog(pendingApproval, true, modifiedCommand);
   };
 
   const handleDeny = async () => {
@@ -2250,13 +1689,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
       await submitCodexApproval(pendingApproval, { type: 'decision', value });
       return;
     }
-    if (aiProvider === 'gemini' || aiProvider === 'kimi') {
-      const approve = aiProvider === 'kimi' ? (window.sai as any).kimiApprove : (window.sai as any).geminiApprove;
-      approve?.(projectPath, pendingApproval.toolUseId, false, undefined, claudeScope);
-    } else {
-      window.sai.claudeApprove(projectPath, pendingApproval.toolUseId, false, undefined, claudeScope);
-    }
-    setPendingApproval(null);
+    await approveViaLog(pendingApproval, false);
   };
 
   const handleAlwaysAllow = async () => {
@@ -2267,16 +1700,9 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
         : { type: 'decision', value: 'acceptForSession' });
       return;
     }
-    if (aiProvider === 'gemini' || aiProvider === 'kimi') {
-      // ACP providers don't support always-allow patterns — just approve this instance
-      const approve = aiProvider === 'kimi' ? (window.sai as any).kimiApprove : (window.sai as any).geminiApprove;
-      approve?.(projectPath, pendingApproval.toolUseId, true, undefined, claudeScope);
-    } else {
-      const pattern = `${pendingApproval.toolName}(*)`;
-      await window.sai.claudeAlwaysAllow(projectPath, pattern);
-      window.sai.claudeApprove(projectPath, pendingApproval.toolUseId, true, undefined, claudeScope);
-    }
-    setPendingApproval(null);
+    // ACP providers don't support always-allow patterns — just approve this instance.
+    if (aiProvider === 'claude') await window.sai.claudeAlwaysAllow(projectPath, `${pendingApproval.toolName}(*)`);
+    await approveViaLog(pendingApproval, true);
   };
 
   const handleCodexAmendment = async (execpolicyAmendment: string[]) => {
@@ -2289,7 +1715,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
   const submitCodexUserInput = async (request: PendingCodexUserInput, response: import('../../../electron/services/codexBackend').CodexUserInputResponse) => {
     try {
       const result = await window.sai.codexAppServerAnswerUserInput?.(projectPath, claudeScope, request.requestHandle, response);
-      if (result?.ok) setPendingCodexUserInput(current => current?.requestHandle === request.requestHandle ? null : current);
+      if (result?.ok) dismissPrompt(`input:${request.requestHandle}`);
     } catch {
       // Keep the request actionable when the App Server preview is unavailable.
     }
@@ -2298,7 +1724,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
   const resolveCodexMcpElicitation = async (request: PendingCodexMcpElicitation, decision: import('../../../electron/services/codexBackend').CodexMcpElicitationDecision) => {
     try {
       const result = await window.sai.codexAppServerResolveMcpElicitation?.(projectPath, claudeScope, request.requestHandle, decision);
-      if (result?.ok) setPendingCodexMcpElicitation(current => current?.requestHandle === request.requestHandle ? null : current);
+      if (result?.ok) dismissPrompt(`elicit:${request.requestHandle}`);
     } catch {
       // Keep the request actionable when the App Server preview is unavailable.
     }
@@ -2314,14 +1740,8 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
       request_id: requestId,
     })}`;
     const error = parseAiError(envelope);
-    setMessages(prev => [...prev, {
-      id: `${Date.now()}-${Math.random()}`,
-      role: 'system',
-      content: error.message,
-      timestamp: Date.now(),
-      error,
-    }]);
-  }, [setMessages]);
+    void appendToLog({ type: 'local_note', noteId: `fake-error-${newClientId()}`, content: error.message, error });
+  }, [appendToLog]);
 
   const loadGuard = useLoadGuard();
   // Only an enabled, paused guard holds sends back; everything else is unchanged.
@@ -2338,6 +1758,11 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
     return true;
   };
 
+  const interruptViaLog = useCallback(() => {
+    if (!chatId) return;
+    return runCommand({ kind: 'interrupt', chatId, clientId: newClientId() }).catch(() => { /* devlogged */ });
+  }, [chatId, runCommand]);
+
   // `opts.taskCard` is passed only by the composer's own send; every other
   // caller (retry, queue, suggestions) sends untagged and unprefixed.
   const handleSend = async (text: string, images?: string[], opts?: { taskCard?: TaskCard | null }) => {
@@ -2346,27 +1771,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
     // Handle built-in commands locally
     if (import.meta.env.DEV && text.startsWith('/fake-error')) {
       handleFakeError(text);
-      return;
-    }
-    // Dev-only: messages containing sai://fake-* render the watcher card without
-    // round-tripping to the LLM. Synthesizes a watch_github_run tool call (the
-    // card now mounts from tool calls, not text detection).
-    if (import.meta.env.DEV && /sai:\/\/fake-run\//.test(text)) {
-      const url = text.match(/sai:\/\/fake-run\/[^\s)"'<]*/)![0];
-      const runId = url.replace(/^sai:\/\/fake-run\//, '').split('?')[0];
-      const ts = Date.now();
-      setMessages(prev => [...prev,
-        { id: `fake-watcher-user-${ts}`, role: 'user', content: text, timestamp: ts, images },
-        {
-          id: `fake-watcher-${ts}`, role: 'assistant', content: '', timestamp: ts + 1,
-          toolCalls: [{
-            id: `fake-watch-${ts}`, type: 'mcp', name: 'mcp__sai__sai_watch_github_run',
-            input: JSON.stringify({ url }),
-            output: JSON.stringify({ owner: 'fake', repo: 'fake', runId, url, status: 'in_progress' }),
-          }],
-        },
-      ]);
-      flushMessagesToParent();
+      pendingComposerRectRef.current = null;
       return;
     }
     // Type-to-answer: when a Claude AskUserQuestion card is awaiting an answer,
@@ -2376,40 +1781,38 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
     if (aiProvider === 'claude' && awaitingQuestion) {
       const pending = buildPendingQuestionAnswer(messagesRef.current, text);
       if (pending) {
-        handleAnswerQuestion(pending.toolUseId, pending.answers);
+        void handleAnswerQuestion(pending.toolUseId, pending.answers).catch(() => {});
         pendingComposerRectRef.current = null;
         return;
       }
     }
 
     if (text === '/clear') {
-      setMessages([]);
-      setRenderStart(0);
-      pendingComposerRectRef.current = null;
+      handleClearContext();
       return;
     }
     if (text === '/compact' && aiProvider === 'claude') {
       // /compact needs the live agent, so it waits out a pause like any send.
       if (queueWhilePaused(text)) return;
-      loadGuardKillRef.current = null;
       window.sai.claudeCompact(projectPath, permissionMode, effortLevel, modelChoice, claudeScope);
       pendingComposerRectRef.current = null;
       return;
     }
 
-    const newMessageId = Date.now().toString();
-
-    if (text === '/help') {
+    // The bubble is the logged user_message, keyed by this id: the FLIP rect
+    // from the composer flies into it.
+    const clientId = newClientId();
+    const keepFlipRect = () => {
       if (pendingComposerRectRef.current) {
-        setFlipRect(newMessageId, pendingComposerRectRef.current);
+        setFlipRect(clientId, pendingComposerRectRef.current);
         pendingComposerRectRef.current = null;
       }
-      setMessages(prev => [...prev,
-        { id: newMessageId, role: 'user', content: text, timestamp: Date.now() },
-        { id: `help-${Date.now()}`, role: 'system', content:
-          buildHelpMessage(aiProvider, slashCommands),
-          timestamp: Date.now() },
-      ]);
+    };
+
+    if (text === '/help') {
+      keepFlipRect();
+      await appendToLog({ type: 'user_message', clientId, text, origin: 'desktop' });
+      await appendToLog({ type: 'local_note', noteId: `help-${clientId}`, content: buildHelpMessage(aiProvider, slashCommands) });
       return;
     }
 
@@ -2417,34 +1820,19 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
     if (queueWhilePaused(text, images)) return;
 
     // Bypass-queue-on-enter: when streaming AND the queue has items, plain
-    // Enter signals "send this now" — interrupt the current turn first, then
-    // dispatch immediately. The queue stays untouched and resumes draining
-    // after this turn ends.
-    if (isStreaming && messageQueue.length > 0) {
-      // The stop will cause the CLI to emit `done`, which flips isStreaming
+    // Enter signals "send this now" — main interrupts the current turn first,
+    // then dispatches immediately. The queue stays untouched and resumes
+    // draining after this turn ends.
+    const now = isStreaming && messageQueue.length > 0;
+    if (now) {
+      // The stop will cause the backend to emit `done`, which flips isStreaming
       // false and would otherwise wake the drain useEffect to shift a queued
       // item. Suppress that one drain so only the user's new message runs.
       suppressNextDrainRef.current = true;
-      if (aiProvider === 'gemini') (window.sai as any).geminiStop?.(projectPath, claudeScope);
-      else if (aiProvider === 'kimi') (window.sai as any).kimiStop?.(projectPath, claudeScope);
-      else if (aiProvider === 'codex') window.sai.codexStop?.(projectPath, claudeScope);
-      else window.sai.claudeStop?.(projectPath, claudeScope);
     }
 
     isAtBottomRef.current = true;
-    if (pendingComposerRectRef.current) {
-      setFlipRect(newMessageId, pendingComposerRectRef.current);
-      pendingComposerRectRef.current = null;
-    }
-    setMessages(prev => [...prev, {
-      id: newMessageId,
-      role: 'user',
-      content: text,
-      timestamp: Date.now(),
-      images: images?.length ? images : undefined,
-      // A message typed on a task tab belongs to that task; stamping keeps an explicit tag.
-      ...(directCard ? { taskId: directCard.tag } : {}),
-    }]);
+    keepFlipRect();
 
     // Save images to temp files and get paths
     let imagePaths: string[] | undefined;
@@ -2454,26 +1842,17 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
       );
     }
 
-    // Our own send starts a fresh turn: its errors (even before streaming_start,
-    // e.g. a failed resume) are real, not the killed agent's.
-    loadGuardKillRef.current = null;
     const builtPrompt = activeFilePath && fileContextEnabled ? `[File: ${activeFilePath}]\n\n${text}` : text;
     const prompt = directCard ? directAtTask(builtPrompt, directCard.title) : builtPrompt;
-    if (aiProvider === 'gemini') {
-      (window.sai as any).geminiSend(projectPath, prompt, imagePaths, geminiApprovalMode, geminiConversationMode, geminiModel, claudeScope);
-    } else if (aiProvider === 'kimi') {
-      (window.sai as any).kimiSend(projectPath, prompt, imagePaths, kimiApprovalMode, kimiModel, claudeScope);
-    } else if (aiProvider === 'codex') {
-      const selectedCodexModel = codexModels.find(model => model.id === codexModel);
-      const sendEffort = normalizeCodexEffort(codexEffort ?? 'high', selectedCodexModel);
-      window.sai.codexSend(projectPath, prompt, imagePaths, codexPermission, sendEffort, codexModel, claudeScope, undefined);
-    } else {
-      window.sai.claudeSend(projectPath, prompt, imagePaths, permissionMode, effortLevel, modelChoice, claudeScope);
-    }
+    await sendToLog(text, {
+      clientId, images, imagePaths, prompt, now,
+      // A message typed on a task tab belongs to that task; stamping keeps an explicit tag.
+      ...(directCard ? { taskId: directCard.tag } : {}),
+    });
   };
 
   const handleCancelWait = () => {
-    window.sai.claudeStop?.(projectPath, claudeScope);
+    void interruptViaLog();
   };
 
   const handleRetry = useCallback((errorMessageId: string) => {
@@ -2490,20 +1869,21 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
   }, [isStreaming]);
 
   const handleClearContext = useCallback(() => {
-    setMessages([]);
+    void appendToLog({ type: 'cleared' });
     setRenderStart(0);
     pendingComposerRectRef.current = null;
-  }, [setMessages]);
+  }, [appendToLog]);
 
-  const handleAnswerQuestion = useCallback((toolUseId: string, answers: Record<string, string | string[]>) => {
-    if (aiProvider !== 'claude' || !projectPath) return Promise.resolve();
-    return window.sai.claudeAnswerQuestion(projectPath, toolUseId, answers, claudeScope).then(() => undefined);
-  }, [aiProvider, projectPath, claudeScope]);
+  const handleAnswerQuestion = useCallback(async (toolUseId: string, answers: Record<string, string | string[]>) => {
+    if (aiProvider !== 'claude' || !projectPath || !chatId) return;
+    await runCommand({ kind: 'answer', chatId, clientId: newClientId(), toolUseId, answers });
+  }, [aiProvider, projectPath, chatId, runCommand]);
 
-  const handleAnswerPlanReview = useCallback((toolUseId: string, approved: boolean) => {
-    if (aiProvider !== 'claude' || !projectPath) return Promise.resolve();
-    return window.sai.claudeAnswerPlanReview(projectPath, toolUseId, approved, claudeScope).then(() => undefined);
-  }, [aiProvider, projectPath, claudeScope]);
+  const handleAnswerPlanReview = useCallback(async (toolUseId: string, approved: boolean) => {
+    if (aiProvider !== 'claude' || !projectPath || !chatId) return;
+    // The plan card's buttons don't await this: a failure is devlogged, never unhandled.
+    await runCommand({ kind: 'planReview', chatId, clientId: newClientId(), toolUseId, approved }).catch(() => {});
+  }, [aiProvider, projectPath, chatId, runCommand]);
 
   const handleTaskStop = useCallback((card: TaskCard) => {
     const taskId = card.agent?.taskId;
@@ -2525,15 +1905,9 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
     // Paused: leave it queued and don't interrupt the running turn.
     if (loadPausedRef.current) return;
     onQueueRemove?.(sessionId, id);
-    // Same semantics as bypass-queue-on-enter: interrupt the current turn and
-    // dispatch immediately; the rest of the queue resumes draining afterwards.
-    if (isStreaming) {
-      suppressNextDrainRef.current = true;
-      if (aiProvider === 'gemini') (window.sai as any).geminiStop?.(projectPath, claudeScope);
-      else if (aiProvider === 'kimi') (window.sai as any).kimiStop?.(projectPath, claudeScope);
-      else if (aiProvider === 'codex') window.sai.codexStop?.(projectPath, claudeScope);
-      else window.sai.claudeStop?.(projectPath, claudeScope);
-    }
+    // Same semantics as bypass-queue-on-enter: main interrupts the current
+    // turn and dispatches immediately; the rest of the queue resumes after.
+    if (isStreaming) suppressNextDrainRef.current = true;
     handleSend(item.fullText, item.images);
   };
 
@@ -2542,8 +1916,6 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
   const prevLoadPausedRef = useRef(loadPaused);
   const suppressNextDrainRef = useRef(false);
   const drainPendingRef = useRef(false);
-  const turnStartedAtRef = useRef<number | null>(null);
-  const nextSegmentStartRef = useRef<number | null>(null);
   const autoSendTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const drainBackstopRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Drives queue draining. Keyed on BOTH isStreaming and messageQueue because a
@@ -2570,34 +1942,6 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
       drainPendingRef.current = false;
       setDrainInFlight(false);
       if (drainBackstopRef.current) { clearTimeout(drainBackstopRef.current); drainBackstopRef.current = null; }
-    }
-
-    if (turnJustEnded) {
-      // Stamp durationMs on every unstamped assistant text bubble in the current
-      // turn. Each bubble gets cumulative time from turn start so the displayed
-      // value monotonically grows across a multi-bubble turn.
-      const turnStart = turnStartedAtRef.current;
-      setMessages(prev => {
-        const startIdx = turnStartIndex ?? 0;
-        const now = Date.now();
-        let changed = false;
-        const next = prev.map((m, i) => {
-          if (
-            i >= startIdx &&
-            m.role === 'assistant' &&
-            m.content && m.content.length > 0 &&
-            typeof m.durationMs !== 'number'
-          ) {
-            changed = true;
-            return { ...m, durationMs: now - (turnStart ?? m.startedAt ?? m.timestamp), completedAt: now };
-          }
-          return m;
-        });
-        return changed ? next : prev;
-      });
-      if (turnStartedAtRef.current !== null) {
-        turnStartedAtRef.current = null;
-      }
     }
 
     if (!isStreaming && !loadPaused && (turnJustEnded || queueGrewWhileIdle || resumedWithQueue)) {
@@ -2767,7 +2111,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
                         />
                       </div>
                     )
-                    : <ChatMessage message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} onRetry={msg.error ? () => handleRetry(msg.id) : undefined} onClearContext={msg.error ? handleClearContext : undefined} isFirstAssistantOfTurn={msg.id === firstAssistantOfTurnId} isStreaming={isStreaming && msg.id === lastAssistantId && !streamSettled} seedGrow={msg.id === seedGrowMsgId} renderToolCall={renderToolCallWrapped} metaRuntime={activeMetaRuntime} onAnswerQuestion={handleAnswerQuestion} onAnswerPlanReview={handleAnswerPlanReview} watcherUrlAllowlist={watcherUrlsByMessageId.get(msg.id) ?? EMPTY_URL_SET} taskLabels={labelsByMessage.get(msg.id)} />}
+                    : <ChatMessage message={msg} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} onRetry={msg.error ? () => handleRetry(msg.id) : undefined} onClearContext={msg.error ? handleClearContext : undefined} isFirstAssistantOfTurn={msg.id === firstAssistantOfTurnId} isStreaming={turnLive && msg.id === lastAssistantId && !textSettled} seedGrow={msg.id === seedGrowMsgId} renderToolCall={renderToolCallWrapped} metaRuntime={activeMetaRuntime} onAnswerQuestion={handleAnswerQuestion} onAnswerPlanReview={handleAnswerPlanReview} watcherUrlAllowlist={watcherUrlsByMessageId.get(msg.id) ?? EMPTY_URL_SET} taskLabels={labelsByMessage.get(msg.id)} />}
                 </Fragment>
               );
             })}
@@ -2848,7 +2192,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
               <button
                 data-testid="prompt-suggestion-chip"
                 className="chat-suggestion-chip"
-                onClick={() => { const s = promptSuggestion; setPromptSuggestion(null); void handleSend(s); }}
+                onClick={() => { const s = promptSuggestion; setDismissedSuggestion(s); void handleSend(s); }}
                 title="Send suggested prompt"
               >
                 <span className="chat-suggestion-arrow">↳</span>
@@ -2858,7 +2202,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
               </button>
               <button
                 className="chat-suggestion-dismiss"
-                onClick={() => setPromptSuggestion(null)}
+                onClick={() => setDismissedSuggestion(promptSuggestion)}
                 title="Dismiss suggestion"
                 aria-label="Dismiss suggestion"
               >
@@ -2905,7 +2249,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
             awaitingQuestion={awaitingQuestion}
             messages={messages}
             todos={taskBoard.todos}
-            onStop={() => aiProvider === 'gemini' ? (window.sai as any).geminiStop(projectPath, claudeScope) : aiProvider === 'kimi' ? (window.sai as any).kimiStop(projectPath, claudeScope) : aiProvider === 'codex' ? window.sai.codexStop(projectPath, claudeScope) : window.sai.claudeStop?.(projectPath, claudeScope)}
+            onStop={() => { void interruptViaLog(); }}
             permissionMode={permissionMode}
             onPermissionChange={onPermissionChange}
             effortLevel={effortLevel}

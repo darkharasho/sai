@@ -169,7 +169,8 @@ export class ChatLogService {
         const meta = this.store.meta(chatId);
         if (!meta) continue;
         if (this.opts.liveChats(meta.provider, meta.projectPath).includes(chatId)) continue;
-        this.appendAndFanOut(chatId, { type: 'done', turnSeq: null, reason: 'app_restart' });
+        // The previous run's processes are gone: no child event can follow either.
+        this.appendAndFanOut(chatId, { type: 'done', turnSeq: null, reason: 'app_restart', subagentsAborted: true });
       } catch (err) {
         this.opts.devlog('chatlog.repairError', { chatId, error: errText(err) });
       }

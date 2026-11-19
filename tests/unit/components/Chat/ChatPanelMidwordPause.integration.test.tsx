@@ -3,7 +3,7 @@ import { act, render, waitFor } from '@testing-library/react';
 import type { ComponentProps } from 'react';
 import { installMockSai } from '../../../helpers/ipc-mock';
 import { _resetRevealRegistry } from '../../../../src/components/Chat/revealRegistry';
-import { scopeMessageBuffer, hasChatListener, _resetChatFrameGate } from '../../../../src/lib/chatFrameGate';
+import { bridgeClaudeOnMessageToLog, seedPanelHistory } from '../../../helpers/chatlogMock';
 
 // Repro for the v1.12.14 dogfood report: a reply that pauses mid-sentence
 // longer than the stream-idle settle (250ms), then keeps streaming, rendered
@@ -18,9 +18,14 @@ vi.mock('../../../../src/components/Chat/MessageQueue', () => ({
   default: () => <div data-testid="message-queue" />,
 }));
 
-import ChatPanel from '../../../../src/components/Chat/ChatPanel';
+import RealChatPanel from '../../../../src/components/Chat/ChatPanel';
 
-type ChatPanelProps = ComponentProps<typeof ChatPanel>;
+function ChatPanel(props: any) {
+  seedPanelHistory(props);
+  return <RealChatPanel {...props} />;
+}
+
+type ChatPanelProps = ComponentProps<typeof RealChatPanel> & { initialMessages?: any[] };
 
 function baseProps(): ChatPanelProps {
   return {
@@ -68,10 +73,10 @@ describe('mid-sentence pause past the settle debounce', () => {
 
   beforeEach(() => {
     _resetRevealRegistry();
-    _resetChatFrameGate();
     mockSai = installMockSai();
     mockSai.settingsGet.mockImplementation((_key: string, fallback: unknown) => Promise.resolve(fallback));
     mockSai.claudeOnMessage.mockImplementation(() => () => {});
+    bridgeClaudeOnMessageToLog(mockSai as any);
     mockSai.geminiStart.mockResolvedValue({ slashCommands: [] });
     Object.defineProperty(window, 'IntersectionObserver', {
       writable: true,
@@ -89,6 +94,8 @@ describe('mid-sentence pause past the settle debounce', () => {
     await act(async () => {
       for (const [handler] of handlerCalls) (handler as (m: any) => void)(msg);
     });
+    // Let the log hook's frame batch land.
+    await act(async () => { await new Promise(res => setTimeout(res, 5)); });
   };
   const sleep = async (ms: number) => {
     await act(async () => { await new Promise(res => setTimeout(res, ms)); });
@@ -170,31 +177,22 @@ describe('mid-sentence pause past the settle debounce', () => {
     expect(text.split('I left out the two Discord-').length).toBe(2);
   });
 
-  it('drains frames buffered before the panel subscribed (focus-swap gap)', async () => {
-    // App buffered content for this scope while no ChatPanel listener was
-    // registered; the panel must pick it up at mount.
-    scopeMessageBuffer.set('session-gap', [
-      { id: 'gap-1', role: 'assistant', content: 'buffered while unmounted', timestamp: Date.now() },
-    ] as any);
+  it('content logged before the panel mounted renders on mount (focus-swap gap)', async () => {
+    // The reply streamed into the log while no panel was listening.
+    mockSai.chatlog.append('session-gap', { type: 'user_message', clientId: 'u1', text: 'hi' }, { projectPath: '/project' });
+    mockSai.chatlog.append('session-gap', { type: 'assistant', message: { content: [{ type: 'text', text: 'logged while unmounted' }] } });
 
     const props = { ...baseProps(), claudeScope: 'session-gap', sessionId: 'session-gap' } as any;
     const { container } = render(<ChatPanel {...props} />);
-    await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
-
-    // Panel took ownership: the buffer is drained and the listener registered.
-    expect(hasChatListener('session-gap')).toBe(true);
-    expect(scopeMessageBuffer.has('session-gap')).toBe(false);
-    // The word-reveal interleaves caret glyphs — strip them before matching.
     await waitFor(() => {
       const text = container.textContent?.replace(/[▋▊▍]/g, '') ?? '';
-      expect(text).toContain('buffered while unmounted');
+      expect(text).toContain('logged while unmounted');
     });
   });
 
-  it('gives a focused scoped Codex chat ownership of its frame gate buffer', async () => {
-    scopeMessageBuffer.set('codex-scope', [
-      { id: 'codex-gap', role: 'assistant', content: 'scoped codex buffer', timestamp: Date.now() },
-    ] as any);
+  it('a scoped Codex chat renders its own logged content and only its own', async () => {
+    mockSai.chatlog.append('codex-scope', { type: 'assistant', message: { content: [{ type: 'text', text: 'scoped codex reply' }] } }, { projectPath: '/project', provider: 'codex' });
+    mockSai.chatlog.append('other-scope', { type: 'assistant', message: { content: [{ type: 'text', text: 'someone else' }] } }, { projectPath: '/project', provider: 'codex' });
 
     const props = {
       ...baseProps(),
@@ -202,17 +200,11 @@ describe('mid-sentence pause past the settle debounce', () => {
       claudeScope: 'codex-scope',
       sessionId: 'codex-scope',
     } as ChatPanelProps;
-    const { container, unmount } = render(<ChatPanel {...props} />);
-    await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
-
-    expect(hasChatListener('codex-scope')).toBe(true);
-    expect(scopeMessageBuffer.has('codex-scope')).toBe(false);
+    const { container } = render(<ChatPanel {...props} />);
     await waitFor(() => {
       const text = container.textContent?.replace(/[▋▊▍]/g, '') ?? '';
-      expect(text).toContain('scoped codex buffer');
+      expect(text).toContain('scoped codex reply');
     });
-
-    unmount();
-    expect(hasChatListener('codex-scope')).toBe(false);
+    expect(container.textContent).not.toContain('someone else');
   });
 });

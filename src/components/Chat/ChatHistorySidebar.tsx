@@ -3,7 +3,8 @@ import { Search, X, Plus, Pin } from 'lucide-react';
 import { WorkspaceSquircle, StatusSlot } from '../shared/WorkspaceSquircle';
 import SaiLogo from '../SaiLogo';
 import { formatSessionDate, formatSessionTime, exportSessionAsMarkdown } from '../../sessions';
-import { dbGetMessages, dbDeleteSession, dbPatchSessionMeta } from '../../chatDb';
+import { dbDeleteSession, dbPatchSessionMeta } from '../../chatDb';
+import { readChatMessages } from '../../lib/chat/readChat';
 import ChatHistoryContextMenu from './ChatHistoryContextMenu';
 import type { ChatSession, AIProvider } from '../../types';
 import { inferSessionProvider } from '../../lib/sessionProvider';
@@ -132,7 +133,8 @@ export default function ChatHistorySidebar({
       const newEntries = new Map<string, { raw: string; lower: string }>();
       for (const session of toLoad) {
         if (cancelled) return;
-        const messages = await dbGetMessages(session.id);
+        // Content lives in the durable log (IndexedDB is only a mirror).
+        const messages = await readChatMessages(session.id).catch(() => []);
         const raw = messages.map(m => m.content).join(' ');
         newEntries.set(session.id, { raw, lower: raw.toLowerCase() });
       }
@@ -242,7 +244,7 @@ export default function ChatHistorySidebar({
       case 'export': {
         const session = sessions.find(s => s.id === sessionId);
         if (session) {
-          dbGetMessages(sessionId).then(messages => {
+          readChatMessages(sessionId).then(messages => {
             const md = exportSessionAsMarkdown(session.title || 'Untitled', messages);
             const blob = new Blob([md], { type: 'text/markdown' });
             const url = URL.createObjectURL(blob);

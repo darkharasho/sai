@@ -193,6 +193,16 @@ describe('load guard', () => {
     expect(s.turn.streaming).toBe(true);
   });
 
+  it("a client's own send (user_message) closes the quiet window", () => {
+    const s = reduceMany(started(1), [
+      e(2, { type: 'load_guard', provider: 'claude', id: 'lg', loadGuard: killed }, 2000),
+      e(3, { type: 'user_message', clientId: 'u1', text: 'again' }, 2100),
+      e(4, { type: 'error', text: 'resume failed' }, 2200),
+    ]);
+    expect(s.turn.loadGuardQuietUntil).toBeNull();
+    expect(s.messages[2]).toMatchObject({ id: 'e4', content: 'resume failed' });
+  });
+
   it('streaming_start closes the quiet window', () => {
     const s = reduceMany(started(1), [
       e(2, { type: 'load_guard', provider: 'claude', id: 'lg', loadGuard: killed }, 2000),

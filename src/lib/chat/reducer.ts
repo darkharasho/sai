@@ -241,6 +241,11 @@ function apply(s: ChatState, entry: ChatLogEntry): ChatState {
 
     case 'user_message': {
       const id = typeof ev.clientId === 'string' && ev.clientId ? ev.clientId : `m${seq}`;
+      // A new send starts a fresh turn: its errors (even before streaming_start,
+      // e.g. a failed resume) are real, not the killed agent's.
+      if (s.turn.loadGuardQuietUntil != null) {
+        s = { ...s, turn: { ...s.turn, loadGuardQuietUntil: null, loadGuardEnded: false } };
+      }
       return appendMessage(s, {
         id,
         role: 'user',

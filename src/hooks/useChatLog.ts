@@ -20,6 +20,8 @@ export interface UseChatLog {
  * then follow live entries with seq dedupe, per-frame batching and gap recovery.
  */
 const backoff = (attempt: number) => Math.min(250 * 2 ** attempt, 5000);
+/** A hidden (throttled) window never runs animation frames: batches still apply after this long. */
+export const HIDDEN_FLUSH_MS = 250;
 
 export function useChatLog(chatId: string | null, fallbackSettings: ChatSettings): UseChatLog {
   const [held, setHeld] = useState<{ chatId: string; state: ChatState | null; meta: ChatMeta | null } | null>(null);
@@ -42,6 +44,7 @@ export function useChatLog(chatId: string | null, fallbackSettings: ChatSettings
     let queue: ChatLogEntry[] = [];
     let buffer: ChatLogEntry[] = []; // live entries held while an open is pending
     let raf: number | null = null;
+    let fallback: ReturnType<typeof setTimeout> | null = null;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
     let recoverFails = 0;
     let initialFails = 0;
@@ -49,6 +52,7 @@ export function useChatLog(chatId: string | null, fallbackSettings: ChatSettings
 
     const flush = () => {
       if (raf !== null) { cancelAnimationFrame(raf); raf = null; }
+      if (fallback !== null) { clearTimeout(fallback); fallback = null; }
       if (!current || queue.length === 0) return;
       const batch = queue;
       queue = [];
@@ -93,6 +97,7 @@ export function useChatLog(chatId: string | null, fallbackSettings: ChatSettings
         head = entry.seq;
         queue.push(entry);
         if (raf === null) raf = requestAnimationFrame(() => { raf = null; flush(); });
+        if (fallback === null && queue.length > 0) fallback = setTimeout(() => { fallback = null; flush(); }, HIDDEN_FLUSH_MS);
         return;
       }
       buffer.push(entry); // gap: fetch the missing range, then replay anything held
@@ -140,6 +145,7 @@ export function useChatLog(chatId: string | null, fallbackSettings: ChatSettings
       alive = false;
       off();
       if (raf !== null) cancelAnimationFrame(raf);
+      if (fallback !== null) clearTimeout(fallback);
       if (retryTimer !== null) clearTimeout(retryTimer);
     };
   }, [chatId]);

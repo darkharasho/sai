@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 
 vi.mock('../../../src/lib/chat/migrateToLog', () => ({ ensureChatInLog: vi.fn(async () => {}) }));
-import { useChatLog } from '../../../src/hooks/useChatLog';
+import { useChatLog, HIDDEN_FLUSH_MS } from '../../../src/hooks/useChatLog';
 
 const settings = { provider: 'claude' } as any;
 const ev = (text: string) => ({ type: 'user_message', clientId: text, text } as any);
@@ -66,6 +66,17 @@ describe('useChatLog', () => {
     frame();
     expect(openMock).toHaveBeenLastCalledWith('a', 1);
     expect(result.current.state?.lastSeq).toBe(4);
+  });
+
+  it('applies live entries in a hidden window where animation frames never run', async () => {
+    openMock.mockResolvedValue(res([entry('a', 1)]));
+    const { result } = renderHook(() => useChatLog('a', settings));
+    await flushMicro();
+    act(() => { listener(entry('a', 2)); listener(entry('a', 3)); });
+    expect(result.current.state?.lastSeq).toBe(1);
+    await act(async () => { await new Promise((r) => setTimeout(r, HIDDEN_FLUSH_MS + 50)); });
+    expect(result.current.state?.lastSeq).toBe(3);
+    expect(result.current.lastApplied.current.map((e) => e.seq)).toEqual([2, 3]);
   });
 
   it('batches many deltas into one render per frame', async () => {

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, fireEvent, act, screen } from '@testing-library/react';
 import ChatHistorySidebar from '../../../../src/components/Chat/ChatHistorySidebar';
 import type { ChatSession } from '../../../../src/types';
+import { createMockChatlog } from '../../../helpers/chatlogMock';
 
 vi.mock('../../../../src/chatDb', () => ({
   dbGetMessages: vi.fn().mockResolvedValue([]),
@@ -121,6 +122,32 @@ describe('ChatHistorySidebar', () => {
 
     expect(getByText('Auth middleware')).toBeTruthy();
     expect(queryByText('Border fix')).toBeNull();
+  });
+
+  it('searches message content from the chat log, not the IndexedDB mirror', async () => {
+    const chatlog = createMockChatlog();
+    chatlog.seed('s1', [{ id: 'u1', role: 'user', content: 'how do I rotate the signing cert', timestamp: 1 }], { projectPath: '/test/project' });
+    chatlog.append('s1', { type: 'assistant', message: { content: [{ type: 'text', text: 'use the kubeconfig reload' }] } });
+    const prevSai = (window as any).sai;
+    (window as any).sai = { ...prevSai, chatlog };
+    try {
+      const sessions = [
+        makeSession({ id: 's1', title: 'Untitled one' }),
+        makeSession({ id: 's2', title: 'Untitled two' }),
+      ];
+      const { container, getByText, queryByText } = render(
+        <ChatHistorySidebar {...defaultProps} sessions={sessions} />
+      );
+      await act(async () => {
+        fireEvent.change(container.querySelector('input')!, { target: { value: 'kubeconfig' } });
+        await new Promise(r => setTimeout(r, 400));
+      });
+      expect(getByText('Untitled one')).toBeTruthy();
+      expect(queryByText('Untitled two')).toBeNull();
+      expect(chatlog.open).toHaveBeenCalledWith('s1', 0);
+    } finally {
+      (window as any).sai = prevSai;
+    }
   });
 
   it('shows context menu on right-click', () => {

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { act, render, waitFor } from '@testing-library/react';
 import type { ComponentProps } from 'react';
 import { installMockSai } from '../../../helpers/ipc-mock';
+import { bridgeClaudeOnMessageToLog, seedPanelHistory } from '../../../helpers/chatlogMock';
 import { _resetRevealRegistry } from '../../../../src/components/Chat/revealRegistry';
 
 // Deliberately NO ChatMessage mock: this suite exercises the REAL
@@ -16,9 +17,14 @@ vi.mock('../../../../src/components/Chat/MessageQueue', () => ({
   default: () => <div data-testid="message-queue" />,
 }));
 
-import ChatPanel from '../../../../src/components/Chat/ChatPanel';
+import RealChatPanel from '../../../../src/components/Chat/ChatPanel';
 
-type ChatPanelProps = ComponentProps<typeof ChatPanel>;
+function ChatPanel(props: any) {
+  seedPanelHistory(props);
+  return <RealChatPanel {...props} />;
+}
+
+type ChatPanelProps = ComponentProps<typeof RealChatPanel> & { initialMessages?: any[] };
 
 function baseProps(): ChatPanelProps {
   return {
@@ -69,6 +75,7 @@ describe('final reply animation (real ChatMessage, post-tool turn)', () => {
     mockSai = installMockSai();
     mockSai.settingsGet.mockImplementation((_key: string, fallback: unknown) => Promise.resolve(fallback));
     mockSai.claudeOnMessage.mockImplementation(() => () => {});
+    bridgeClaudeOnMessageToLog(mockSai as any);
     mockSai.geminiStart.mockResolvedValue({ slashCommands: [] });
     Object.defineProperty(window, 'IntersectionObserver', {
       writable: true,
@@ -82,10 +89,12 @@ describe('final reply animation (real ChatMessage, post-tool turn)', () => {
     Object.defineProperty(window, 'cancelAnimationFrame', { writable: true, value: (id: number) => clearTimeout(id) });
   });
 
+  // Logged first (the bridge), then the frame the log hook batches on runs.
   const send = async (handlerCalls: any[], msg: any) => {
     await act(async () => {
       for (const [handler] of handlerCalls) (handler as (m: any) => void)(msg);
     });
+    await act(async () => { await new Promise(res => setTimeout(res, 5)); });
   };
 
   it('a full-frame final reply after a tool run keeps the thinking phase, then word-reveals', async () => {
@@ -121,6 +130,8 @@ describe('final reply animation (real ChatMessage, post-tool turn)', () => {
     expect(container.querySelector('.sah-status')).toBeTruthy();
 
     // Turn ends → morph (250ms) → word-by-word reveal of the reply.
+    await send(calls, { type: 'result', projectPath: '/project', scope: 'chat' });
+    await send(calls, { type: 'done', projectPath: '/project', scope: 'chat' });
     rerender(<ChatPanel {...props} isStreaming={false} />);
     await act(async () => { await new Promise(res => setTimeout(res, 400)); });
     expect(container.querySelector('.sah-root')?.getAttribute('data-phase')).toBe('revealed');
@@ -193,6 +204,7 @@ describe('final reply animation (real ChatMessage, post-tool turn)', () => {
     expect(md.style.display).not.toBe('none');
 
     now += 600; // on screen well past the watch threshold
+    await send(calls, { type: 'done', projectPath: '/project', scope: 'chat' });
     rerender(<ChatPanel {...props} isStreaming={false} />);
     await act(async () => { await new Promise(res => setTimeout(res, 400)); });
     // No word-reveal replay for text the user already watched arrive.

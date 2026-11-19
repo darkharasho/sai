@@ -180,8 +180,17 @@ describe('ChatLogService.startupRepair', () => {
     expect(store.state('c1')!.turn.streaming).toBe(true);
     svc.startupRepair();
     expect(store.state('c1')!.turn.streaming).toBe(false);
-    expect(sent.at(-1)!.ev).toEqual({ type: 'done', turnSeq: null, reason: 'app_restart' });
+    expect(sent.at(-1)!.ev).toEqual({ type: 'done', turnSeq: null, reason: 'app_restart', subagentsAborted: true });
     expect(store.openTurnChatIds()).toEqual([]);
+  });
+
+  it('startup repair clears child activity the dead run left behind', () => {
+    const { svc, store } = mk();
+    svc.record({ type: 'streaming_start', projectPath: '/p', scope: 'c1', turnSeq: 1 });
+    svc.record({ type: 'subagent_activity', projectPath: '/p', scope: 'c1', agentId: 'a1', status: 'running', turnSeq: 1 });
+    expect(Object.keys(store.state('c1')!.activeSubagents)).toEqual(['a1']);
+    svc.startupRepair();
+    expect(store.state('c1')!.activeSubagents).toEqual({});
   });
 
   it('startup repair leaves chats with a live backend alone', () => {

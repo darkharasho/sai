@@ -2,13 +2,15 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { act, render, waitFor } from '@testing-library/react';
 import type { ComponentProps } from 'react';
 import { installMockSai } from '../../../helpers/ipc-mock';
+import { bridgeClaudeOnMessageToLog, flushChatlog, seedPanelHistory } from '../../../helpers/chatlogMock';
 import { _resetRevealRegistry } from '../../../../src/components/Chat/revealRegistry';
 
 // Regression: a reply that streamed into a hidden (busy, non-active) workspace
 // was persisted truncated to its FIRST delta ("CI now" out of a 2k-char reply).
-// The final frame and `done` landed before React rendered, so the done-time
-// flushMessagesToParent read a messagesRef that lagged the queued updates;
-// the turn end then unmounted the hidden panel, discarding them for good.
+// The panel now renders from the durable log: the turn-end mirror is handed
+// log state once it has applied (even in a hidden window, where animation
+// frames never run), and a panel that unmounts early loses nothing — the log
+// keeps the whole reply for the next mount.
 
 vi.mock('../../../../src/components/Chat/ChatInput', () => ({
   default: () => <button data-testid="chat-input">send</button>,
@@ -17,9 +19,15 @@ vi.mock('../../../../src/components/Chat/MessageQueue', () => ({
   default: () => <div data-testid="message-queue" />,
 }));
 
-import ChatPanel from '../../../../src/components/Chat/ChatPanel';
+import RealChatPanel from '../../../../src/components/Chat/ChatPanel';
+import { HIDDEN_FLUSH_MS } from '../../../../src/hooks/useChatLog';
 
-type ChatPanelProps = ComponentProps<typeof ChatPanel>;
+function ChatPanel(props: any) {
+  seedPanelHistory(props);
+  return <RealChatPanel {...props} />;
+}
+
+type ChatPanelProps = ComponentProps<typeof RealChatPanel> & { initialMessages?: any[] };
 
 function baseProps(): ChatPanelProps {
   return {
@@ -70,6 +78,7 @@ describe('done-time flush to parent', () => {
     mockSai = installMockSai();
     mockSai.settingsGet.mockImplementation((_key: string, fallback: unknown) => Promise.resolve(fallback));
     mockSai.claudeOnMessage.mockImplementation(() => () => {});
+    bridgeClaudeOnMessageToLog(mockSai as any);
     mockSai.geminiStart.mockResolvedValue({ slashCommands: [] });
     Object.defineProperty(window, 'IntersectionObserver', {
       writable: true,
@@ -90,6 +99,7 @@ describe('done-time flush to parent', () => {
     });
     render(<ChatPanel {...props} />);
     await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+    await flushChatlog();
     const handlers = mockSai.claudeOnMessage.mock.calls.map(([h]: any[]) => h as (m: any) => void);
     const emit = (msg: any) => { for (const h of handlers) h({ projectPath: '/project', scope: 'chat', ...msg }); };
     const full = 'CI now passes on both Linux and Windows, which finishes Task 5.';
@@ -114,8 +124,10 @@ describe('done-time flush to parent', () => {
       emit({ type: 'result', turnSeq: 3 });
       emit({ type: 'done', turnSeq: 3 });
     });
+    // No frame ever runs here: the hook's hidden-window fallback applies the batch.
+    await act(async () => { await new Promise(res => setTimeout(res, HIDDEN_FLUSH_MS + 50)); });
 
-    expect(props.onTurnComplete).toHaveBeenCalled();
+    expect(props.onTurnComplete).toHaveBeenCalledTimes(1);
     const last = atTurnComplete![atTurnComplete!.length - 1];
     expect(last.role).toBe('assistant');
     expect(last.content).toBe(full);
@@ -123,13 +135,13 @@ describe('done-time flush to parent', () => {
 
   // Regression (v1.34.0): `result` clears the workspace's busy flag, so App can
   // render — and unmount the hidden panel — BEFORE the separate `done` frame
-  // arrives. done is never seen, so the done-time flush never runs; App's
-  // unmount flush then persisted the last COMMITTED report, which lagged the
-  // queued final text ("…for signed wraps you just" — tail lost on screen).
-  it('hands the parent the full text when it unmounts before done arrives', async () => {
+  // arrives. The reply's tail must survive: the log holds it, and the next
+  // mount renders it complete (App mirrors a background turn end from the log).
+  it('a panel that unmounts before done loses nothing: the next mount shows the full text', async () => {
     const props = baseProps();
     const { unmount } = render(<ChatPanel {...props} />);
     await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+    await flushChatlog();
     const handlers = mockSai.claudeOnMessage.mock.calls.map(([h]: any[]) => h as (m: any) => void);
     const emit = (msg: any) => { for (const h of handlers) h({ projectPath: '/project', scope: 'chat', ...msg }); };
     const full = 'Then I will start plan 3 for the signed wraps you just approved.';
@@ -138,7 +150,6 @@ describe('done-time flush to parent', () => {
       emit({ type: 'streaming_start', turnSeq: 2 });
       emit({ type: 'assistant', message: { content: [{ type: 'text', delta: true, text: 'Then I' }] } });
     });
-    await act(async () => { await new Promise(res => setTimeout(res, 300)); });
     // Tail + reconcile frame + result land, then the panel unmounts (busy
     // cleared by result) in the same flush — done never reaches it.
     await act(async () => {
@@ -147,11 +158,16 @@ describe('done-time flush to parent', () => {
       emit({ type: 'result', turnSeq: 2 });
       unmount();
     });
+    await act(async () => { emit({ type: 'done', turnSeq: 2 }); });
 
-    const calls = (props.onMessagesChange as any).mock.calls;
-    const reported = calls[calls.length - 1][0];
-    const last = reported[reported.length - 1];
-    expect(last.role).toBe('assistant');
-    expect(last.content).toBe(full);
+    const logged = mockSai.chatlog.state('session-int')!.messages;
+    expect(logged[logged.length - 1]).toMatchObject({ role: 'assistant', content: full });
+
+    const again = baseProps();
+    const { container } = render(<ChatPanel {...again} />);
+    await act(async () => { await new Promise(res => setTimeout(res, HIDDEN_FLUSH_MS + 50)); });
+    expect(container.textContent).toContain(full);
+    const reported = (again.onMessagesChange as any).mock.calls.at(-1)[0];
+    expect(reported[reported.length - 1]).toMatchObject({ role: 'assistant', content: full });
   });
 });

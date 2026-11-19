@@ -1,4 +1,5 @@
 import { vi } from 'vitest';
+import { createMockChatlog, type MockChatlog } from './chatlogMock';
 
 /**
  * Typed mock interface matching the full window.sai preload bridge.
@@ -146,6 +147,9 @@ export interface MockSai {
   githubSyncNow: ReturnType<typeof vi.fn>;
   githubOnSyncStatus: ReturnType<typeof vi.fn>;
   githubOnSettingsApplied: ReturnType<typeof vi.fn>;
+
+  // Durable chat log (in-memory, real reducer) — see chatlogMock.ts
+  chatlog: MockChatlog;
 }
 
 /**
@@ -160,7 +164,7 @@ export function createMockSai(): MockSai {
   // pass or fail based on unrelated calls to a different channel.
   const noopUnsubscribe = () => vi.fn(() => () => {});
 
-  return {
+  const sai = {
     platform: 'linux',
 
     // Terminal
@@ -302,7 +306,10 @@ export function createMockSai(): MockSai {
     githubSyncNow: vi.fn().mockResolvedValue(undefined),
     githubOnSyncStatus: noopUnsubscribe(),
     githubOnSettingsApplied: noopUnsubscribe(),
-  };
+  } as Omit<MockSai, 'chatlog'> as MockSai;
+  // Commands dispatch through the legacy preload methods, read at call time.
+  sai.chatlog = createMockChatlog(sai as unknown as Record<string, any>);
+  return sai;
 }
 
 /**
