@@ -18,6 +18,7 @@ import type { SaiChatLogApi } from '../../../src/types';
 import type { V2Client } from './client';
 import type { ChatEntriesFrame, ChatEntryFrame, ChatErrorFrame, ChatSnapshotFrame, ChatsListFrame, ConnState, NativeApi } from './types';
 import { CHAT_LOG_UNAVAILABLE_MESSAGE } from './types';
+import { newClientId } from '../../../src/lib/clientId';
 
 type Provider = ChatSettings['provider'];
 
@@ -41,17 +42,7 @@ const validChatId = (v: string): boolean => CHAT_ID.test(v) && !(v in Object.pro
 const CLIENT_EVENT_TYPES = new Set(['local_note', 'watcher_snapshot']);
 
 /** A fresh client id (crypto.randomUUID needs iOS 15.4; the app targets 15.0). */
-export function newClientId(): string {
-  const c = (globalThis as { crypto?: Crypto }).crypto;
-  if (c && typeof c.randomUUID === 'function') return c.randomUUID();
-  const b = new Uint8Array(16);
-  if (c && typeof c.getRandomValues === 'function') c.getRandomValues(b);
-  else for (let i = 0; i < 16; i++) b[i] = Math.floor(Math.random() * 256);
-  b[6] = (b[6] & 0x0f) | 0x40;
-  b[8] = (b[8] & 0x3f) | 0x80;
-  const h = Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
-  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
-}
+export { newClientId };
 
 function dataUrlToArrayBuffer(dataUrl: string): ArrayBuffer | null {
   const comma = dataUrl.indexOf(',');

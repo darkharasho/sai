@@ -2,6 +2,7 @@ import { Fragment, useState, useEffect, useLayoutEffect, useRef, useCallback, us
 import { isPhone } from '../../lib/platform';
 import { createPortal } from 'react-dom';
 import { ChevronDown, CornerLeftUp } from 'lucide-react';
+import { newClientId } from '../../lib/clientId';
 import { stampTaskTags } from './tasks/taskTags';
 import { motion, AnimatePresence, LayoutGroup } from 'motion/react';
 import { setFlipRect } from './flipRegistry';
@@ -145,10 +146,6 @@ function recordTaskStamps(messages: ChatMessageType[], stamps: Map<string, strin
       if (tc.taskId !== undefined) stamps.set(itemKey(m.id, tc.id, i), tc.taskId);
     });
   }
-}
-
-function newClientId(): string {
-  return crypto.randomUUID();
 }
 
 /** Text-only assistant output (not an API-error envelope): the stream-idle gate's activity signal. */

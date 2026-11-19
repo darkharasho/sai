@@ -1,4 +1,5 @@
 import { getNative, type FullNativeApi } from '../native';
+import { newClientId } from '../../../src/lib/clientId';
 
 export interface Machine {
   id: string;
@@ -29,7 +30,7 @@ function save(list: Machine[]): void {
 export function getClientId(): string {
   let id = localStorage.getItem(CLIENT_ID_KEY);
   if (!id) {
-    id = crypto.randomUUID();
+    id = newClientId(); // crypto.randomUUID needs iOS 15.4
     localStorage.setItem(CLIENT_ID_KEY, id);
   }
   return id;
@@ -43,7 +44,7 @@ export async function addMachine(
   const list = listMachines();
   const existing = list.find((x) => x.baseUrl === m.baseUrl);
   const machine: Machine = {
-    id: existing?.id ?? crypto.randomUUID(),
+    id: existing?.id ?? newClientId(),
     label: existing?.label ?? m.label,
     baseUrl: m.baseUrl,
     deviceId: m.deviceId,

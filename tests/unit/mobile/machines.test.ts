@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { FullNativeApi } from '../../../mobile/src/native';
-import { listMachines, removeMachine, getToken, addMachine, tokenKey } from '../../../mobile/src/machines/store';
+import { listMachines, removeMachine, getToken, addMachine, tokenKey, getClientId } from '../../../mobile/src/machines/store';
 import { checkReachable } from '../../../mobile/src/machines/reachability';
 
 function fakeNative(over: Partial<FullNativeApi> = {}): FullNativeApi & { kc: Map<string, string> } {
@@ -42,5 +42,26 @@ describe('machines', () => {
     expect(await getToken(m.id, native)).toBeNull();
     expect(native.kc.has(tokenKey(m.id))).toBe(false);
     expect(listMachines()).toEqual([]);
+  });
+});
+
+describe('machines on iOS 15.0-15.3 (no crypto.randomUUID)', () => {
+  beforeEach(() => {
+    const real = globalThis.crypto;
+    vi.stubGlobal('crypto', { getRandomValues: (b: Uint8Array) => real.getRandomValues(b) });
+    return () => vi.unstubAllGlobals();
+  });
+  const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+  it('getClientId still makes and keeps a uuid', () => {
+    const id = getClientId();
+    expect(id).toMatch(UUID);
+    expect(getClientId()).toBe(id);
+  });
+
+  it('addMachine still pairs', async () => {
+    const m = await addMachine({ label: 'desk', baseUrl: 'http://100.1.1.1:9', deviceId: 'd1', token: 't' }, fakeNative());
+    expect(m.id).toMatch(UUID);
+    expect(listMachines().map((x) => x.id)).toEqual([m.id]);
   });
 });
