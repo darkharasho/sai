@@ -152,6 +152,37 @@ describe('long-press link', () => {
     expect(document.querySelector('.link-ctx')).toBeNull();
   });
 
+  it('phone: click after a long-press is swallowed; menu stays open', () => {
+    setPhone(true);
+    const { link } = press();
+    act(() => { vi.advanceTimersByTime(600); });
+    fireEvent.touchEnd(link);
+    fireEvent.click(link);
+    expect((window.sai as any).openExternal).not.toHaveBeenCalled();
+    expect(document.querySelector('.link-ctx')).toBeTruthy();
+  });
+
+  it('phone: a plain tap still opens the link', () => {
+    setPhone(true);
+    const { link } = press();
+    act(() => { vi.advanceTimersByTime(100); });
+    fireEvent.touchEnd(link);
+    fireEvent.click(link);
+    expect((window.sai as any).openExternal).toHaveBeenCalledWith('https://example.com/x');
+    expect(document.querySelector('.link-ctx')).toBeNull();
+  });
+
+  it('phone: a tap after a long-press (no click in between) still opens the link', () => {
+    setPhone(true);
+    const { link } = press();
+    act(() => { vi.advanceTimersByTime(600); });
+    fireEvent.touchEnd(link);
+    fireEvent.touchStart(link, { touches: [{ clientX: 1, clientY: 1 }] });
+    fireEvent.touchEnd(link);
+    fireEvent.click(link);
+    expect((window.sai as any).openExternal).toHaveBeenCalled();
+  });
+
   it('desktop: touch does not open the menu', () => {
     press();
     act(() => { vi.advanceTimersByTime(600); });

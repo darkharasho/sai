@@ -49,6 +49,7 @@ export function useLinkContextMenu(onOpen?: (href: string) => void) {
   const cancelPress = useCallback(() => {
     if (pressTimer.current) { clearTimeout(pressTimer.current); pressTimer.current = null; }
   }, []);
+  const longPressFired = useRef(false);
   useEffect(() => cancelPress, [cancelPress]);
 
   const onTouchStart = useCallback((e: React.TouchEvent) => {
@@ -59,11 +60,22 @@ export function useLinkContextMenu(onOpen?: (href: string) => void) {
     const x = t?.clientX ?? 0;
     const y = t?.clientY ?? 0;
     cancelPress();
+    longPressFired.current = false;
     pressTimer.current = setTimeout(() => {
       pressTimer.current = null;
+      longPressFired.current = true;
       setMenu({ x, y, href });
     }, 500);
   }, [cancelPress]);
+
+  // The touchend after a long-press synthesizes a click on the link; swallow it
+  // (capture phase, so the <a> onClick never runs) and reset.
+  const onClickCapture = useCallback((e: React.MouseEvent) => {
+    if (!longPressFired.current) return;
+    longPressFired.current = false;
+    e.preventDefault();
+    e.stopPropagation();
+  }, []);
 
   const element = menu ? (
     <LinkContextMenu
@@ -73,7 +85,7 @@ export function useLinkContextMenu(onOpen?: (href: string) => void) {
     />
   ) : null;
 
-  return { onContextMenu, onTouchStart, onTouchMove: cancelPress, onTouchEnd: cancelPress, onTouchCancel: cancelPress, element };
+  return { onContextMenu, onTouchStart, onTouchMove: cancelPress, onTouchEnd: cancelPress, onTouchCancel: cancelPress, onClickCapture, element };
 }
 
 function LinkContextMenu({ x, y, href, onClose, onOpen }: MenuState & { onClose: () => void; onOpen?: () => void }) {

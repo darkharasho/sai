@@ -52,3 +52,11 @@ html[data-sai-phone] .toolbar-btn {
     color: inherit;
   }
 }
+
+/* Long-pressing a link opens SAI's own menu; suppress the iOS callout/preview. */
+html[data-sai-phone] .chat-msg a,
+html[data-sai-phone] .chat-msg [data-link-href] {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}

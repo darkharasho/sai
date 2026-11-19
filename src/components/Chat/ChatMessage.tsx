@@ -880,6 +880,7 @@ function ChatMessage({
       onTouchMove={linkMenu.onTouchMove}
       onTouchEnd={linkMenu.onTouchEnd}
       onTouchCancel={linkMenu.onTouchCancel}
+      onClickCapture={linkMenu.onClickCapture}
       {...effectiveEntryProps}
     >
       {linkMenu.element}
