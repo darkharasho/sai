@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { getNative, type FullNativeApi } from '../native';
 import { checkReachable } from './reachability';
 import { listMachines, removeMachine, renameMachine, type Machine } from './store';
+import type { V2Client } from '../v2/client';
 
 export type Reach = 'checking' | 'online' | 'offline';
 
@@ -25,7 +26,11 @@ export function useMachines(native: FullNativeApi = getNative()) {
 
   useEffect(() => { refresh(); }, [refresh]);
 
-  const remove = useCallback(async (id: string) => { await removeMachine(id, native); refresh(); }, [native, refresh]);
+  /** `client`: the machine's live connection, if any (push.unregister goes over it). */
+  const remove = useCallback(async (id: string, client: V2Client | null = null) => {
+    await removeMachine(id, native, client);
+    refresh();
+  }, [native, refresh]);
   const rename = useCallback((id: string, label: string) => { renameMachine(id, label); refresh(); }, [refresh]);
   return { machines, reach, refresh, remove, rename };
 }

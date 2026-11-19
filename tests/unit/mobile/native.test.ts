@@ -25,6 +25,29 @@ describe('native (Capacitor path)', () => {
     expect(kc.remove).toHaveBeenCalledWith({ key: 'k' });
   });
 
+  it('passes an access group only when given', async () => {
+    const n = createNative();
+    kc.get.mockResolvedValue({ value: 'k' });
+    await n.keychainGet('seal:m', { accessGroup: 'com.project96.sai.shared' });
+    await n.keychainSet('seal:m', 'v', { accessGroup: 'com.project96.sai.shared' });
+    await n.keychainRemove('seal:m', { accessGroup: 'com.project96.sai.shared' });
+    expect(kc.get).toHaveBeenCalledWith({ key: 'seal:m', accessGroup: 'com.project96.sai.shared' });
+    expect(kc.set).toHaveBeenCalledWith({ key: 'seal:m', value: 'v', accessGroup: 'com.project96.sai.shared' });
+    expect(kc.remove).toHaveBeenCalledWith({ key: 'seal:m', accessGroup: 'com.project96.sai.shared' });
+  });
+
+  it('buildEnv maps the provisioning env and falls back to production on an older shell', async () => {
+    const n = createNative();
+    (kc as Record<string, unknown>).buildEnv = vi.fn(async () => ({ env: 'development' }));
+    expect(await n.buildEnv!()).toBe('sandbox');
+    (kc as Record<string, unknown>).buildEnv = vi.fn(async () => ({ env: 'production' }));
+    expect(await n.buildEnv!()).toBe('production');
+    (kc as Record<string, unknown>).buildEnv = vi.fn(async () => { throw Object.assign(new Error('not implemented'), { code: 'UNIMPLEMENTED' }); });
+    expect(await n.buildEnv!()).toBe('production');
+    delete (kc as Record<string, unknown>).buildEnv;
+    expect(await n.buildEnv!()).toBe('production');
+  });
+
   it('http uses CapacitorHttp with connect/read timeouts', async () => {
     request.mockResolvedValue({ status: 200, data: '{"status":"ok"}' });
     const n = createNative();

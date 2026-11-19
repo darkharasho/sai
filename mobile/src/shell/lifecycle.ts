@@ -11,11 +11,14 @@ import type { ConnState } from '../v2/types';
  * client.resume(): a dead socket reconnects at once and every subscription
  * catches up from its last seq. Backgrounding never closes the client.
  */
-export function startLifecycle(getClient: () => V2Client | null): () => void {
+export function startLifecycle(getClient: () => V2Client | null, onActiveChange?: (isActive: boolean) => void): () => void {
   let stopped = false;
   let handle: { remove: () => Promise<void> | void } | null = null;
   const resume = () => { getClient()?.resume(); };
-  void CapApp.addListener('appStateChange', ({ isActive }) => { if (isActive) resume(); })
+  void CapApp.addListener('appStateChange', ({ isActive }) => {
+    if (isActive) resume();
+    onActiveChange?.(isActive);
+  })
     .then((h) => { if (stopped) void h.remove(); else handle = h; })
     .catch(() => { /* no App plugin (plain browser): the online event still resumes */ });
   window.addEventListener('online', resume);

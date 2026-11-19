@@ -12,12 +12,15 @@ import {
 import { isAccentId } from '../../../src/accents';
 import type { ChatMeta } from '../../../src/lib/chat/types';
 import type { RemoteWorkspace } from '../../../electron/services/remote/renderer-proxy';
-import { getNative } from '../native';
+import { getNative, type PushPermission } from '../native';
 import { newClientId } from '../v2/saiShim';
 import { useMachines } from '../machines/hooks';
 import { MachineList } from '../machines/MachineList';
 import { PairScreen } from '../machines/PairScreen';
 import { getToken, listMachines, type Machine } from '../machines/store';
+import { ensurePushRegistration, linkMachine, onPushIdentity } from '../push/registration';
+import { getPresence } from '../push/presence';
+import { parseTap, routeTap } from '../push/routing';
 import {
   connectTo, disconnect, getActive, getAppSettings, onActive, onAppSettings, type ActiveConnection,
 } from './connection';
@@ -87,14 +90,26 @@ export function PhoneApp() {
 
   useEffect(() => onActive(setConn), []);
   useEffect(() => onAppSettings(setSettings), []);
-  useEffect(() => startLifecycle(() => getActive()?.client ?? null), []);
+  const [notifPerm, setNotifPerm] = useState<PushPermission | null>(null);
+  const refreshNotifPerm = useCallback(() => {
+    const push = getNative().push;
+    if (!push) return;
+    void push.checkPermission().then(setNotifPerm, () => {});
+  }, []);
+  useEffect(() => startLifecycle(() => getActive()?.client ?? null, (isActive) => {
+    getPresence().setForeground(isActive);
+    if (isActive) refreshNotifPerm(); // back from iOS Settings
+  }), [refreshNotifPerm]);
   useEffect(() => trackViewport(), []);
   useAppearance(settings);
 
   const machine = useMemo(() => machinesApi.machines.find((m) => m.id === conn?.machineId) ?? null, [machinesApi.machines, conn]);
   const connState = useConnState(conn?.client ?? null);
 
+  // Only the latest openMachine applies (a notification tap can race the boot reconnect).
+  const openSeq = useRef(0);
   const openMachine = useCallback(async (m: Machine) => {
+    const seq = ++openSeq.current;
     // Already connected: keep its connection, subscriptions and selection.
     if (getActive()?.machineId === m.id) {
       setDrawerOpen(false);
@@ -102,6 +117,7 @@ export function PhoneApp() {
       return;
     }
     const token = await getToken(m.id).catch(() => null);
+    if (seq !== openSeq.current) return;
     if (!token) {
       showRepairToast(m.label, () => setView('pair'));
       setView('machines');
@@ -122,7 +138,56 @@ export function PhoneApp() {
     const last = list.find((m) => m.id === localStorage.getItem(ACTIVE_MACHINE_KEY));
     if (last) void openMachine(last);
     else setView(list.length ? 'machines' : 'pair');
+    // Push: only once something is paired (the permission prompt follows a pairing, never precedes it).
+    if (list.length) void ensurePushRegistration(getNative(), { prompt: true });
   }, [openMachine]);
+
+  // Push link: (re)send push.register on every auth_ok and whenever the relay identity changes.
+  useEffect(() => {
+    if (!conn) return;
+    const n = getNative();
+    const link = () => {
+      const m = listMachines().find((x) => x.id === conn.machineId);
+      if (m) void linkMachine(m, conn.client, n);
+    };
+    const offAuth = conn.client.onAuth(link);
+    const offId = onPushIdentity(n, link);
+    if (conn.client.connected) link();
+    return () => { offAuth(); offId(); };
+  }, [conn]);
+
+  // Presence: the chat on screen, re-sent on every auth_ok.
+  useEffect(() => getPresence().attach(conn?.client ?? null), [conn]);
+  useEffect(() => { getPresence().setChat(view === 'chat' ? sel.chatId : null); }, [view, sel.chatId]);
+
+  // Notification taps: machine → workspace → chat; an unknown machine opens the list.
+  const onTap = useRef<(data: Record<string, unknown>) => void>(() => {});
+  onTap.current = (data) => {
+    const route = routeTap(parseTap(data), listMachines());
+    if (route.kind === 'machines') {
+      setDrawerOpen(false);
+      machinesApi.refresh();
+      setView(listMachines().length ? 'machines' : 'pair');
+      return;
+    }
+    const next: Selection = { projectPath: route.projectPath, chatId: route.chatId };
+    if (!route.projectPath) {
+      void openMachine(route.machine);
+      return;
+    }
+    saveSelection(route.machine.id, next);
+    if (getActive()?.machineId === route.machine.id) {
+      openSeq.current++; // a slower open of another machine must not win
+      setSel(next);
+      setDrawerOpen(false);
+      setView('chat');
+    } else {
+      void openMachine(route.machine);
+    }
+  };
+  useEffect(() => getNative().push?.onAction((d) => onTap.current(d)), []);
+
+  useEffect(() => { if (view === 'machines') refreshNotifPerm(); }, [view, refreshNotifPerm]);
 
   useConnectionToasts(conn?.client ?? null, machine?.label ?? 'desktop', () => setView('pair'));
 
@@ -182,14 +247,19 @@ export function PhoneApp() {
     if (getActive()?.machineId === m.id) disconnect();
     machinesApi.refresh();
     void openMachine(m);
-  }, [machinesApi, openMachine]);
+    // After a successful pairing: ask for notification permission (iOS shows it once).
+    void ensurePushRegistration(getNative(), { prompt: true }).then(refreshNotifPerm);
+  }, [machinesApi, openMachine, refreshNotifPerm]);
 
   const onRemove = useCallback(async (id: string) => {
-    if (getActive()?.machineId === id) {
+    const live = getActive()?.machineId === id ? getActive() : null;
+    // push.unregister goes out synchronously over the live socket, before it closes.
+    const removing = machinesApi.remove(id, live?.client ?? null);
+    if (live) {
       disconnect();
       localStorage.removeItem(ACTIVE_MACHINE_KEY);
     }
-    await machinesApi.remove(id).catch(() => showToast("Couldn't remove that machine"));
+    await removing.catch(() => showToast("Couldn't remove that machine"));
     setView(listMachines().length ? 'machines' : 'pair');
   }, [machinesApi]);
 
@@ -215,6 +285,7 @@ export function PhoneApp() {
           onRename={machinesApi.rename}
           onRemove={(id) => { void onRemove(id); }}
           onAdd={() => setView('pair')}
+          notifications={notifPerm ? { permission: notifPerm, onOpenSettings: () => { void getNative().openSettings?.(); } } : undefined}
         />
         <Toasts />
       </div>

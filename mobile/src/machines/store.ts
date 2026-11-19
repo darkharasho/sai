@@ -1,5 +1,7 @@
 import { getNative, type FullNativeApi } from '../native';
 import { newClientId } from '../../../src/lib/clientId';
+import { unlinkMachine } from '../push/registration';
+import type { V2Client } from '../v2/client';
 
 export interface Machine {
   id: string;
@@ -59,8 +61,13 @@ export function renameMachine(id: string, label: string): void {
   save(listMachines().map((m) => (m.id === id ? { ...m, label } : m)));
 }
 
-/** Deletes the token and the list entry. Closing a live connection is the caller's job. */
-export async function removeMachine(id: string, native: FullNativeApi = getNative()): Promise<void> {
+/**
+ * Unlinks push (push.unregister over `client` when it is this machine's live
+ * connection, relay revoke, seal key), then deletes the token and the list
+ * entry. Closing a live connection is the caller's job, after this resolves.
+ */
+export async function removeMachine(id: string, native: FullNativeApi = getNative(), client: V2Client | null = null): Promise<void> {
+  await unlinkMachine({ id }, client, native);
   await native.keychainRemove(tokenKey(id));
   save(listMachines().filter((m) => m.id !== id));
 }
