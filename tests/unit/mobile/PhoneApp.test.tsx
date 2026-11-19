@@ -66,6 +66,37 @@ describe('PhoneApp', () => {
     expect(within(drawer).getByText('proj')).toBeTruthy();
     expect(FakeSocket.all).toHaveLength(1); // same connection, no reconnect
   });
+  it("opens the desktop's focused workspace and chat, and follows it only when it moves", async () => {
+    const m = await addMachine({ label: 'desk', baseUrl: 'http://desk:17830', deviceId: 'd1', token: 'tok' }, getNative());
+    localStorage.setItem('sai.activeMachine.v1', m.id);
+    render(<PhoneApp />);
+    await waitFor(() => expect(FakeSocket.all.length).toBe(1));
+    act(() => { last().open(); last().authOk(); });
+    await waitFor(() => expect(sentOf('workspaces.subscribe').length).toBeGreaterThan(0));
+    const list = (active: string, chatId: string) => ({ type: 'workspaces.changed', workspaces: [
+      { projectPath: '/a', name: 'alpha', kind: 'project', state: active === '/a' ? 'active' : 'open', ...(active === '/a' ? { activeChatId: chatId } : {}) },
+      { projectPath: '/b', name: 'beta', kind: 'project', state: active === '/b' ? 'active' : 'open', ...(active === '/b' ? { activeChatId: chatId } : {}) },
+    ] });
+    act(() => { last().recv(list('/b', 'desk-chat')); });
+    await waitFor(() => expect(screen.getByTestId('chat-host').getAttribute('data-chat-id')).toBe('desk-chat'));
+
+    // The phone moves elsewhere: an unchanged desktop focus doesn't pull it back.
+    fireEvent.click(screen.getByRole('button', { name: 'New chat' }));
+    const phoneChat = screen.getByTestId('chat-host').getAttribute('data-chat-id');
+    expect(phoneChat).not.toBe('desk-chat');
+    act(() => { last().recv(list('/b', 'desk-chat')); });
+    expect(screen.getByTestId('chat-host').getAttribute('data-chat-id')).toBe(phoneChat);
+
+    // The drawer offers the desktop's chat back.
+    fireEvent.click(screen.getByRole('button', { name: 'Open menu' }));
+    fireEvent.click(await screen.findByTestId('desktop-focus'));
+    expect(screen.getByTestId('chat-host').getAttribute('data-chat-id')).toBe('desk-chat');
+
+    // The desktop switches chats: the phone follows.
+    act(() => { last().recv(list('/a', 'other-chat')); });
+    await waitFor(() => expect(screen.getByTestId('chat-host').getAttribute('data-chat-id')).toBe('other-chat'));
+  });
+
   it('lists the workspace chats first and keeps each workspace on its last chat', async () => {
     const m = await addMachine({ label: 'desk', baseUrl: 'http://desk:17830', deviceId: 'd1', token: 'tok' }, getNative());
     localStorage.setItem('sai.activeMachine.v1', m.id);

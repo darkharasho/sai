@@ -1,5 +1,5 @@
 import React from 'react';
-import { Folder, Monitor, Plus, Settings2 } from 'lucide-react';
+import { Folder, Monitor, MonitorUp, Plus, Settings2 } from 'lucide-react';
 import SaiLogo from '../../../src/components/SaiLogo';
 import type { ChatMeta } from '../../../src/lib/chat/types';
 import type { RemoteWorkspace } from '../../../electron/services/remote/renderer-proxy';
@@ -24,6 +24,9 @@ export interface DrawerProps {
   activeTitle: string | null;
   onPickChat(chatId: string): void;
   onNewChat(): void;
+  /** Set when the desktop has a chat open that the phone isn't showing. */
+  desktopFocus?: { workspaceName: string | null } | null;
+  onOpenDesktopFocus?(): void;
 }
 
 export function chatTitleOf(meta: Pick<ChatMeta, 'title'> | null | undefined): string {
@@ -50,6 +53,12 @@ export function Drawer(p: DrawerProps) {
           <SaiLogo mode="static" size={20} />
           <span>SAI</span>
         </div>
+        {p.desktopFocus && p.onOpenDesktopFocus && (
+          <button type="button" className="sai-phone-row sai-phone-desktop-focus" data-testid="desktop-focus" onClick={p.onOpenDesktopFocus}>
+            <MonitorUp size={16} className="sai-phone-row-icon" aria-hidden="true" />
+            <span className="sai-phone-row-main">Open the desktop's chat{p.desktopFocus.workspaceName ? ` · ${p.desktopFocus.workspaceName}` : ''}</span>
+          </button>
+        )}
         {p.activeProjectPath && (
           <section>
             <h2 className="sai-phone-drawer-h">{workspaceName ? `Chats · ${workspaceName}` : 'Chats'}</h2>

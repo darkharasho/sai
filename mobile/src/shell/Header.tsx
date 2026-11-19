@@ -24,7 +24,8 @@ export interface HeaderProps {
   chatTitle: string | null;
   status: ChatStatus | null;
   onMenu(): void;
-  onNewChat(): void;
+  /** Absent until a workspace is picked. */
+  onNewChat?: () => void;
   onMachines(): void;
 }
 
@@ -59,11 +60,13 @@ export function Header({ workspaceName, chatTitle, status, onMenu, onNewChat, on
           aria-label={STATUS_LABEL[status]}
         />
       )}
+      {onNewChat && (
+        <button type="button" className="sai-phone-icon-btn" aria-label="New chat" onClick={onNewChat}><SquarePen size={20} /></button>
+      )}
       <div className="sai-phone-menu-wrap" ref={menuRef}>
         <button type="button" className="sai-phone-icon-btn" aria-label="More" aria-expanded={menuOpen} onClick={() => setMenuOpen((o) => !o)}><MoreHorizontal size={22} /></button>
         {menuOpen && (
           <div role="menu" className="sai-phone-menu">
-            <button role="menuitem" type="button" onClick={() => { setMenuOpen(false); onNewChat(); }}><SquarePen size={17} aria-hidden="true" />New chat</button>
             <button role="menuitem" type="button" onClick={() => { setMenuOpen(false); onMachines(); }}><MonitorSmartphone size={17} aria-hidden="true" />Machines</button>
           </div>
         )}

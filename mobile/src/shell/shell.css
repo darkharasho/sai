@@ -342,3 +342,7 @@ html[data-sai-phone] body {
   color: var(--text);
   font-size: var(--text-md);
 }
+
+/* Jump to the chat open on the desktop. */
+.sai-phone-desktop-focus { margin-bottom: 10px; border: 1px dashed var(--border-accent); color: var(--accent); }
+.sai-phone-desktop-focus .sai-phone-row-icon { color: var(--accent); }

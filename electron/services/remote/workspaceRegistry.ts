@@ -22,6 +22,7 @@ function sanitize(raw: unknown): RemoteWorkspace | null {
   }
   if (r.status && typeof r.status === 'object') out.status = r.status as RemoteWorkspace['status'];
   if (typeof r.state === 'string' && STATES.has(r.state)) out.state = r.state as RemoteWorkspace['state'];
+  if (typeof r.activeChatId === 'string' && r.activeChatId && r.activeChatId.length <= 128) out.activeChatId = r.activeChatId;
   return out;
 }
 
