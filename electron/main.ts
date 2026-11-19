@@ -95,7 +95,11 @@ import { registerFsHandlers } from './services/fs';
 import { registerUpdater } from './services/updater';
 import { registerUsageHandlers, destroyUsagePolling } from './services/usage';
 import { destroyAll, startSuspendTimer, stopSuspendTimer, getAll, remove, suspend, getOrCreate as getOrCreateWorkspace, DEFAULT_SUSPEND_TIMEOUT, listAcpLiveScopes, onWorkspaceCreated } from './services/workspace';
-import { initFocusTracking, setActiveWorkspace } from './services/notify';
+import { initFocusTracking, setActiveWorkspace, getDesktopPresence } from './services/notify';
+import { PushRegistry, bindRevocation } from './services/push/registry';
+import { PhonePresence } from './services/push/presence';
+import { createPushSender } from './services/push/sender';
+import { createPushTriggers } from './services/push/triggers';
 import { devlog, devlogEnabled, devlogFor, devlogPath } from './services/devlog';
 import { readIntactClipboardPng } from './services/clipboardImage';
 import { startIdleMemoryPurge, collectRendererGarbage, logPurge } from './services/idleMemoryPurge';
@@ -303,6 +307,11 @@ let rendererProxy: RendererProxy | null = null;
 let blobStore: BlobStore | null = null;
 let bridge: BridgeServer | null = null;
 let remoteKvPath: string | null = null;
+// Push notifications to paired phones (electron/services/push). The registry
+// lives with the pairing store; triggers start once both it and the chat log exist.
+let pushRegistry: PushRegistry | null = null;
+const phonePresence = new PhonePresence();
+let pushTriggers: { dispose(): void } | null = null;
 let activeSessionBroadcast: ((payload: { projectPath: string; scope: string; sessionId: string }) => void) | null = null;
 let lastActiveSession: { projectPath: string; scope: string; sessionId: string } | null = null;
 // Otto uses 17829; pick a distinct port so both can run side by side.
@@ -369,6 +378,10 @@ async function getOrInitRemote(): Promise<RemoteModule> {
   const pairingPath = path.join(userDataDir, 'sai-remote-pairings.json');
   remoteKvPath = path.join(userDataDir, 'sai-remote-kv.json');
   pairing = new PairingStore(pairingPath);
+  pushRegistry = new PushRegistry(path.join(userDataDir, 'push-registrations.json'), (err) =>
+    devlog('push', 'registryError', { error: err instanceof Error ? err.message : String(err) }));
+  bindRevocation(pairing, pushRegistry);
+  initPushTriggers();
   bus = new SessionBus();
   setRemoteBus(bus);
   blobStore = new BlobStore();
@@ -418,6 +431,7 @@ async function getOrInitRemote(): Promise<RemoteModule> {
           modelCache: modelCacheDir(),
         }),
         backgroundTasks: backgroundTasksFeed,
+        pushNotifications: { registry: pushRegistry!, presence: phonePresence },
         sendPrompt: (args) => {
           // Persist base64 image attachments to temp files (parity with the
           // desktop path, which expects on-disk paths). Fire-and-forget:
@@ -512,6 +526,36 @@ async function getOrInitRemote(): Promise<RemoteModule> {
     },
   });
   return remote;
+}
+
+/** settings.json pushNotifications; missing means on. */
+function pushNotificationsEnabled(): boolean {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'settings.json'), 'utf-8')).pushNotifications !== false;
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * Starts the push triggers once both the chat log and the push registry exist
+ * (either can come up first). With no registered phone a trigger stops at a
+ * cheap check: nothing is sealed, read or sent.
+ */
+function initPushTriggers(): void {
+  if (pushTriggers || !chatLog || !chatLogStore || !pushRegistry) return;
+  const log = chatLog;
+  const store = chatLogStore;
+  const registry = pushRegistry;
+  const send = createPushSender({ registry, log: (event, data) => devlog('push', event, data) });
+  pushTriggers = createPushTriggers({
+    chatlog: { onEntry: (cb) => log.onAppend(cb), state: (id) => store.state(id), meta: (id) => store.meta(id) },
+    registry,
+    presence: phonePresence,
+    desktopPresence: getDesktopPresence,
+    send,
+    enabled: pushNotificationsEnabled,
+  });
 }
 
 async function getEnabledFlag(): Promise<boolean> {
@@ -777,6 +821,7 @@ function createWindow() {
     });
   }
   initChatLog();
+  initPushTriggers();
   registerClaudeHandlers(mainWindow);
   initSudoService(emitChatMessage);
   registerJiraHandlers();

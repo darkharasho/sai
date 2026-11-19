@@ -48,6 +48,7 @@ async function verifyToken(token: string, saltB64: string, hashB64: string): Pro
 export class PairingStore {
   private rows: Row[] = [];
   private writeChain: Promise<void> = Promise.resolve();
+  private readonly revokeListeners = new Set<(deviceId: string) => void>();
 
   constructor(private readonly path: string, private readonly now: () => number = Date.now) {
     if (path !== ':memory:') this.loadSync();
@@ -80,12 +81,14 @@ export class PairingStore {
 
   async issue(label: string, clientId?: string | null): Promise<{ deviceId: string; token: string }> {
     const cid = clientId ?? null;
+    const superseded: string[] = [];
     if (cid !== null) {
       const now = this.now();
       for (const row of this.rows) {
-        if (row.clientId === cid && !row.revokedAt) row.revokedAt = now;
+        if (row.clientId === cid && !row.revokedAt) { row.revokedAt = now; superseded.push(row.id); }
       }
     }
+    for (const id of superseded) this.emitRevoke(id);
     const deviceId = randomUUID();
     const token = randomBytes(32).toString('base64url');
     const { salt, hash } = await hashToken(token);
@@ -118,7 +121,18 @@ export class PairingStore {
     if (row && !row.revokedAt) {
       row.revokedAt = this.now();
       void this.persist();
+      this.emitRevoke(deviceId);
     }
+  }
+
+  /** Called with the deviceId of every device revoked from now on (revoke, or a re-pair superseding it). */
+  onRevoke(cb: (deviceId: string) => void): () => void {
+    this.revokeListeners.add(cb);
+    return () => { this.revokeListeners.delete(cb); };
+  }
+
+  private emitRevoke(deviceId: string): void {
+    for (const cb of this.revokeListeners) { try { cb(deviceId); } catch { /* isolate one listener */ } }
   }
 
   list(): PairedDevice[] {

@@ -140,6 +140,8 @@ export interface BridgeServerOpts {
   slashCommands?: ChatV2Opts['slashCommands'];
   readChatFile?: ChatV2Opts['readFile'];
   backgroundTasks?: ChatV2Opts['backgroundTasks'];
+  /** v2 push.register / push.unregister / phone.presence (ChatV2Opts.push). */
+  pushNotifications?: ChatV2Opts['push'];
 }
 
 /** The only paths with CORS (the Capacitor app pairs and probes from its own origin). */
@@ -187,6 +189,7 @@ export class BridgeServer {
       slashCommands: opts.slashCommands,
       readFile: opts.readChatFile,
       backgroundTasks: opts.backgroundTasks,
+      push: opts.pushNotifications,
     });
     // Track the latest workspace.status + github.watcher events so we can
     // replay them when a new phone subscribes mid-flight.
@@ -475,7 +478,7 @@ export class BridgeServer {
       // workspace/chat-list pushes and app settings.
       if (isV2FrameType(msg.type)) {
         try {
-          await this.chatV2.handle(ws, msg);
+          await this.chatV2.handle(ws, msg, { deviceId });
         } catch (err) {
           try {
             ws.send(JSON.stringify({ v: 2, type: 'chat.error', code: 'internal', message: err instanceof Error ? err.message : String(err) }));

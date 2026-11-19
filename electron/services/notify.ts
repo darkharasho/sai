@@ -28,6 +28,14 @@ export function initFocusTracking(win: BrowserWindow) {
   devlog('notify', 'focus.init', { focused: windowFocused });
 }
 
+/**
+ * The event-tracked window focus and active workspace, as notifyCompletion
+ * reads them (push notifications skip the chat the user is looking at).
+ */
+export function getDesktopPresence(): { focused: boolean; activeWorkspace: string } {
+  return { focused: windowFocused, activeWorkspace: activeWorkspacePath };
+}
+
 export function setActiveWorkspace(projectPath: string) {
   const prev = activeWorkspacePath;
   activeWorkspacePath = projectPath;

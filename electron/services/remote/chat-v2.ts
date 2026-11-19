@@ -10,6 +10,8 @@ import type { RemoteWorkspace } from './renderer-proxy';
 import type { WorkspaceRegistry } from './workspaceRegistry';
 import type { AppSettingsFeed } from './appSettings';
 import type { FileReadResult } from './fileRead';
+import { parsePushRegistration, type PushRegistry } from '../push/registry';
+import type { PhonePresence } from '../push/presence';
 
 type Provider = ChatSettings['provider'];
 
@@ -45,7 +47,15 @@ export interface ChatV2Opts {
   readFile?: (kind: unknown, ref: unknown) => Promise<FileReadResult> | FileReadResult;
   /** chat.background: the claude:backgroundTasks snapshots. */
   backgroundTasks?: BackgroundTasksSource;
+  /** push.register / push.unregister / phone.presence (push notifications). */
+  push?: {
+    registry: Pick<PushRegistry, 'set' | 'delete'>;
+    presence: Pick<PhonePresence, 'set' | 'clear'>;
+  };
 }
+
+/** Who sent a frame: the paired device bridge auth resolved (auth_ok). */
+export interface V2FrameContext { deviceId?: string | null }
 
 /** Most chats.subscribe projects one socket may hold. */
 export const MAX_CHAT_LIST_SUBS = 32;
@@ -64,7 +74,10 @@ const MAX_IMAGE_BYTES = 24 * 1024 * 1024;
 const PROVIDERS = ['claude', 'codex', 'gemini', 'kimi'] as const;
 const SETTINGS_KEYS = ['provider', 'model', 'permMode', 'effort', 'approvalMode', 'conversationMode'] as const;
 /** Frame types outside the chat./chats. namespaces that ChatV2 handles. */
-const OTHER_V2_TYPES = new Set(['workspaces.subscribe', 'app.settings', 'models.list', 'slash.list', 'file.read']);
+const OTHER_V2_TYPES = new Set([
+  'workspaces.subscribe', 'app.settings', 'models.list', 'slash.list', 'file.read',
+  'push.register', 'push.unregister', 'phone.presence',
+]);
 
 interface Sub {
   /** Highest seq sent to the client. */
@@ -152,7 +165,10 @@ export class ChatV2 {
   constructor(private readonly opts: ChatV2Opts) {}
 
   /** Handles one authenticated v2 frame (see isV2FrameType). */
-  async handle(ws: V2Socket, msg: Frame): Promise<void> {
+  async handle(ws: V2Socket, msg: Frame, ctx: V2FrameContext = {}): Promise<void> {
+    if (msg.type === 'push.register' || msg.type === 'push.unregister' || msg.type === 'phone.presence') {
+      return this.pushFrame(ws, msg, ctx.deviceId ?? null);
+    }
     if (msg.type === 'workspaces.subscribe') return this.subscribeWorkspaces(ws, msg.reqId);
     if (msg.type === 'app.settings') return this.appSettings(ws, msg.reqId);
     if (msg.type === 'models.list') return this.listModels(ws, msg.reqId, msg.provider);
@@ -235,6 +251,7 @@ export class ChatV2 {
   /** Drops every subscription the socket holds (socket closed). */
   detach(ws: V2Socket): void {
     this.closed.add(ws);
+    this.opts.push?.presence.clear(ws);
     const ex = this.extras.get(ws);
     if (ex) {
       for (const c of ex.chats.values()) { c.unsub(); if (c.timer) clearTimeout(c.timer); }
@@ -327,6 +344,38 @@ export class ChatV2 {
     let settings;
     try { settings = feed.get(); } catch (err) { return this.error(ws, null, 'read_failed', errText(err)); }
     this.send(ws, { type: 'app.settings.result', reqId, settings });
+  }
+
+  // ─── push notifications ────────────────────────────────────────────────────
+
+  /**
+   * push.register {reqId, pushId, sendSecret, secretId, sealKey, keyId, env}
+   * → push.registered {reqId}; a replay (reconnect) is acked without a write.
+   * push.unregister {reqId} → push.unregistered {reqId}.
+   * phone.presence {chatId: string|null, foreground} (no reply; per socket).
+   * Keyed by the authenticated deviceId, never by anything the phone sends.
+   */
+  private pushFrame(ws: V2Socket, msg: Frame, deviceId: string | null): void {
+    const push = this.opts.push;
+    if (!push) return this.error(ws, null, 'unavailable', 'push notifications are not available', msg.reqId);
+    if (!deviceId) return this.error(ws, null, 'unauthorized', 'no paired device', msg.reqId);
+    if (msg.type === 'phone.presence') {
+      if (typeof msg.foreground !== 'boolean') return;
+      const chatId = msg.chatId === null ? null : chatIdOf(msg.chatId);
+      if (msg.chatId !== null && !chatId) return;
+      push.presence.set(deviceId, ws, { chatId, foreground: msg.foreground });
+      return;
+    }
+    if (msg.type === 'push.unregister') {
+      push.registry.delete(deviceId);
+      return this.send(ws, { type: 'push.unregistered', reqId: msg.reqId });
+    }
+    const reg = parsePushRegistration(msg);
+    if ('error' in reg) return this.error(ws, null, 'bad_request', `invalid ${reg.error}`, msg.reqId);
+    try { push.registry.set(deviceId, reg); } catch (err) {
+      return this.error(ws, null, 'internal', errText(err), msg.reqId);
+    }
+    this.send(ws, { type: 'push.registered', reqId: msg.reqId });
   }
 
   // ─── models, slash commands, files ─────────────────────────────────────────
