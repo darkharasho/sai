@@ -138,7 +138,7 @@ describe('client state', () => {
     let s = reduceMany(claude(), [
       e(1, { type: 'user_message', clientId: 'u1', text: 'first', origin: 'desktop' }),
       e(2, { type: 'streaming_start', turnSeq: 1 }),
-      e(3, { type: 'user_message', clientId: 'u2', text: 'second', origin: 'desktop', taskId: 't-9' }),
+      e(3, { type: 'user_message', clientId: 'u2', text: 'second', origin: 'desktop', taskId: 't-9', queued: true }),
       e(4, { type: 'queue_added', item: { clientId: 'u2', text: 'second', queuedAt: 1, taskId: 't-9', images: ['data:x'] } }),
       e(5, assistant(1, { type: 'text', text: 'reply' })),
     ]);
@@ -160,9 +160,19 @@ describe('client state', () => {
     expect(s.messages.map(m => m.role)).toEqual(['user', 'assistant', 'user', 'assistant']);
   });
 
+  it('replay of an older log (unmarked user_message then queue_added) still holds the bubble until sent', () => {
+    let s = reduceMany(claude(), [
+      e(1, { type: 'user_message', clientId: 'u2', text: 'second', origin: 'desktop' }),
+      e(2, { type: 'queue_added', item: { clientId: 'u2', text: 'second', queuedAt: 1 } }),
+    ]);
+    expect(s.messages).toEqual([]);
+    s = reduceChat(s, e(3, { type: 'queue_removed', clientId: 'u2', sent: true }));
+    expect(s.messages.map(m => m.id)).toEqual(['u2']);
+  });
+
   it('a queued item removed by the user never reaches the transcript', () => {
     const s = reduceMany(claude(), [
-      e(1, { type: 'user_message', clientId: 'u2', text: 'second', origin: 'desktop' }),
+      e(1, { type: 'user_message', clientId: 'u2', text: 'second', origin: 'desktop', queued: true }),
       e(2, { type: 'queue_added', item: { clientId: 'u2', text: 'second', queuedAt: 1 } }),
       e(3, { type: 'queue_removed', clientId: 'u2' }),
     ]);

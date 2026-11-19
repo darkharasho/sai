@@ -257,4 +257,61 @@ describe('ChatPanel: the queue lives in the log', () => {
     expect(inputProps.messageQueue).toEqual([expect.objectContaining({ id: 'q-old', text: 'from before' })]);
     expect(contents()).toEqual([]);
   });
+
+  it('the strip shows the short composer text, not the pasted context', async () => {
+    await mount();
+    await startLogTurn();
+    const full = '[Terminal output]\n```\nls\n```\n\n@/project/a.ts\n\nfix it';
+    await act(async () => { await inputProps.onQueue('fix it', full); });
+    await flushChatlog();
+    expect(log.commands('send')[0]).toMatchObject({ text: full, label: 'fix it' });
+    expect(inputProps.messageQueue).toEqual([expect.objectContaining({ text: 'fix it', fullText: full })]);
+    // Sent as typed (with context) once it drains.
+    await emitChat(sai, { type: 'done', projectPath: P, scope: 'c1', turnSeq: 1 });
+    expect(sai.claudeSend.mock.calls[0][1]).toBe(full);
+  });
+
+  it('send-now of an item main already drained does not send it again', async () => {
+    await mount();
+    await startLogTurn();
+    await act(async () => { await inputProps.onQueue('once', 'once'); });
+    await flushChatlog();
+    const [item] = inputProps.messageQueue;
+    // The click lands while the strip still shows the item, but main drains it first.
+    const staleSendNow = inputProps.onQueueSendNow;
+    await emitChat(sai, { type: 'done', projectPath: P, scope: 'c1', turnSeq: 1 });
+    expect(sai.claudeSend).toHaveBeenCalledTimes(1);
+    await act(async () => { await staleSendNow(item.id); });
+    await flushChatlog();
+    expect(sai.claudeSend).toHaveBeenCalledTimes(1);
+    expect(sai.claudeStop).not.toHaveBeenCalled();
+    expect(log.commands('send')).toHaveLength(1);
+  });
 });
+
+describe('ChatPanel: command palette sends', () => {
+  it('palette /compact mid-turn queues behind the running turn instead of compacting now', async () => {
+    const sendTextRef: { current: ((t: string) => void) | null } = { current: null };
+    sai.claudeCompact = vi.fn();
+    await mount({ sendTextRef } as any);
+    await startLogTurn();
+    await act(async () => { sendTextRef.current!('/compact'); });
+    await flushChatlog();
+    expect(sai.claudeCompact).not.toHaveBeenCalled();
+    expect(log.commands('send')[0]).toMatchObject({ text: '/compact' });
+    expect(log.commands('send')[0].now).toBeUndefined();
+    expect(inputProps.messageQueue.map((q: any) => q.text)).toEqual(['/compact']);
+    expect(sai.claudeStop).not.toHaveBeenCalled();
+  });
+
+  it('palette /compact while idle compacts right away', async () => {
+    const sendTextRef: { current: ((t: string) => void) | null } = { current: null };
+    sai.claudeCompact = vi.fn();
+    await mount({ sendTextRef } as any);
+    await act(async () => { sendTextRef.current!('/compact'); });
+    await flushChatlog();
+    expect(sai.claudeCompact).toHaveBeenCalledTimes(1);
+    expect(log.commands('send')).toHaveLength(0);
+  });
+});
+

@@ -87,7 +87,7 @@ import { registerGitHandlers } from './services/git';
 import { registerFsHandlers } from './services/fs';
 import { registerUpdater } from './services/updater';
 import { registerUsageHandlers, destroyUsagePolling } from './services/usage';
-import { destroyAll, startSuspendTimer, stopSuspendTimer, getAll, remove, suspend, getOrCreate as getOrCreateWorkspace, DEFAULT_SUSPEND_TIMEOUT, listAcpLiveScopes } from './services/workspace';
+import { destroyAll, startSuspendTimer, stopSuspendTimer, getAll, remove, suspend, getOrCreate as getOrCreateWorkspace, DEFAULT_SUSPEND_TIMEOUT, listAcpLiveScopes, onWorkspaceCreated } from './services/workspace';
 import { initFocusTracking, setActiveWorkspace } from './services/notify';
 import { devlog, devlogEnabled, devlogFor, devlogPath } from './services/devlog';
 import { readIntactClipboardPng } from './services/clipboardImage';
@@ -246,6 +246,11 @@ function initChatLog(): void {
     started: (chatId) => commands.onTurnStarted(chatId),
     ended: (chatId, ev) => commands.onTurnEnded(chatId, ev),
     idleDone: (chatId) => commands.onIdleDone(chatId),
+    opened: (chatId) => commands.onChatOpened(chatId),
+  });
+  // A workspace appearing can make a provider dispatchable: retry persisted queues (gated as usual).
+  onWorkspaceCreated(() => {
+    if (chatLogStore) commands.resumeQueues(chatLogStore.queuedChatIds());
   });
   ipcMain.handle('chatlog:command', (_e, cmd: ChatCommand) => commands.run(cmd));
   chatCommands = commands;

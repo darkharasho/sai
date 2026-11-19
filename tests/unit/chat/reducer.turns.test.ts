@@ -203,6 +203,29 @@ describe('load guard', () => {
     expect(s.messages[2]).toMatchObject({ id: 'e4', content: 'resume failed' });
   });
 
+  it('a send queued inside the quiet window keeps it: no bubble, the killed agent\'s error stays silent', () => {
+    let s = reduceMany(started(1), [
+      e(2, { type: 'load_guard', provider: 'claude', id: 'lg', loadGuard: killed }, 2000),
+      // Main logs a queued send's user_message marked queued, then queue_added.
+      e(3, { type: 'user_message', clientId: 'u1', text: 'later', origin: 'desktop', queued: true }, 2100),
+      e(4, { type: 'queue_added', item: { clientId: 'u1', text: 'later', queuedAt: 2100 } }, 2100),
+      e(5, { type: 'error', text: 'process crashed' }, 2200),
+    ]);
+    expect(s.turn.loadGuardEnded).toBe(true);
+    expect(s.turn.streaming).toBe(false);
+    expect(s.messages.map(m => m.id)).toEqual(['lg']);
+    expect(s.queue.map(q => q.clientId)).toEqual(['u1']);
+    // The drain: the next turn starts, then the item leaves the queue as sent.
+    s = reduceMany(s, [
+      e(6, { type: 'streaming_start', turnSeq: 2 }, 20_000),
+      e(7, { type: 'queue_removed', clientId: 'u1', sent: true }, 20_001),
+      e(8, { type: 'assistant', turnSeq: 2, message: { content: [{ type: 'text', text: 'done it' }] } }, 20_002),
+    ]);
+    expect(s.messages.filter(m => m.id === 'u1')).toHaveLength(1);
+    expect(s.messages.map(m => m.role)).toEqual(['system', 'user', 'assistant']);
+    expect(s.messages[1]).toMatchObject({ id: 'u1', content: 'later', timestamp: 20_001 });
+  });
+
   it('streaming_start closes the quiet window', () => {
     const s = reduceMany(started(1), [
       e(2, { type: 'load_guard', provider: 'claude', id: 'lg', loadGuard: killed }, 2000),

@@ -41,6 +41,7 @@ function wire(log: ChatLogService, cmds: ChatCommands) {
     started: (id) => cmds.onTurnStarted(id),
     ended: (id, ev) => cmds.onTurnEnded(id, ev),
     idleDone: (id) => cmds.onIdleDone(id),
+    opened: (id) => cmds.onChatOpened(id),
   });
 }
 
@@ -578,5 +579,73 @@ describe('Task 9 dogfood scenarios (log-driven)', () => {
     expect(d.send).toHaveBeenCalledTimes(1);
     expect((d.send as any).mock.calls[0][1].prompt).toBe('after');
     expect(store.state('c1')!.queue).toEqual([]);
+  });
+});
+
+describe('Task 9 fix round 1', () => {
+  it('a queued send logs its user_message marked queued (an immediate one is not)', async () => {
+    const { store, log, d, cmds } = mk();
+    await cmds.run(send('u1', 'first'));
+    startTurn(log, 1);
+    d.setBusy(true);
+    await cmds.run(send('u2', 'later', { label: 'short' }));
+    const users = store.read('c1', 0).entries.filter((e) => e.ev.type === 'user_message');
+    expect(users.map((e) => [e.ev.clientId, e.ev.queued === true])).toEqual([['u1', false], ['u2', true]]);
+    expect(store.state('c1')!.queue[0]).toMatchObject({ clientId: 'u2', text: 'later', label: 'short' });
+    expect(store.state('c1')!.messages.map((m) => m.id)).toEqual(['u1']);
+  });
+
+  it('a paused send to a new chat is marked queued too', async () => {
+    const { store, d, cmds } = mk();
+    d.setPaused(true);
+    await cmds.run(send('u1', 'held'));
+    const [user] = store.read('c1', 0).entries.filter((e) => e.ev.type === 'user_message');
+    expect(user.ev.queued).toBe(true);
+    expect(store.state('c1')!.messages).toEqual([]);
+  });
+
+  it('queueRemove fails for an item no longer queued (a drained item is not sent twice)', async () => {
+    const { log, d, cmds } = mk();
+    await cmds.run(send('u1', 'first'));
+    startTurn(log, 1);
+    d.setBusy(true);
+    await cmds.run(send('u2', 'queued'));
+    d.setBusy(false);
+    endTurn(log, 1);
+    await tick(); // drained: u2 was sent
+    const r = await cmds.run({ kind: 'queueRemove', chatId: 'c1', clientId: 'rm1', target: 'u2' });
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/not queued/);
+  });
+
+  it('opening a chat retries a persisted queue the bounded startup retry gave up on', async () => {
+    const first = mk();
+    first.d.setPaused(true);
+    await first.cmds.run(send('u1', 'held'));
+    first.store.close();
+    const second = mk({ dir: first.dir });
+    let ready = false;
+    second.d.canDispatch = () => ready;
+    second.cmds.resumeQueues(second.store.queuedChatIds());
+    await new Promise((r) => setTimeout(r, 400)); // 6 retries at 2ms base: gave up
+    expect(second.d.send).not.toHaveBeenCalled();
+    ready = true;
+    await new Promise((r) => setTimeout(r, 50));
+    expect(second.d.send).not.toHaveBeenCalled(); // nothing polls any more
+    // The renderer opens the chat (chatlog:open / bindLegacyScope → opened hook).
+    second.log.notifyOpened('c1');
+    await tick();
+    expect(second.d.send).toHaveBeenCalledTimes(1);
+    expect(second.store.state('c1')!.queue).toEqual([]);
+  });
+
+  it('opening a chat with no queue dispatches nothing', async () => {
+    const { log, d, cmds } = mk();
+    await cmds.run(send('u1', 'first'));
+    runTurn(log);
+    log.notifyOpened('c1');
+    log.notifyOpened('nope');
+    await tick();
+    expect(d.send).toHaveBeenCalledTimes(1);
   });
 });

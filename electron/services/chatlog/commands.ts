@@ -18,6 +18,8 @@ export type ChatCommand =
     origin: Origin; projectPath: string; now?: boolean; taskId?: string; promptOverride?: string;
     /** The chat's provider: creates a new chat with it, or switches an existing chat before this message. */
     provider?: Provider;
+    /** Short text the queue strip shows while this send waits (text can carry pasted context). */
+    label?: string;
   }
   | { kind: 'approve'; chatId: string; clientId: string; toolUseId: string; approved: boolean; modifiedCommand?: string }
   | { kind: 'answer'; chatId: string; clientId: string; toolUseId: string; answers: Record<string, string | string[]> }
@@ -174,6 +176,14 @@ export class ChatCommands {
     this.clearInFlight(chatId);
   }
 
+  /**
+   * A client opened the chat, or a workspace appeared: a persisted queue the
+   * bounded startup retry gave up on gets another (gated) drain attempt.
+   */
+  onChatOpened(chatId: string): void {
+    if ((this.store.meta(chatId)?.queued ?? 0) > 0) this.resumeQueues([chatId]);
+  }
+
   /** The load guard un-paused: drain one item for every chat holding a queue. */
   onLoadResumed(): void {
     for (const chatId of [...this.queuedChats]) this.scheduleDrain(chatId, 0, 0);
@@ -209,7 +219,9 @@ export class ChatCommands {
       }
       case 'settings': return this.settings(cmd);
       case 'queueRemove': {
-        this.chat(cmd.chatId);
+        // Fails when the item already left the queue (e.g. drained): a client's
+        // "send now" must not send it a second time.
+        if (!this.chat(cmd.chatId).state.queue.some((q) => q.clientId === cmd.target)) throw new Error(`not queued: ${cmd.target}`);
         return { seq: this.log.appendClient(cmd.chatId, { type: 'queue_removed', clientId: cmd.target }).seq };
       }
       case 'queuePromote': {
@@ -257,26 +269,36 @@ export class ChatCommands {
       this.log.appendClient(cmd.chatId, { type: 'settings_changed', settings: { provider: cmd.provider } });
       this.store.patchMeta(cmd.chatId, { provider: cmd.provider });
     }
+    // Decided before the user_message is logged: a queued send's entry is
+    // marked so the bubble (and the new-turn reset of the load guard's error
+    // quiet window) waits for the drain that sends it.
+    const pre = exists
+      ? this.chat(cmd.chatId)
+      : { projectPath: cmd.projectPath, provider: cmd.provider ?? 'claude', state: null };
+    const paused = this.dispatch.isLoadPaused();
+    const ready = this.canDispatch(pre.provider, pre.projectPath, cmd.chatId);
+    const busy = this.isBusy(pre.projectPath, cmd.chatId);
+    // Paused holds every send (send-now too, like the desktop composer). A busy
+    // chat, or one with items already waiting, queues unless this is send-now.
+    const queue = paused || !ready || (!cmd.now && (busy || (pre.state?.queue.length ?? 0) > 0));
+
     const entry = this.log.appendClient(cmd.chatId, {
       type: 'user_message', clientId: cmd.clientId, text, origin,
       ...(images ? { images } : {}),
       ...(typeof cmd.taskId === 'string' ? { taskId: cmd.taskId } : {}),
+      ...(queue ? { queued: true } : {}),
     }, exists ? undefined : { projectPath: cmd.projectPath, ...(cmd.provider ? { provider: cmd.provider } : {}) });
 
     const { projectPath, provider, state } = this.chat(cmd.chatId);
     const prompt = typeof cmd.promptOverride === 'string' ? cmd.promptOverride : text;
     const imagePaths = Array.isArray(cmd.imagePaths) && cmd.imagePaths.length > 0 ? cmd.imagePaths : undefined;
-    const paused = this.dispatch.isLoadPaused();
-    const ready = this.canDispatch(provider, projectPath, cmd.chatId);
-    const busy = this.isBusy(projectPath, cmd.chatId);
 
-    // Paused holds every send (send-now too, like the desktop composer). A busy
-    // chat, or one with items already waiting, queues unless this is send-now.
-    if (paused || !ready || (!cmd.now && (busy || state.queue.length > 0))) {
+    if (queue) {
       const item: QueuedSend = {
         clientId: cmd.clientId, text, queuedAt: Date.now(), origin,
         ...(images ? { images } : {}),
         ...(typeof cmd.taskId === 'string' ? { taskId: cmd.taskId } : {}),
+        ...(typeof cmd.label === 'string' && cmd.label && cmd.label !== text ? { label: cmd.label } : {}),
         ...(prompt !== text ? { prompt } : {}),
         ...(imagePaths ? { imagePaths } : {}),
       };

@@ -555,7 +555,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode:
   // The message queue is the chat's, in main's log; the strip shows it as-is.
   const logQueue = logState?.queue;
   const messageQueue = useMemo<QueuedMessage[]>(() => (logQueue ?? []).map(q => ({
-    id: q.clientId, text: q.text, fullText: q.text,
+    id: q.clientId, text: q.label ?? q.text, fullText: q.text,
     ...(q.images?.length ? { images: q.images, attachments: { images: q.images.length, files: 0, terminal: false } } : {}),
   })), [logQueue]);
   const settingsSeedRef = useRef<() => Partial<ChatSettings> | null>(() => null);
@@ -1746,7 +1746,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode:
    * another provider) is seeded from the workspace defaults first, so the
    * dispatch runs with what the composer shows.
    */
-  const sendToLog = async (text: string, opts: { clientId: string; images?: string[]; imagePaths?: string[]; prompt?: string; taskId?: string; now?: boolean }): Promise<boolean> => {
+  const sendToLog = async (text: string, opts: { clientId: string; images?: string[]; imagePaths?: string[]; prompt?: string; taskId?: string; now?: boolean; label?: string }): Promise<boolean> => {
     if (!chatId || !projectPath) return false;
     const seed = settingsSeedRef.current();
     try {
@@ -1762,6 +1762,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode:
         ...(opts.prompt !== undefined && opts.prompt !== text ? { promptOverride: opts.prompt } : {}),
         ...(opts.taskId ? { taskId: opts.taskId } : {}),
         ...(opts.now ? { now: true } : {}),
+        ...(opts.label && opts.label !== text ? { label: opts.label } : {}),
       });
       return true;
     } catch (err) {
@@ -1903,7 +1904,8 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode:
   // caller (retry, queue, suggestions) sends untagged and unprefixed.
   // `opts.queue` (Ctrl+Enter) never interrupts; `opts.now` (send-now from the
   // queue strip) always does.
-  const handleSend = async (text: string, images?: string[], opts?: { taskCard?: TaskCard | null; queue?: boolean; now?: boolean }) => {
+  // `opts.label` is the short text the queue strip shows (Ctrl+Enter).
+  const handleSend = async (text: string, images?: string[], opts?: { taskCard?: TaskCard | null; queue?: boolean; now?: boolean; label?: string }) => {
     // Slash commands must reach the command handler as typed, so they are never redirected.
     const directCard = taskUiEnabled && !text.trim().startsWith('/') && opts?.taskCard?.source === 'declared' ? opts.taskCard : null;
     // Handle built-in commands locally
@@ -1929,9 +1931,11 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode:
       handleClearContext();
       return;
     }
-    // /compact needs the live agent: while paused it falls through and waits
-    // in main's queue like any send.
-    if (text === '/compact' && aiProvider === 'claude' && !loadPausedRef.current) {
+    // /compact needs the live agent: while paused — or, for a queued send
+    // (palette, Ctrl+Enter), while a turn runs or items wait — it falls
+    // through and waits in main's queue like any send.
+    const compactWaits = loadPausedRef.current || (!!opts?.queue && (turnLive || messageQueue.length > 0));
+    if (text === '/compact' && aiProvider === 'claude' && !compactWaits) {
       window.sai.claudeCompact(projectPath, permissionMode, effortLevel, modelChoice, claudeScope);
       pendingComposerRectRef.current = null;
       return;
@@ -1978,7 +1982,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode:
     const builtPrompt = activeFilePath && fileContextEnabled ? `[File: ${activeFilePath}]\n\n${text}` : text;
     const prompt = directCard ? directAtTask(builtPrompt, directCard.title) : builtPrompt;
     const sent = await sendToLog(text, {
-      clientId, images, imagePaths, prompt, now,
+      clientId, images, imagePaths, prompt, now, label: opts?.label,
       // A message typed on a task tab belongs to that task; stamping keeps an explicit tag.
       ...(directCard ? { taskId: directCard.tag } : {}),
     });
@@ -2030,8 +2034,8 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode:
 
   // The queue lives in main's log (state.queue): Ctrl+Enter is a plain send
   // that main queues behind the running turn and drains one per turn end.
-  const handleQueue = (_text: string, fullText: string, images?: string[]) => {
-    void handleSend(fullText, images, { queue: true });
+  const handleQueue = (text: string, fullText: string, images?: string[]) => {
+    void handleSend(fullText, images, { queue: true, label: text });
   };
 
   const handleQueueRemove = (id: string) => {
@@ -2051,9 +2055,11 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode:
     if (loadPausedRef.current) return;
     // Same semantics as bypass-queue-on-enter: main interrupts the current
     // turn and dispatches immediately; the rest of the queue resumes after.
+    // Main refuses when the item already left the queue (drained meanwhile):
+    // then it was sent, and must not go a second time.
     try {
       await runCommand({ kind: 'queueRemove', chatId, clientId: newClientId(), target: id });
-    } catch { return; /* devlogged; still queued */ }
+    } catch { return; /* devlogged */ }
     await handleSend(item.fullText, item.images, { now: true });
   };
 
@@ -2062,7 +2068,8 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode:
   handleSendRef.current = handleSend;
   useEffect(() => {
     if (!sendTextRef) return;
-    const send = (text: string) => { void handleSendRef.current(text); };
+    // Like the old palette queue: behind a running turn, never interrupting it.
+    const send = (text: string) => { void handleSendRef.current(text, undefined, { queue: true }); };
     sendTextRef.current = send;
     return () => { if (sendTextRef.current === send) sendTextRef.current = null; };
   }, [sendTextRef]);

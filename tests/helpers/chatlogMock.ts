@@ -176,18 +176,22 @@ export function createMockChatlog(sai: Record<string, any> = {}): MockChatlog {
           append(cmd.chatId, { type: 'settings_changed', settings: { provider: cmd.provider } });
           chats.get(cmd.chatId)!.meta.provider = cmd.provider;
         }
+        const pre = stateOf(cmd.chatId);
+        const queue = paused || (!cmd.now && !!pre && (pre.turn.streaming || pre.queue.length > 0));
         const entry = append(cmd.chatId, {
           type: 'user_message', clientId: cmd.clientId, text: cmd.text ?? '', origin: cmd.origin ?? 'desktop',
           ...(cmd.images?.length ? { images: cmd.images } : {}),
           ...(typeof cmd.taskId === 'string' ? { taskId: cmd.taskId } : {}),
+          ...(queue ? { queued: true } : {}),
         }, { projectPath: cmd.projectPath, ...(cmd.provider ? { provider: cmd.provider } : {}) });
         const prompt = typeof cmd.promptOverride === 'string' ? cmd.promptOverride : cmd.text;
         const st = stateOf(cmd.chatId)!;
-        if (paused || (!cmd.now && (st.turn.streaming || st.queue.length > 0))) {
+        if (queue) {
           append(cmd.chatId, { type: 'queue_added', item: {
             clientId: cmd.clientId, text: cmd.text ?? '', queuedAt: Date.now(), origin: cmd.origin ?? 'desktop',
             ...(cmd.images?.length ? { images: cmd.images } : {}),
             ...(typeof cmd.taskId === 'string' ? { taskId: cmd.taskId } : {}),
+            ...(cmd.label && cmd.label !== cmd.text ? { label: cmd.label } : {}),
             ...(prompt !== cmd.text ? { prompt } : {}),
             ...(cmd.imagePaths?.length ? { imagePaths: cmd.imagePaths } : {}),
           } });
@@ -226,7 +230,10 @@ export function createMockChatlog(sai: Record<string, any> = {}): MockChatlog {
         await sai.claudeAnswerPlanReview?.(c.meta.projectPath, cmd.toolUseId, cmd.approved, cmd.chatId);
         return {};
       }
-      case 'queueRemove': known(cmd.chatId); return { seq: append(cmd.chatId, { type: 'queue_removed', clientId: cmd.target }).seq };
+      case 'queueRemove':
+        known(cmd.chatId);
+        if (!stateOf(cmd.chatId)!.queue.some(q => q.clientId === cmd.target)) throw new Error(`not queued: ${cmd.target}`);
+        return { seq: append(cmd.chatId, { type: 'queue_removed', clientId: cmd.target }).seq };
       case 'queuePromote': known(cmd.chatId); return { seq: append(cmd.chatId, { type: 'queue_promoted', clientId: cmd.target }).seq };
       case 'queueClear': known(cmd.chatId); return { seq: append(cmd.chatId, { type: 'queue_cleared' }).seq };
       default: throw new Error(`unknown command ${cmd.kind}`);

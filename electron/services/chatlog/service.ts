@@ -28,6 +28,8 @@ export interface TurnHooks {
   ended?(chatId: string, ev: ChatEvent): void;
   /** A done was appended while no turn was open (a turn that never started). */
   idleDone?(chatId: string): void;
+  /** A client opened the chat (cold open or legacy-scope bind). */
+  opened?(chatId: string): void;
 }
 
 const PROVIDERS: ReadonlyArray<ChatSettings['provider']> = ['claude', 'codex', 'gemini', 'kimi'];
@@ -227,8 +229,12 @@ export class ChatLogService {
   }
 
   registerIpc(ipcMain: IpcMain): void {
-    ipcMain.handle('chatlog:open', (_e, chatId: string, after: number) =>
-      this.store.read(String(chatId), Number.isFinite(after) ? Number(after) : 0));
+    ipcMain.handle('chatlog:open', (_e, chatId: string, after: number) => {
+      const from = Number.isFinite(after) ? Number(after) : 0;
+      const res = this.store.read(String(chatId), from);
+      if (from === 0) this.notifyOpened(String(chatId));
+      return res;
+    });
     ipcMain.handle('chatlog:appendClient', (_e, chatId: string, ev: ChatEvent, init?: { projectPath: string; provider?: ChatSettings['provider'] }) =>
       this.appendClient(chatId, ev, init));
     ipcMain.handle('chatlog:importMessages', (
@@ -241,9 +247,19 @@ export class ChatLogService {
     ipcMain.handle('chatlog:delete', (_e, chatIds: string[]) => {
       for (const id of Array.isArray(chatIds) ? chatIds : []) if (typeof id === 'string' && id) this.store.delete(id);
     });
-    ipcMain.handle('chatlog:bindLegacyScope', (_e, projectPath: string, chatId: string) => this.bindLegacyScope(projectPath, chatId));
+    ipcMain.handle('chatlog:bindLegacyScope', (_e, projectPath: string, chatId: string) => {
+      this.bindLegacyScope(projectPath, chatId);
+      this.notifyOpened(String(chatId));
+    });
     ipcMain.handle('chatlog:patchMeta', (_e, chatId: string, patch: Partial<Pick<ChatMeta, 'title' | 'provider'>>) =>
       this.store.patchMeta(String(chatId), patch ?? {}));
+  }
+
+  /** Tells the turn hooks a client opened the chat; a hook failure never fails the open. */
+  notifyOpened(chatId: string): void {
+    try { this.turnHooks.opened?.(chatId); } catch (err) {
+      this.opts.devlog('chatlog.turnHookError', { chatId, type: 'opened', error: errText(err) });
+    }
   }
 
   private appendAndFanOut(chatId: string, ev: ChatEvent, init?: { projectPath: string; provider: ChatSettings['provider']; imported?: boolean }): ChatLogEntry {

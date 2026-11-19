@@ -244,6 +244,13 @@ function newAcpState(projectPath: string): AcpWorkspaceState {
   };
 }
 
+const createdListeners = new Set<(projectPath: string) => void>();
+/** Called after a new workspace is created (e.g. so queued chat sends can dispatch). Returns an unsubscribe. */
+export function onWorkspaceCreated(cb: (projectPath: string) => void): () => void {
+  createdListeners.add(cb);
+  return () => { createdListeners.delete(cb); };
+}
+
 export function getOrCreate(projectPath: string): Workspace {
   const existing = workspaces.get(projectPath);
   if (existing) {
@@ -269,6 +276,9 @@ export function getOrCreate(projectPath: string): Workspace {
     status: 'active',
   };
   workspaces.set(projectPath, ws);
+  for (const cb of [...createdListeners]) {
+    try { cb(projectPath); } catch (err) { console.warn('[workspace] created listener failed:', err); }
+  }
   return ws;
 }
 

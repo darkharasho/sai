@@ -252,6 +252,10 @@ function apply(s: ChatState, entry: ChatLogEntry): ChatState {
     }
 
     case 'user_message': {
+      // Queued: no bubble and no new-turn reset yet — queue_removed{sent}
+      // adds the bubble, and the drained turn's streaming_start clears the
+      // load guard's quiet window.
+      if (ev.queued === true) return s;
       const id = typeof ev.clientId === 'string' && ev.clientId ? ev.clientId : `m${seq}`;
       // A new send starts a fresh turn: its errors (even before streaming_start,
       // e.g. a failed resume) are real, not the killed agent's.
@@ -433,8 +437,8 @@ function apply(s: ChatState, entry: ChatLogEntry): ChatState {
       const item = ev.item as QueuedItem | undefined;
       if (!item || typeof item.clientId !== 'string') return s;
       if (s.queue.some(q => q.clientId === item.clientId)) return s;
-      // The send logged its bubble first; while queued it shows in the queue
-      // strip, not the transcript (its drain puts it back at the end).
+      // Logs written before queued user_messages were marked hold the bubble
+      // already: while queued it shows in the strip, not the transcript.
       return { ...withoutMessage(s, item.clientId), queue: [...s.queue, item] };
     }
 

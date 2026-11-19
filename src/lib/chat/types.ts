@@ -18,6 +18,8 @@ export interface QueuedItem {
   clientId: string; text: string; images?: string[]; queuedAt: number;
   /** The send's task tag: the bubble keeps it when the item is sent. */
   taskId?: string;
+  /** Short display text for the queue strip when `text` carries pasted context. */
+  label?: string;
 }
 
 export interface TurnState {
