@@ -9,6 +9,8 @@ Modules:
 - `session-bus.ts` — output fan-out: subscribeAll + per-topic subscribe + history
 - `bridge-server.ts` — HTTP + WS, binds tailnet IP only
 - `chat-v2.ts` — chat protocol v2 (below) over the durable chat log (`../chatlog/`)
+- `workspaceRegistry.ts` — the renderer-pushed workspace list (v2 `workspaces.subscribe`)
+- `appSettings.ts` — the phone-visible app settings snapshot + change feed (v2 `app.settings`)
 - `index.ts` — RemoteModule supervisor
 
 Tests live under `tests/unit/remote/` and `tests/integration/remote/` per SAI's vitest project layout.
@@ -17,8 +19,9 @@ Tests live under `tests/unit/remote/` and `tests/integration/remote/` per SAI's 
 
 Runs on the same `/ws` socket as v1, after the same `auth` frame (any frame
 before `auth_ok`, v2 included, closes the socket with 4001). Frames whose
-`type` starts with `chat.` or is `chats.list` are v2; everything else is v1 and
-unchanged. Every v2 frame the desktop sends carries `v: 2`. The chat log, its
+`type` starts with `chat.` or `chats.`, or is `workspaces.subscribe` or
+`app.settings`, are v2; everything else is v1 and unchanged (v1
+`workspaces.list` included). Every v2 frame the desktop sends carries `v: 2`. The chat log, its
 seq numbers and the reducer (`src/lib/chat/reducer.ts`) are shared with the
 desktop: a client that applies the same entries ends with the same state.
 
@@ -29,6 +32,10 @@ Client → desktop:
 | `chat.subscribe` | `chatId`, `after` (last seq the client applied; 0 = none) |
 | `chat.unsubscribe` | `chatId` |
 | `chats.list` | `reqId`, `projectPath` (matched by realpath, so `/home/...` and `/var/home/...` both work) |
+| `chats.subscribe` | `reqId`, `projectPath` (realpath-matched): replies `chats.list.result`, then pushes `chats.changed` |
+| `chats.unsubscribe` | `projectPath` |
+| `workspaces.subscribe` | `reqId`: replies `workspaces.list.result`, then pushes `workspaces.changed` |
+| `app.settings` | `reqId`: replies `app.settings.result`, then pushes `app.settings.changed` |
 | `chat.page` | `reqId`, `chatId`, `beforeIndex`, `limit` (≤ 200) |
 | `chat.command` | `command`: a `ChatCommand` (`electron/services/chatlog/commands.ts`) |
 
@@ -40,6 +47,11 @@ Desktop → client:
 | `chat.entries` | `chatId`, `entries`: catch-up batch, contiguous from the snapshot seq (or `after`) + 1; may be empty |
 | `chat.entry` | `chatId`, `entry`: one live entry |
 | `chats.list.result` | `reqId`, `chats: ChatMeta[]` (newest first) |
+| `chats.changed` | `projectPath` (as the client sent it), `chats: ChatMeta[]`: the project's full list |
+| `workspaces.list.result` | `reqId`, `workspaces: RemoteWorkspace[]` (`renderer-proxy.ts`) |
+| `workspaces.changed` | `workspaces: RemoteWorkspace[]`: the full list |
+| `app.settings.result` | `reqId`, `settings` (below) |
+| `app.settings.changed` | `settings` (below) |
 | `chat.page.result` | `reqId`, `chatId`, `messages` (indices `[olderCount, beforeIndex)`), `olderCount` |
 | `chat.ack` | `result: CommandResult` (`clientId`, `ok`, `duplicate`, `seq?`, `error?`) |
 | `chat.error` | `chatId?`, `code` (`bad_request`, `unknown_chat`, `unavailable`, `read_failed`, `unknown_type`, `internal`), `message` |
@@ -55,6 +67,40 @@ chats subscribe fine (empty `chat.entries`); their first entries arrive live.
 If the client sent `after > 0` for a chat with no log (it was deleted), it
 first gets an empty `chat.snapshot` at `seq: 0`, so its head resets and seq 1
 isn't dropped as a duplicate.
+
+**Workspaces.** The renderer pushes its workspace list to main
+(`remoteReportWorkspaces`, debounced to 250 ms, whenever the list or a status
+changes) into `WorkspaceRegistry`; rows are the v1 `workspaces.list` rows, and
+`status` is the full `workspace.status` payload (`busy`, `streaming`,
+`completed`, `approval`, `awaitingQuestion`, `streamingSessionId`,
+`streamingSessionIds`, `suspendedSessionIds`, `awaitingSessionIds`) when the
+workspace has had any activity. `workspaces.changed` is pushed only when the
+list actually differs. Until the renderer has reported once, the
+`workspaces.subscribe` reply falls back to the proxied v1 list (empty if the
+renderer doesn't answer).
+
+**Chat lists.** `chats.subscribe` pushes `chats.changed` when any chat under the
+project (by realpath) changes its list row: `title`, `updatedAt`, `openTurn`,
+`queued`, `headSeq`, or the chat is created, imported or deleted. Pushes are
+throttled per project to one per 500 ms, trailing edge: a burst (a phone-created
+chat's first entries, a streaming reply's deltas) becomes a single push of the
+list as it is at the end of the window. Re-subscribing a project replaces the
+previous subscription.
+
+**App settings.** `settings` holds exactly these settings.json keys when set
+(unset ones are omitted; apply the desktop defaults): `theme`, `accent`,
+`highlightTheme`, `messageStampMode`, `toolCallsExpanded`,
+`tagMessagesWithTask`, `saiAnimationEnabled`, `autoCompactThreshold`; plus
+`remoteCeiling` (`'auto' | 'auto-read' | 'always-ask' | null`, the remote
+permission ceiling). `app.settings.changed` is pushed when one of them changes
+(a settings write on the desktop, a GitHub settings sync, or a ceiling change).
+
+All subscriptions end when the socket closes.
+
+**CORS.** `POST /pair` and `GET /healthz` send `Access-Control-Allow-Origin: *`,
+`Access-Control-Allow-Methods: GET, POST, OPTIONS` and
+`Access-Control-Allow-Headers: content-type`; `OPTIONS` on those two paths
+answers 204. No other path has CORS headers.
 
 **Client rules** (the same as `src/hooks/useChatLog.ts`):
 - A snapshot REPLACES the client's state; its `seq` becomes the client head.

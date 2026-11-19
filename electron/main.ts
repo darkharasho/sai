@@ -84,6 +84,8 @@ import { createProviderDispatch } from './services/chatlog/providerDispatch';
 import { getChatSync, setChatSync } from './services/chatlog/holder';
 import { setLogImageReferences } from './services/toolResultImageStore';
 import { RendererProxy } from './services/remote/renderer-proxy';
+import { WorkspaceRegistry } from './services/remote/workspaceRegistry';
+import { AppSettingsFeed, pickRemoteAppSettings } from './services/remote/appSettings';
 import { registerGitHandlers } from './services/git';
 import { registerFsHandlers } from './services/fs';
 import { registerUpdater } from './services/updater';
@@ -305,6 +307,20 @@ ipcMain.handle('remote:setActiveSession', (_e, payload) => {
   activeSessionBroadcast?.(payload);
 });
 
+// v2 workspaces.subscribe reads the renderer's pushed list (App debounces the
+// pushes to 250ms). Registered at module load so the list is there before the
+// bridge starts.
+const workspaceRegistry = new WorkspaceRegistry();
+ipcMain.handle('remote:reportWorkspaces', (_e, list: unknown) => { workspaceRegistry.set(list); });
+
+// v2 app.settings: the phone-visible keys of settings.json + the remote ceiling.
+// writeSetting and remote:setCeiling call notify(); it pushes only real changes.
+const remoteAppSettings = new AppSettingsFeed(() => {
+  let s: Record<string, unknown> = {};
+  try { s = JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'settings.json'), 'utf-8')); } catch { /* none yet */ }
+  return pickRemoteAppSettings(s, getRemoteCeiling());
+});
+
 interface RemoteKv { screenshotSecret?: string; enabled?: boolean; remoteCeiling?: 'auto' | 'auto-read' | 'always-ask' | null }
 
 function readRemoteKv(): RemoteKv {
@@ -384,6 +400,8 @@ async function getOrInitRemote(): Promise<RemoteModule> {
         fallbackPorts: [17831, 17832],
         chatSync: getChatSync,
         saveImages: (imgs) => writeRemoteImages(imgs),
+        workspaces: workspaceRegistry,
+        appSettings: remoteAppSettings,
         sendPrompt: (args) => {
           // Persist base64 image attachments to temp files (parity with the
           // desktop path, which expects on-disk paths). Fire-and-forget:
@@ -1064,6 +1082,7 @@ function createWindow() {
     const settings = readSettings();
     settings[key] = value;
     fs.writeFileSync(settingsFile, JSON.stringify(settings));
+    remoteAppSettings.notify();
     // Schedule a push to GitHub if authed (skip for auth key itself)
     if (key !== 'github_auth') {
       const auth = getAuthInfo();
@@ -1616,6 +1635,7 @@ function createWindow() {
     await getOrInitRemote();
     writeRemoteKv({ remoteCeiling: ceiling });
     setRemoteCeiling(ceiling);
+    remoteAppSettings.notify();
   });
 
   ipcMain.handle('remote:getCeiling', async () => {

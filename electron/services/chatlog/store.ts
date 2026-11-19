@@ -49,6 +49,14 @@ function realPathOf(p: string): string {
 
 interface Loaded { state: ChatState; headSeq: number }
 
+/**
+ * A chat's list row (ChatMeta: title, updatedAt, openTurn, queued, headSeq)
+ * changed, or the chat was created or deleted. Called synchronously from the
+ * write path, once per append (pure deltas included): listeners must be cheap
+ * and do their own throttling.
+ */
+export type MetaChangeListener = (chatId: string, projectPath: string) => void;
+
 export class ChatLogStore {
   private dir: string;
   private now: () => number;
@@ -68,6 +76,8 @@ export class ChatLogStore {
   private timer: NodeJS.Timeout | null = null;
   private realCache = new Map<string, string>();
   private onError: (err: unknown) => void;
+  /** onMetaChange listeners (direct callbacks: no per-chat bus topics). */
+  private metaListeners = new Set<MetaChangeListener>();
 
   constructor(opts: { dir: string; now?: () => number; flushMs?: number; compactAfter?: number; maxLoaded?: number; onError?: (err: unknown) => void }) {
     this.dir = opts.dir;
@@ -288,7 +298,20 @@ export class ChatLogStore {
       this.writeIndex();
       if (ev.type === 'done' && !l.state.turn.streaming && meta.headSeq - meta.snapshotSeq >= this.compactAfter) this.compact(chatId);
     }
+    this.emitMeta(chatId, meta.projectPath);
     return entry;
+  }
+
+  /** Subscribes to chat list-row changes (see MetaChangeListener); returns the unsubscribe. */
+  onMetaChange(cb: MetaChangeListener): () => void {
+    this.metaListeners.add(cb);
+    return () => { this.metaListeners.delete(cb); };
+  }
+
+  private emitMeta(chatId: string, projectPath: string): void {
+    for (const cb of this.metaListeners) {
+      try { cb(chatId, projectPath); } catch (err) { this.onError(err); }
+    }
   }
 
   read(chatId: string, after: number): ReadResult {
@@ -323,6 +346,11 @@ export class ChatLogStore {
       .map(m => ({ ...m }));
   }
 
+  /** The realpath list() matches projects by (memoized; path.resolve when the path doesn't exist). */
+  realPath(p: string): string {
+    return this.real(p);
+  }
+
   private real(p: string): string {
     let r = this.realCache.get(p);
     if (r === undefined) {
@@ -336,9 +364,11 @@ export class ChatLogStore {
   patchMeta(chatId: string, patch: Partial<Pick<ChatMeta, 'title' | 'provider'>>): void {
     const m = this.index[chatId];
     if (!m) return;
+    const titleChanged = patch.title !== undefined && patch.title !== m.title;
     if (patch.title !== undefined) m.title = patch.title;
     if (patch.provider !== undefined) m.provider = patch.provider;
     this.writeIndex();
+    if (titleChanged) this.emitMeta(chatId, m.projectPath);
   }
 
   /**
@@ -371,6 +401,7 @@ export class ChatLogStore {
       if (prefix.length === 0) {
         meta.imported = true;
         this.writeIndex();
+        this.emitMeta(chatId, meta.projectPath);
         return 'marked';
       }
       const entry = this.append(chatId, { type: 'history_imported' });
@@ -385,6 +416,7 @@ export class ChatLogStore {
       meta.imported = true;
       this.writeIndex();
       onFolded?.(entry);
+      this.emitMeta(chatId, meta.projectPath);
       return 'folded';
     }
     if (!init?.projectPath || fs.existsSync(this.logPath(chatId)) || fs.existsSync(this.snapPath(chatId))) return false;
@@ -400,6 +432,7 @@ export class ChatLogStore {
     // Not cached: a first-launch migration imports every chat, and none of them
     // should stay reduced in memory. load() reads the snapshot when it's used.
     this.writeIndex();
+    this.emitMeta(chatId, init.projectPath);
     return 'created';
   }
 
@@ -423,9 +456,11 @@ export class ChatLogStore {
     this.buffers.delete(chatId);
     this.loaded.delete(chatId);
     for (const p of [this.logPath(chatId), this.snapPath(chatId)]) fs.rmSync(p, { force: true });
-    if (this.index[chatId]) {
+    const m = this.index[chatId];
+    if (m) {
       delete this.index[chatId];
       this.writeIndex();
+      this.emitMeta(chatId, m.projectPath);
     }
   }
 

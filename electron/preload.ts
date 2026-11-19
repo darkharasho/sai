@@ -77,6 +77,8 @@ contextBridge.exposeInMainWorld('sai', {
     awaitingSessionIds?: string[];
   }) =>
     ipcRenderer.invoke('remote:emit-workspace-status', projectPath, status),
+  /** The workspace list for v2 workspaces.subscribe (same rows as the proxied workspaces.list). */
+  remoteReportWorkspaces: (list: unknown[]) => ipcRenderer.invoke('remote:reportWorkspaces', list),
   claudeAlwaysAllow: (projectPath: string, toolPattern: string) =>
     ipcRenderer.invoke('claude:alwaysAllow', projectPath, toolPattern),
   claudeModels: () => ipcRenderer.invoke('claude:models'),

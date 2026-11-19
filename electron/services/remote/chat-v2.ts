@@ -6,6 +6,9 @@ import type { ChatLogEntry, ChatSettings, ChatSnapshot, ChatState } from '../../
 import type { ChatSync } from '../chatlog/holder';
 import { emptyChatState } from '../../../src/lib/chat/reducer';
 import type { SessionBus } from './session-bus';
+import type { RemoteWorkspace } from './renderer-proxy';
+import type { WorkspaceRegistry } from './workspaceRegistry';
+import type { AppSettingsFeed } from './appSettings';
 
 /** The socket surface ChatV2 needs (a `ws` WebSocket in production). */
 export interface V2Socket { send(data: string): void }
@@ -16,7 +19,18 @@ export interface ChatV2Opts {
   chat: () => Pick<ChatSync, 'store' | 'commands'> | null;
   /** Writes data-URL images to temp files; returns their paths (the v1 prompt writer). */
   saveImages?: (dataUrls: string[]) => string[];
+  /** The renderer-reported workspace list (workspaces.subscribe). */
+  workspaces?: WorkspaceRegistry;
+  /** Used once by workspaces.subscribe while the renderer hasn't reported a list yet (the proxied v1 list). */
+  listWorkspacesFallback?: () => Promise<RemoteWorkspace[]>;
+  /** The phone-visible app settings (app.settings). */
+  appSettings?: AppSettingsFeed;
+  /** chats.changed throttle window (ms). */
+  chatsThrottleMs?: number;
 }
+
+/** chats.changed is sent at most once per this window per subscribed project (trailing edge). */
+export const CHATS_THROTTLE_MS = 500;
 
 /** Messages a snapshot frame carries; the rest are counted in olderCount and paged with chat.page. */
 export const SNAPSHOT_MESSAGES = 200;
@@ -33,6 +47,24 @@ interface Sub {
   live: boolean;
   buffer: ChatLogEntry[];
   unsub: () => void;
+}
+
+/** A chats.subscribe: one project's chat list, pushed on any list-row change. */
+interface ChatsSub {
+  /** The projectPath as the client sent it (echoed in chats.changed). */
+  projectPath: string;
+  /** Its realpath, as ChatLogStore matches projects. */
+  real: string;
+  timer: NodeJS.Timeout | null;
+  unsub: () => void;
+}
+
+/** Per-socket subscriptions other than single chats. */
+interface SockExtras {
+  /** realpath → subscription (a Map: never a raw object key). */
+  chats: Map<string, ChatsSub>;
+  workspaces: (() => void) | null;
+  settings: (() => void) | null;
 }
 
 type Frame = { type?: unknown; [k: string]: unknown };
@@ -77,13 +109,24 @@ export function pickImages(raw: unknown): string[] | undefined {
   return out.length ? out : undefined;
 }
 
+/** Frame types ChatV2 handles (bridge routing). */
+export function isV2FrameType(type: unknown): boolean {
+  return typeof type === 'string'
+    && (type.startsWith('chat.') || type.startsWith('chats.') || type === 'workspaces.subscribe' || type === 'app.settings');
+}
+
 export class ChatV2 {
   private readonly socks = new Map<V2Socket, Map<string, Sub>>();
+  private readonly extras = new Map<V2Socket, SockExtras>();
+  /** Sockets detached (closed) while an async subscribe was in flight. */
+  private readonly closed = new WeakSet<V2Socket>();
 
   constructor(private readonly opts: ChatV2Opts) {}
 
-  /** Handles one authenticated frame whose type is `chat.*` or `chats.list`. */
+  /** Handles one authenticated v2 frame (see isV2FrameType). */
   async handle(ws: V2Socket, msg: Frame): Promise<void> {
+    if (msg.type === 'workspaces.subscribe') return this.subscribeWorkspaces(ws, msg.reqId);
+    if (msg.type === 'app.settings') return this.appSettings(ws, msg.reqId);
     const chat = this.opts.chat();
     if (!chat) return this.error(ws, null, 'unavailable', 'chat log is not available');
     switch (msg.type) {
@@ -103,6 +146,16 @@ export class ChatV2 {
         if (!projectPath) return this.error(ws, null, 'bad_request', 'projectPath required');
         // ChatLogStore.list matches by realpath (/home may be a symlink to /var/home).
         return this.send(ws, { type: 'chats.list.result', reqId: msg.reqId, chats: chat.store.list(projectPath) });
+      }
+      case 'chats.subscribe': {
+        const projectPath = str(msg.projectPath);
+        if (!projectPath) return this.error(ws, null, 'bad_request', 'projectPath required');
+        return this.subscribeChats(ws, chat, projectPath, msg.reqId);
+      }
+      case 'chats.unsubscribe': {
+        const projectPath = str(msg.projectPath);
+        if (projectPath) this.unsubscribeChats(ws, chat.store.realPath(projectPath));
+        return;
       }
       case 'chat.page': {
         const chatId = chatIdOf(msg.chatId);
@@ -138,10 +191,96 @@ export class ChatV2 {
 
   /** Drops every subscription the socket holds (socket closed). */
   detach(ws: V2Socket): void {
+    this.closed.add(ws);
+    const ex = this.extras.get(ws);
+    if (ex) {
+      for (const c of ex.chats.values()) { c.unsub(); if (c.timer) clearTimeout(c.timer); }
+      ex.workspaces?.();
+      ex.settings?.();
+      this.extras.delete(ws);
+    }
     const subs = this.socks.get(ws);
     if (!subs) return;
     for (const sub of subs.values()) sub.unsub();
     this.socks.delete(ws);
+  }
+
+  // ─── workspaces, chat lists, app settings ──────────────────────────────────
+
+  private extrasOf(ws: V2Socket): SockExtras {
+    let ex = this.extras.get(ws);
+    if (!ex) { ex = { chats: new Map(), workspaces: null, settings: null }; this.extras.set(ws, ex); }
+    return ex;
+  }
+
+  /**
+   * Replies with the renderer-reported list, then pushes workspaces.changed on
+   * every registry change. Until the renderer has reported, the reply falls
+   * back once to the proxied v1 list (a report landing meanwhile wins).
+   */
+  private async subscribeWorkspaces(ws: V2Socket, reqId: unknown): Promise<void> {
+    const reg = this.opts.workspaces;
+    const ex = this.extrasOf(ws);
+    ex.workspaces?.();
+    ex.workspaces = null;
+    let ready = false;
+    const unsub = reg?.onChange((workspaces) => {
+      if (ready) this.send(ws, { type: 'workspaces.changed', workspaces });
+    }) ?? null;
+    ex.workspaces = unsub;
+    let list = reg?.get() ?? null;
+    if (!list) {
+      let fallback: RemoteWorkspace[] = [];
+      try { fallback = (await this.opts.listWorkspacesFallback?.()) ?? []; } catch { /* renderer unavailable: empty */ }
+      if (this.closed.has(ws) || ex.workspaces !== unsub) return; // closed or re-subscribed meanwhile
+      list = reg?.get() ?? fallback;
+    }
+    this.send(ws, { type: 'workspaces.list.result', reqId, workspaces: list });
+    ready = true;
+  }
+
+  private subscribeChats(ws: V2Socket, chat: Pick<ChatSync, 'store'>, projectPath: string, reqId: unknown): void {
+    const store = chat.store;
+    const real = store.realPath(projectPath);
+    this.unsubscribeChats(ws, real);
+    const ex = this.extrasOf(ws);
+    const throttleMs = this.opts.chatsThrottleMs ?? CHATS_THROTTLE_MS;
+    const sub: ChatsSub = { projectPath, real, timer: null, unsub: () => {} };
+    // Trailing-edge throttle: the first change in a window arms the timer; the
+    // push carries the list as it is when the timer fires (streaming deltas
+    // collapse into one push per window).
+    sub.unsub = store.onMetaChange((_chatId, chatProject) => {
+      if (sub.timer || store.realPath(chatProject) !== real) return;
+      sub.timer = setTimeout(() => {
+        sub.timer = null;
+        if (ex.chats.get(real) !== sub) return;
+        let chats;
+        try { chats = store.list(projectPath); } catch { return; }
+        this.send(ws, { type: 'chats.changed', projectPath, chats });
+      }, throttleMs);
+      sub.timer.unref?.();
+    });
+    ex.chats.set(real, sub);
+    this.send(ws, { type: 'chats.list.result', reqId, chats: store.list(projectPath) });
+  }
+
+  private unsubscribeChats(ws: V2Socket, real: string): void {
+    const sub = this.extras.get(ws)?.chats.get(real);
+    if (!sub) return;
+    sub.unsub();
+    if (sub.timer) clearTimeout(sub.timer);
+    this.extras.get(ws)!.chats.delete(real);
+  }
+
+  /** Replies with the phone-visible settings; later changes push app.settings.changed. */
+  private appSettings(ws: V2Socket, reqId: unknown): void {
+    const feed = this.opts.appSettings;
+    if (!feed) return this.error(ws, null, 'unavailable', 'app settings are not available');
+    const ex = this.extrasOf(ws);
+    if (!ex.settings) ex.settings = feed.onChange((settings) => this.send(ws, { type: 'app.settings.changed', settings }));
+    let settings;
+    try { settings = feed.get(); } catch (err) { return this.error(ws, null, 'read_failed', errText(err)); }
+    this.send(ws, { type: 'app.settings.result', reqId, settings });
   }
 
   // ─── subscriptions ─────────────────────────────────────────────────────────
