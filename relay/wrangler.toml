@@ -14,7 +14,7 @@ workers_dev = true
 [[d1_databases]]
 binding = "DB"
 database_name = "sai-push"
-database_id = "00000000-0000-0000-0000-000000000000" # placeholder, filled at deploy
+database_id = "55c8fd12-6c1e-4d9a-a048-54a0a7989084"
 
 # Rate limits. `[[ratelimits]]` is the GA form of the old
 # `[[unsafe.bindings]] type = "ratelimit"` binding (same fields).
