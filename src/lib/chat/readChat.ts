@@ -1,6 +1,6 @@
 import { dbGetMessages } from '../../chatDb';
 import type { ChatMessage } from '../../types';
-import { ensureChatInLog } from './migrateToLog';
+import { ensureChatInLog, forgetChatImported, isChatImported } from './migrateToLog';
 import { emptyChatState, persistableState, reduceMany } from './reducer';
 
 /**
@@ -12,7 +12,14 @@ export async function readChatMessages(chatId: string): Promise<ChatMessage[]> {
   const api = window.sai?.chatlog;
   if (!api) return dbGetMessages(chatId);
   let res = await api.open(chatId, 0);
-  if (!res.meta) {
+  if (res.meta && !res.meta.imported && isChatImported(chatId)) {
+    // Main lost history this session already settled (its snapshot went
+    // missing). Forget it first so the IndexedDB mirror's shrink guard keeps
+    // the only full copy, then re-fold it and read again.
+    forgetChatImported(chatId);
+    try { await ensureChatInLog(chatId); } catch { /* read what the log has */ }
+    res = await api.open(chatId, 0);
+  } else if (!res.meta) {
     // Not imported yet (the one-shot migration may still be running).
     try { await ensureChatInLog(chatId); } catch { /* read what the log has */ }
     res = await api.open(chatId, 0);
