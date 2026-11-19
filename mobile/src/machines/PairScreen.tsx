@@ -24,6 +24,8 @@ export function PairScreen({ onPaired, onCancel, pairFn = defaultPair }: PairScr
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const busyRef = useRef(false);
   const startingRef = useRef(false);
+  // The last code that failed to pair: the camera still sees it, so scans of it are ignored until a different code appears.
+  const lastFailedRef = useRef<string | null>(null);
   const mounted = useRef(true);
 
   const stopScanning = useCallback(() => {
@@ -35,6 +37,7 @@ export function PairScreen({ onPaired, onCancel, pairFn = defaultPair }: PairScr
     stopScanning();
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
+    lastFailedRef.current = null;
     if (mounted.current) setScanning(false);
   }, [stopScanning]);
 
@@ -54,6 +57,8 @@ export function PairScreen({ onPaired, onCancel, pairFn = defaultPair }: PairScr
       const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
       const hit = jsQR(img.data, img.width, img.height);
       if (hit && parsePairUrl(hit.data)) {
+        if (hit.data === lastFailedRef.current) return;
+        lastFailedRef.current = null;
         stopScanning();
         void submitRef.current(hit.data);
       }
@@ -71,6 +76,7 @@ export function PairScreen({ onPaired, onCancel, pairFn = defaultPair }: PairScr
       stopCamera();
       if (mounted.current) onPaired(m);
     } catch (e) {
+      lastFailedRef.current = url;
       if (mounted.current) {
         setError(e instanceof PairError ? e.message : "can't reach desktop — is Tailscale on?");
         // Camera still on: keep looking so the user can point at a fresh code.
@@ -86,6 +92,7 @@ export function PairScreen({ onPaired, onCancel, pairFn = defaultPair }: PairScr
   const startCamera = useCallback(async () => {
     if (startingRef.current || streamRef.current) return;
     startingRef.current = true;
+    lastFailedRef.current = null;
     setError(null);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });

@@ -55,7 +55,7 @@ describe('PairScreen', () => {
     expect(pairFn).toHaveBeenCalledWith(URL1, 'My Phone');
   });
 
-  it('keeps scanning after a failed pair so a fresh code works', async () => {
+  it('keeps scanning after a failed pair: same code is not retried, a different code is', async () => {
     const pairFn = vi.fn()
       .mockRejectedValueOnce(new PairError('code expired', 'expired'))
       .mockResolvedValueOnce({ id: 'm' });
@@ -65,7 +65,12 @@ describe('PairScreen', () => {
     expect(screen.getByRole('alert').textContent).toBe('code expired');
     expect(stops[0]).not.toHaveBeenCalled();
     await tickScan();
+    await tickScan();
+    expect(pairFn).toHaveBeenCalledTimes(1);
+    jsqr.mockReturnValue({ data: 'http://desk:7421/?code=fresh' });
+    await tickScan();
     expect(pairFn).toHaveBeenCalledTimes(2);
+    expect(pairFn).toHaveBeenLastCalledWith('http://desk:7421/?code=fresh', 'iPhone');
   });
 
   it('double tap opens one stream', async () => {
