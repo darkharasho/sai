@@ -311,8 +311,11 @@ describe('ChatCommands', () => {
   it('async provider: concurrent drains dispatch once (in-flight counts as busy)', async () => {
     const { store, log, d, cmds } = mk();
     // isBusy only flips true after an await, like codex (getModels) or kimi (transport/session).
-    (d.send as any).mockImplementation(() => { setTimeout(() => d.setBusy(true), 10); });
+    // Each send's late flip is captured and fired explicitly, so a slow runner can't reorder it.
+    const flips: Array<() => void> = [];
+    (d.send as any).mockImplementation(() => { flips.push(() => d.setBusy(true)); });
     await cmds.run(send('u1', 'first'));
+    flips.shift()!();         // the first send's backend reports busy
     startTurn(log, 1);
     d.setBusy(true);
     await cmds.run(send('u2', 'a'));
@@ -326,7 +329,11 @@ describe('ChatCommands', () => {
     cmds.onLoadResumed();
     await tick();
     expect(d.send).toHaveBeenCalledTimes(2);
-    await new Promise((r) => setTimeout(r, 20));
+    // Then the drained send's backend reports busy: still nothing more dispatched.
+    expect(flips).toHaveLength(1);
+    flips.shift()!();
+    cmds.onLoadResumed();
+    await tick();
     expect(d.send).toHaveBeenCalledTimes(2);
     expect(store.state('c1')!.queue.map((q) => q.clientId)).toEqual(['u3']);
   });
