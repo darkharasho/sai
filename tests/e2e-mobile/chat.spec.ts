@@ -102,3 +102,42 @@ test('composer stays above the keyboard', async ({ page }) => {
   }).toBeLessThanOrEqual(keyboardTop);
   await expect(page.getByRole('button', { name: 'Open menu' })).toBeInViewport();
 });
+
+test('follows the reply to the bottom through tool cards', async ({ page }) => {
+  await pair(page);
+  await newChat(page);
+  await send(page, 'run some tools please');
+  await expect(page.locator('.tool-call-card').first()).toBeVisible();
+  // Several tool calls land and grow while the reply streams; the view stays pinned.
+  for (let i = 0; i < 6; i++) {
+    await page.waitForTimeout(400);
+    const gap = await page.locator('.chat-messages').evaluate((el) => el.scrollHeight - el.clientHeight - el.scrollTop);
+    expect(gap).toBeLessThan(4);
+  }
+});
+
+test('mid-reply: Send sits beside Stop and queues the message', async ({ page }) => {
+  await pair(page);
+  await newChat(page);
+  await send(page, 'hello there');
+  await expect(page.getByTitle('Stop')).toBeVisible();
+  await page.getByRole('textbox').fill('and a follow-up');
+  const queued = page.getByTitle('Send (queued)');
+  await expect(queued).toBeVisible();
+  await queued.click();
+  await expect(page.getByTestId('queue-badge')).toContainText('1');
+  // The composer toolbar never runs off the screen.
+  const vw = page.viewportSize()!.width;
+  for (const b of await page.locator('.input-wrapper button').all()) {
+    const box = await b.boundingBox();
+    if (box) expect(box.x + box.width).toBeLessThanOrEqual(vw);
+  }
+});
+
+test('composer text is 16px (iOS zooms smaller focused inputs)', async ({ page }) => {
+  await pair(page);
+  await newChat(page);
+  const fs = await page.getByRole('textbox').evaluate((el) => getComputedStyle(el).fontSize);
+  expect(fs).toBe('16px');
+  await expect(page.getByTitle('Send')).toHaveCSS('height', '44px');
+});

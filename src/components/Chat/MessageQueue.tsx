@@ -67,7 +67,7 @@ export default function MessageQueue({ queue, onRemove, onPromote, onSendNow }: 
           key={`badge-${pulseKey}`}
         >
           <ListOrdered size={13} />
-          <span className="queue-badge-count">{queue.length} queued</span>
+          <span className="queue-badge-count">{queue.length}<span className="queue-badge-word"> queued</span></span>
         </motion.button>
 
         <AnimatePresence>
