@@ -11,6 +11,8 @@ const read = (p: string) => readFileSync(join(root, p), 'utf8');
 const nse = read('mobile/ios/App/NotificationService/NotificationService.swift');
 const keychain = read('mobile/ios/App/App/KeychainPlugin.swift');
 const appDelegate = read('mobile/ios/App/App/AppDelegate.swift');
+const prefixSwift = read('mobile/ios/App/Shared/AppIdentifierPrefix.swift');
+const iosYml = read('.github/workflows/ios.yml');
 const apns = read('relay/src/apns.ts');
 const routing = read('mobile/src/push/routing.ts');
 const registration = read('mobile/src/push/registration.ts');
@@ -68,7 +70,7 @@ describe('NSE contract', () => {
   it('leaves the fallback untouched on failure', () => {
     // The original content is what's delivered unless decryption fully succeeded.
     expect(nse).toMatch(/self\.fallbackContent = request\.content/);
-    expect(nse).toMatch(/handler\(fallback\)/);
+    expect(nse).toMatch(/bestAttemptContent \?\? fallbackContent/);
     // Every mutation happens on a copy, inside the success branch.
     const success = nse.indexOf('if let opened = NotificationService.open(');
     const deliver = nse.indexOf('deliver()', success);
@@ -83,7 +85,7 @@ describe('NSE contract', () => {
 
   it('the Keychain plugin takes accessGroup and adds the AppIdentifierPrefix', () => {
     expect(keychain).toContain('call.getString("accessGroup")');
-    expect(keychain).toContain('forInfoDictionaryKey: "AppIdentifierPrefix"');
+    expect(keychain).toContain('AppIdentifierPrefix.resolve(service: KeychainPlugin.service)');
     for (const m of ['get', 'set', 'remove', 'buildEnv', 'openSettings']) {
       expect(keychain).toContain(`CAPPluginMethod(name: "${m}"`);
       expect(keychain).toMatch(new RegExp(`@objc func ${m}\\(_ call: CAPPluginCall\\)`));
@@ -91,6 +93,48 @@ describe('NSE contract', () => {
     expect(keychain).toContain('"aps-environment"');
     expect(keychain).toContain('embedded');
     expect(keychain).toContain('UIApplication.openSettingsURLString');
+  });
+
+  it('delivers exactly once under a lock (timeWillExpire can race didReceive)', () => {
+    expect(nse).toContain('private let lock = NSLock()');
+    const deliverFn = nse.slice(nse.indexOf('private func deliver()'));
+    const body = deliverFn.slice(0, deliverFn.indexOf('\n    }\n'));
+    expect(body).toMatch(/lock\.lock\(\)[\s\S]*contentHandler = nil[\s\S]*lock\.unlock\(\)[\s\S]*handler\(content\)/);
+    // bestAttemptContent is only written under the lock.
+    expect(nse).toMatch(/lock\.lock\(\)\s*bestAttemptContent = content\s*lock\.unlock\(\)/);
+  });
+
+  it('both targets resolve the App ID prefix from Info.plist, else a Keychain probe', () => {
+    expect(prefixSwift).toContain('forInfoDictionaryKey: "AppIdentifierPrefix"');
+    expect(prefixSwift).toContain('!value.contains("$(")');
+    expect(prefixSwift).toContain('value.hasSuffix(".")');
+    // Probe: an item added without a group reports the default group, TEAMID.<group>.
+    expect(prefixSwift).toContain('"__prefix_probe"');
+    expect(prefixSwift).toContain('kSecReturnAttributes');
+    expect(prefixSwift).toContain('attributes[kSecAttrAccessGroup as String]');
+    expect(prefixSwift).toMatch(/group\.firstIndex\(of: "\."\)/);
+    expect(prefixSwift).toMatch(/fromInfoPlist\(\) \?\? fromKeychain\(service: service\)/);
+    expect(prefixSwift).toMatch(/cached = prefix/);
+    expect(nse).toContain('AppIdentifierPrefix.resolve(service: service)');
+    expect(keychain).toContain('AppIdentifierPrefix.resolve(service:');
+    // Compiled into both targets: two Sources build files for the one file reference.
+    const buildFiles = [...pbxproj.matchAll(/(\w{24}) \/\* AppIdentifierPrefix\.swift in Sources \*\/ = \{isa = PBXBuildFile/g)].map((m) => m[1]);
+    expect(buildFiles).toHaveLength(2);
+    const sourcesPhases = [...pbxproj.matchAll(/isa = PBXSourcesBuildPhase;[\s\S]*?files = \(([\s\S]*?)\);/g)].map((m) => m[1]);
+    expect(sourcesPhases).toHaveLength(2);
+    for (const phase of sourcesPhases) expect(buildFiles.some((id) => phase.includes(id))).toBe(true);
+  });
+
+  it('ios.yml writes the team into AppIdentifierPrefix in both Info.plists before signing, and checks it', () => {
+    expect(iosYml).toContain('NSE="$APP/PlugIns/NotificationService.appex"');
+    expect(iosYml).toMatch(/for plist in "\$APP\/Info\.plist" "\$NSE\/Info\.plist"/);
+    expect(iosYml).toContain('Set :AppIdentifierPrefix $TEAM_ID.');
+    expect(iosYml).toContain('Add :AppIdentifierPrefix string $TEAM_ID.');
+    expect(iosYml.indexOf('Set :AppIdentifierPrefix')).toBeLessThan(iosYml.indexOf('adhoc --entitlements'));
+    expect(iosYml).toContain('Print :AppIdentifierPrefix');
+    expect(iosYml).toContain('[ "$prefix" = "$TEAM_ID." ]');
+    expect(iosYml).toMatch(/for b in "\$APP" "\$NSE"; do[\s\S]*?Print :AppIdentifierPrefix[\s\S]*?done/);
+    expect(iosYml.indexOf('Print :AppIdentifierPrefix')).toBeLessThan(iosYml.indexOf('-exportArchive'));
   });
 
   it('the AppDelegate forwards APNs registration to @capacitor/push-notifications', () => {

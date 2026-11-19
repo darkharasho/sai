@@ -21,6 +21,9 @@ class NotificationService: UNNotificationServiceExtension {
     private static let sealAccountPrefix = "seal:"
     private static let kinds: Set<String> = ["done", "approval", "question", "error"]
 
+    /// Guards the three fields below: serviceExtensionTimeWillExpire can run while didReceive
+    /// is still working, and the handler must be called exactly once.
+    private let lock = NSLock()
     private var contentHandler: ((UNNotificationContent) -> Void)?
     /// The original request content: what is delivered on any failure.
     private var fallbackContent: UNNotificationContent?
@@ -29,8 +32,10 @@ class NotificationService: UNNotificationServiceExtension {
 
     override func didReceive(_ request: UNNotificationRequest,
                              withContentHandler contentHandler: @escaping (UNNotificationContent) -> Void) {
+        lock.lock()
         self.contentHandler = contentHandler
         self.fallbackContent = request.content
+        lock.unlock()
 
         if let opened = NotificationService.open(request.content.userInfo),
            let content = request.content.mutableCopy() as? UNMutableNotificationContent {
@@ -42,7 +47,9 @@ class NotificationService: UNNotificationServiceExtension {
             info["c"] = opened.plain.chatId
             info["p"] = opened.plain.projectPath
             content.userInfo = info
+            lock.lock()
             bestAttemptContent = content
+            lock.unlock()
         }
         deliver()
     }
@@ -53,12 +60,14 @@ class NotificationService: UNNotificationServiceExtension {
     }
 
     private func deliver() {
-        guard let handler = contentHandler else { return }
+        lock.lock()
+        let handler = contentHandler
         contentHandler = nil
-        if let best = bestAttemptContent {
-            handler(best)
-        } else if let fallback = fallbackContent {
-            handler(fallback)
+        let content: UNNotificationContent? = bestAttemptContent ?? fallbackContent
+        lock.unlock()
+        // Called outside the lock; whoever took the handler is the only caller.
+        if let handler = handler, let content = content {
+            handler(content)
         }
     }
 
@@ -101,7 +110,7 @@ class NotificationService: UNNotificationServiceExtension {
 
     /// Every `seal:<keyId>` item in the shared group: (keyId, 32 raw key bytes).
     static func sealKeys() -> [(String, Data)] {
-        guard let prefix = appIdentifierPrefix() else { return [] }
+        guard let prefix = AppIdentifierPrefix.resolve(service: service) else { return [] }
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -129,14 +138,5 @@ class NotificationService: UNNotificationServiceExtension {
             keys.append((String(account.dropFirst(sealAccountPrefix.count)), raw))
         }
         return keys
-    }
-
-    /// `TEAMID.` from this extension's Info.plist (`$(AppIdentifierPrefix)`), nil if unexpanded.
-    static func appIdentifierPrefix() -> String? {
-        guard let prefix = Bundle.main.object(forInfoDictionaryKey: "AppIdentifierPrefix") as? String,
-              !prefix.isEmpty, !prefix.contains("$(") else {
-            return nil
-        }
-        return prefix.hasSuffix(".") ? prefix : prefix + "."
     }
 }

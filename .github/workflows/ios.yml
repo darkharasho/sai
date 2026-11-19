@@ -142,6 +142,15 @@ jobs:
           # with the project's entitlements, $(AppIdentifierPrefix) expanded to the team. Export then
           # re-signs them for distribution and sets aps-environment to production.
           APP="$ARCHIVE/Products/Applications/App.app"
+          NSE="$APP/PlugIns/NotificationService.appex"
+          # Info.plist's AppIdentifierPrefix ($(AppIdentifierPrefix)) is only expanded by a signing
+          # build, so the unsigned archive has it empty. The app and extension name the shared
+          # Keychain group with it: write the team in now, before signing seals Info.plist. (They
+          # also fall back to a Keychain probe at runtime.)
+          for plist in "$APP/Info.plist" "$NSE/Info.plist"; do
+            /usr/libexec/PlistBuddy -c "Set :AppIdentifierPrefix $TEAM_ID." "$plist" 2>/dev/null \
+              || /usr/libexec/PlistBuddy -c "Add :AppIdentifierPrefix string $TEAM_ID." "$plist"
+          done
           ENT_DIR="$RUNNER_TEMP/entitlements"
           mkdir -p "$ENT_DIR"
           for f in App/App.entitlements NotificationService/NotificationService.entitlements; do
@@ -153,12 +162,15 @@ jobs:
                     "$APP"/PlugIns/*.appex/Frameworks/*.framework; do
             adhoc "$fw"
           done
-          adhoc --entitlements "$ENT_DIR/NotificationService.entitlements" "$APP/PlugIns/NotificationService.appex"
+          adhoc --entitlements "$ENT_DIR/NotificationService.entitlements" "$NSE"
           adhoc --entitlements "$ENT_DIR/App.entitlements" "$APP"
-          for b in "$APP" "$APP/PlugIns/NotificationService.appex"; do
+          for b in "$APP" "$NSE"; do
             ents=$(codesign -d --entitlements - --xml "$b" 2>/dev/null)
             grep -q "$TEAM_ID.com.project96.sai.shared" <<<"$ents" \
               || { echo "::error::$b has no shared keychain-access-groups entitlement"; exit 1; }
+            prefix=$(/usr/libexec/PlistBuddy -c "Print :AppIdentifierPrefix" "$b/Info.plist" 2>/dev/null || true)
+            [ "$prefix" = "$TEAM_ID." ] \
+              || { echo "::error::$b/Info.plist AppIdentifierPrefix is '$prefix', not '$TEAM_ID.'"; exit 1; }
           done
           grep -q aps-environment <<<"$(codesign -d --entitlements - --xml "$APP" 2>/dev/null)" \
             || { echo "::error::App.app has no aps-environment entitlement"; exit 1; }

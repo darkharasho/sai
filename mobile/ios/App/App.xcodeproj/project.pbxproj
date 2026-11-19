@@ -19,6 +19,8 @@
 		5A1C4E0000000000000000A2 /* KeychainPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A1C4E0000000000000000A1 /* KeychainPlugin.swift */; };
 		5A1C4F0000000000000000B6 /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A1C4F0000000000000000B2 /* NotificationService.swift */; };
 		5A1C4F0000000000000000B7 /* NotificationService.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 5A1C4F0000000000000000B1 /* NotificationService.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		5A1C4F0000000000000000C4 /* AppIdentifierPrefix.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A1C4F0000000000000000C3 /* AppIdentifierPrefix.swift */; };
+		5A1C4F0000000000000000C5 /* AppIdentifierPrefix.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A1C4F0000000000000000C3 /* AppIdentifierPrefix.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -63,6 +65,7 @@
 		5A1C4F0000000000000000B3 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		5A1C4F0000000000000000B4 /* NotificationService.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = NotificationService.entitlements; sourceTree = "<group>"; };
 		5A1C4F0000000000000000B5 /* App.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = App.entitlements; sourceTree = "<group>"; };
+		5A1C4F0000000000000000C3 /* AppIdentifierPrefix.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppIdentifierPrefix.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -90,6 +93,7 @@
 				958DCC722DB07C7200EA8C5F /* debug.xcconfig */,
 				504EC3061FED79650016851F /* App */,
 				5A1C4F0000000000000000B8 /* NotificationService */,
+				5A1C4F0000000000000000C6 /* Shared */,
 				504EC3051FED79650016851F /* Products */,
 			);
 			sourceTree = "<group>";
@@ -129,6 +133,14 @@
 				5A1C4F0000000000000000B4 /* NotificationService.entitlements */,
 			);
 			path = NotificationService;
+			sourceTree = "<group>";
+		};
+		5A1C4F0000000000000000C6 /* Shared */ = {
+			isa = PBXGroup;
+			children = (
+				5A1C4F0000000000000000C3 /* AppIdentifierPrefix.swift */,
+			);
+			path = Shared;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -245,6 +257,7 @@
 				504EC3081FED79650016851F /* AppDelegate.swift in Sources */,
 				9582B6832FE993A70072D4E8 /* SceneDelegate.swift in Sources */,
 				5A1C4E0000000000000000A2 /* KeychainPlugin.swift in Sources */,
+				5A1C4F0000000000000000C4 /* AppIdentifierPrefix.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -253,6 +266,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				5A1C4F0000000000000000B6 /* NotificationService.swift in Sources */,
+				5A1C4F0000000000000000C5 /* AppIdentifierPrefix.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

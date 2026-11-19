@@ -19,7 +19,7 @@ class MainViewController: CAPBridgeViewController {
 /// - `Keychain.openSettings()`: opens this app's page in iOS Settings.
 ///
 /// `accessGroup` is the group without the team prefix (`com.project96.sai.shared`); the prefix is
-/// read at runtime from the `AppIdentifierPrefix` Info.plist key (`$(AppIdentifierPrefix)`). Seal
+/// resolved at runtime (Shared/AppIdentifierPrefix.swift: Info.plist, else a Keychain probe). Seal
 /// keys (`seal:<keyId>`) live in that shared group, which the extension also holds. Everything
 /// else goes to the app's private group: it is first in App.entitlements' keychain-access-groups,
 /// and the first entry is the default group for items added without an explicit group.
@@ -37,15 +37,6 @@ public class KeychainPlugin: CAPPlugin, CAPBridgedPlugin {
 
     private static let service = "com.project96.sai.machines"
 
-    /// `TEAMID.` from Info.plist, or nil when the build had no team (unsigned simulator builds).
-    static func appIdentifierPrefix() -> String? {
-        guard let prefix = Bundle.main.object(forInfoDictionaryKey: "AppIdentifierPrefix") as? String,
-              !prefix.isEmpty, !prefix.contains("$(") else {
-            return nil
-        }
-        return prefix.hasSuffix(".") ? prefix : prefix + "."
-    }
-
     private enum GroupError: Error { case unavailable }
 
     /// The base query; adds `kSecAttrAccessGroup` when the call names an access group.
@@ -56,7 +47,7 @@ public class KeychainPlugin: CAPPlugin, CAPBridgedPlugin {
             kSecAttrAccount as String: key
         ]
         if let group = call.getString("accessGroup"), !group.isEmpty {
-            guard let prefix = KeychainPlugin.appIdentifierPrefix() else { throw GroupError.unavailable }
+            guard let prefix = AppIdentifierPrefix.resolve(service: KeychainPlugin.service) else { throw GroupError.unavailable }
             query[kSecAttrAccessGroup as String] = prefix + group
         }
         return query
@@ -70,7 +61,7 @@ public class KeychainPlugin: CAPPlugin, CAPBridgedPlugin {
         do {
             return try baseQuery(key, call)
         } catch {
-            call.reject("Keychain access group unavailable (no AppIdentifierPrefix in this build)")
+            call.reject("Keychain access group unavailable (no App ID prefix: Info.plist and Keychain probe both failed)")
             return nil
         }
     }
