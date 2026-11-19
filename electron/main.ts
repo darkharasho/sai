@@ -81,6 +81,7 @@ import { ChatLogStore } from './services/chatlog/store';
 import { ChatLogService, liveChatIds, realPath } from './services/chatlog/service';
 import { ChatCommands, type ChatCommand } from './services/chatlog/commands';
 import { createProviderDispatch } from './services/chatlog/providerDispatch';
+import { getChatSync, setChatSync } from './services/chatlog/holder';
 import { setLogImageReferences } from './services/toolResultImageStore';
 import { RendererProxy } from './services/remote/renderer-proxy';
 import { registerGitHandlers } from './services/git';
@@ -184,9 +185,8 @@ let chatLogStore: ChatLogStore | null = null;
 let chatLog: ChatLogService | null = null;
 let chatLogRepaired = false;
 // The one command path into chats (send/approve/queue/settings); the phone
-// bridge gets it via getChatCommands() (chat sync Task 10).
+// bridge reads it (with the store) from chatlog/holder.ts.
 let chatCommands: ChatCommands | null = null;
-export function getChatCommands(): ChatCommands | null { return chatCommands; }
 
 /** Live backend scopes for a provider, across every project. */
 function liveScopesOf(provider: string): Array<{ projectPath: string; scope: string }> {
@@ -254,6 +254,7 @@ function initChatLog(): void {
   });
   ipcMain.handle('chatlog:command', (_e, cmd: ChatCommand) => commands.run(cmd));
   chatCommands = commands;
+  setChatSync({ store: chatLogStore, service, commands });
   setLogImageReferences(() => service.referencedImageFiles());
   setLogModelKeyReferences(() => service.referencedModelKeys());
 }
@@ -305,6 +306,26 @@ function writeRemoteKv(patch: RemoteKv): void {
   fs.writeFileSync(remoteKvPath, JSON.stringify(merged, null, 2), 'utf8');
 }
 
+/** Writes a phone's data-URL image attachments to temp files; returns their paths (unreadable items skipped). */
+function writeRemoteImages(imgs?: string[]): string[] {
+  if (!imgs || imgs.length === 0) return [];
+  const tmpDir = path.join(app.getPath('temp'), 'sai-images');
+  try { fs.mkdirSync(tmpDir, { recursive: true }); } catch { /* best-effort */ }
+  const out: string[] = [];
+  for (const dataUrl of imgs) {
+    const m = dataUrl.match(/^data:image\/([\w+.-]+);base64,(.+)$/);
+    if (!m) continue;
+    const ext = (m[1] || 'png').replace(/[^\w]/g, '') || 'png';
+    const filename = `image-${Date.now()}-${crypto.randomBytes(4).toString('hex')}.${ext}`;
+    const filepath = path.join(tmpDir, filename);
+    try {
+      fs.writeFileSync(filepath, Buffer.from(m[2], 'base64'));
+      out.push(filepath);
+    } catch { /* skip unreadable item */ }
+  }
+  return out;
+}
+
 async function getOrInitRemote(): Promise<RemoteModule> {
   if (remote) return remote;
   const userDataDir = app.getPath('userData');
@@ -349,29 +370,13 @@ async function getOrInitRemote(): Promise<RemoteModule> {
         loadScreenshot: async () => null, // Phase 3+ wires this
         port: REMOTE_PORT,
         fallbackPorts: [17831, 17832],
+        chatSync: getChatSync,
+        saveImages: (imgs) => writeRemoteImages(imgs),
         sendPrompt: (args) => {
           // Persist base64 image attachments to temp files (parity with the
           // desktop path, which expects on-disk paths). Fire-and-forget:
           // bridge-server doesn't await this callback.
-          const writeImages = (imgs?: string[]): string[] => {
-            if (!imgs || imgs.length === 0) return [];
-            const tmpDir = path.join(app.getPath('temp'), 'sai-images');
-            try { fs.mkdirSync(tmpDir, { recursive: true }); } catch { /* best-effort */ }
-            const out: string[] = [];
-            for (const dataUrl of imgs) {
-              const m = dataUrl.match(/^data:image\/([\w+.-]+);base64,(.+)$/);
-              if (!m) continue;
-              const ext = (m[1] || 'png').replace(/[^\w]/g, '') || 'png';
-              const filename = `image-${Date.now()}-${crypto.randomBytes(4).toString('hex')}.${ext}`;
-              const filepath = path.join(tmpDir, filename);
-              try {
-                fs.writeFileSync(filepath, Buffer.from(m[2], 'base64'));
-                out.push(filepath);
-              } catch { /* skip unreadable item */ }
-            }
-            return out;
-          };
-          const imagePaths = writeImages(args.images);
+          const imagePaths = writeRemoteImages(args.images);
           // Adopt the session the device is attached to so ensureProcess
           // spawns with --resume instead of forking a fresh context. The
           // workspace may not exist yet (first remote message after launch).
