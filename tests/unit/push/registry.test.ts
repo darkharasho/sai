@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -28,10 +28,10 @@ function validFrame(over: Record<string, unknown> = {}) {
   };
 }
 
-function mk(file: string) {
+function mk(file: string, live: (deviceId: string) => boolean = () => true) {
   const registry = new PushRegistry(file);
   const presence = new PhonePresence();
-  const v2 = new ChatV2({ bus: new SessionBus(), chat: () => null, push: { registry, presence } });
+  const v2 = new ChatV2({ bus: new SessionBus(), chat: () => null, push: { registry, presence, isLiveDevice: live } });
   const frames: any[] = [];
   const ws = { send: (d: string) => { frames.push(JSON.parse(d)); } };
   return { registry, presence, v2, ws, frames };
@@ -138,6 +138,25 @@ describe('push registry', () => {
     expect(presence.isViewing('dev-1', 'c1')).toBe(false);
   });
 
+  it('push frames from a device that is no longer paired are refused and not stored', async () => {
+    const revoked = new Set(['dev-old']);
+    const { registry, presence, v2, ws, frames } = mk(':memory:', (id) => !revoked.has(id));
+    registry.set('dev-old', parsePushRegistration(validFrame()) as any);
+    await v2.handle(ws, validFrame({ sendSecret: b64url(32).replace(/^./, 'Q') }), { deviceId: 'dev-old' });
+    await v2.handle(ws, { type: 'phone.presence', chatId: 'c1', foreground: true }, { deviceId: 'dev-old' });
+    await v2.handle(ws, { type: 'push.unregister', reqId: 'u' }, { deviceId: 'dev-old' });
+    expect(frames.map((f) => [f.type, f.code])).toEqual([
+      ['chat.error', 'unauthorized'], ['chat.error', 'unauthorized'], ['chat.error', 'unauthorized'],
+    ]);
+    // Nothing changed for the stale device (the revoke path owns its row).
+    expect(registry.get('dev-old')?.sendSecret).toBe(b64url(32));
+    expect(presence.isViewing('dev-old', 'c1')).toBe(false);
+    // A live device on the same server is unaffected.
+    frames.length = 0;
+    await v2.handle(ws, validFrame(), { deviceId: 'dev-new' });
+    expect(frames).toEqual([{ v: 2, type: 'push.registered', reqId: 'r1' }]);
+  });
+
   it('revoke device deletes registration', () => {
     const file = path.join(tmp(), 'push-registrations.json');
     const registry = new PushRegistry(file);
@@ -205,6 +224,98 @@ describe('push frames over the bridge', () => {
       ws.close();
       await new Promise((res) => setTimeout(res, 50));
       expect(presence.isViewing(ok.deviceId, 'c1')).toBe(false);
+    } finally {
+      await server.stop();
+    }
+  });
+});
+
+describe('bridge heartbeat', () => {
+  afterEach(() => { vi.useRealTimers(); });
+
+  async function setup() {
+    const { BridgeServer, BRIDGE_HEARTBEAT_MS } = await import('@electron/services/remote/bridge-server');
+    const WebSocket = (await import('ws')).default;
+    const pairing = new PairingStore(':memory:');
+    const registry = new PushRegistry(':memory:');
+    const presence = new PhonePresence();
+    bindRevocation(pairing, registry); // as main.ts wires it
+    const server = new BridgeServer({
+      tailnetIp: '127.0.0.1', pairing, bus: new SessionBus(), pwaDir: null,
+      screenshotSecret: 'x', loadScreenshot: async () => null, pushNotifications: { registry, presence },
+    });
+    const { port } = await server.start();
+    async function connect(label: string, clientId: string, autoPong: boolean, existingToken?: string) {
+      let token = existingToken;
+      if (!token) {
+        const code = server.mintPairingCode();
+        const r = await fetch(`http://127.0.0.1:${port}/pair`, {
+          method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code, deviceLabel: label, clientId }),
+        });
+        token = (await r.json()).token as string;
+      }
+      const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`, { autoPong });
+      const closed = new Promise<void>((res) => ws.once('close', () => res()));
+      await new Promise((res) => ws.once('open', res));
+      const authed = new Promise<any>((res) => ws.on('message', (d) => { const m = JSON.parse(d.toString()); if (m.type === 'auth_ok') res(m); }));
+      ws.send(JSON.stringify({ type: 'auth', token }));
+      const ok = await authed;
+      return { ws, deviceId: ok.deviceId as string, closed, token };
+    }
+    return { server, pairing, registry, presence, connect, BRIDGE_HEARTBEAT_MS, WebSocket, port };
+  }
+
+  const settle = (ms = 30) => new Promise((res) => setTimeout(res, ms));
+
+  it('terminates a socket that misses a pong, clearing its foreground presence', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    const { server, presence, connect, BRIDGE_HEARTBEAT_MS } = await setup();
+    expect(BRIDGE_HEARTBEAT_MS).toBe(30_000);
+    try {
+      // The half-open socket: never answers pings (a phone that switched networks).
+      const dead = await connect('Phone', 'client-1', false);
+      // The same phone reconnects (same device, new socket): answers pings and reports background.
+      const live = await connect('Phone', 'client-1', true, dead.token);
+      expect(live.deviceId).toBe(dead.deviceId);
+      dead.ws.send(JSON.stringify({ v: 2, type: 'phone.presence', chatId: 'c1', foreground: true }));
+      live.ws.send(JSON.stringify({ v: 2, type: 'phone.presence', chatId: 'c1', foreground: false }));
+      await settle();
+      // The dead socket's foreground wins the union: pushes for c1 would be suppressed.
+      expect(presence.isViewing(dead.deviceId, 'c1')).toBe(true);
+      vi.advanceTimersByTime(BRIDGE_HEARTBEAT_MS); // ping
+      await settle();
+      expect(presence.isViewing(dead.deviceId, 'c1')).toBe(true); // one missed beat is not yet fatal
+      vi.advanceTimersByTime(BRIDGE_HEARTBEAT_MS); // no pong since the last ping: terminate
+      await dead.closed;
+      await settle();
+      expect(presence.isViewing(dead.deviceId, 'c1')).toBe(false);
+      // A socket that answers pings survives any number of beats.
+      for (let i = 0; i < 3; i++) { vi.advanceTimersByTime(BRIDGE_HEARTBEAT_MS); await settle(); }
+      expect(live.ws.readyState).toBe(live.ws.OPEN);
+      live.ws.close();
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it('a superseded device (re-paired) cannot re-register on its old socket', async () => {
+    const { server, registry, connect } = await setup();
+    try {
+      const old = await connect('Phone', 'client-1', true);
+      old.ws.send(JSON.stringify(validFrame({ v: 2 })));
+      await settle(50);
+      expect(registry.get(old.deviceId)).not.toBeNull();
+      // Re-pair from the same phone: the old device row is revoked.
+      const fresh = await connect('Phone', 'client-1', true);
+      expect(registry.get(old.deviceId)).toBeNull();
+      // The old socket replays push.register: refused, nothing stored.
+      const replies: any[] = [];
+      old.ws.on('message', (d) => replies.push(JSON.parse(d.toString())));
+      old.ws.send(JSON.stringify(validFrame({ v: 2, reqId: 'stale' })));
+      await settle(50);
+      expect(registry.get(old.deviceId)).toBeNull();
+      expect(replies.some((m) => m.type === 'push.registered')).toBe(false);
+      old.ws.close(); fresh.ws.close();
     } finally {
       await server.stop();
     }

@@ -149,6 +149,23 @@ describe('push triggers', () => {
     expect(sent).toEqual([]);
   });
 
+  it('an ACP Stop answered with stopReason cancelled does not push', () => {
+    const { ev, assistant, sent } = mk();
+    // onStop awaits session/cancel; the agent answers session/prompt with
+    // stopReason "cancelled" first, so the send path emits result then done.
+    ev('c1', { type: 'streaming_start', turnSeq: 1 });
+    assistant('c1', 'partial');
+    ev('c1', { type: 'result', turnSeq: 1, stopReason: 'cancelled', usage: {} });
+    ev('c1', { type: 'done', turnSeq: 1 });
+    expect(sent).toEqual([]);
+    // A normal ACP end (stopReason end_turn) still pushes.
+    ev('c1', { type: 'streaming_start', turnSeq: 2 });
+    assistant('c1', 'complete');
+    ev('c1', { type: 'result', turnSeq: 2, stopReason: 'end_turn', usage: {} });
+    ev('c1', { type: 'done', turnSeq: 2 });
+    expect(sent.map((s) => s.plain.body)).toEqual(['complete']);
+  });
+
   it('a turn that ends in an error pushes error with its message', () => {
     const { ev, sent } = mk();
     ev('c1', { type: 'streaming_start', turnSeq: 1 });

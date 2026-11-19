@@ -2,7 +2,8 @@
 // main and turns four moments into a sealed push (sender.ts):
 //
 //   done      a turn ended naturally: a current-turn `result` (not an empty
-//             continuation, not a background/scheduled wait) then the `done`
+//             continuation, not an ACP stopReason "cancelled", not a
+//             background/scheduled wait) then the `done`
 //             that closed the reduced turn. A user Stop and the pre-emptive
 //             done of a superseded turn carry no result, and a superseded
 //             turn's late result/done is stale for the reducer (turnSeq guard),
@@ -178,7 +179,9 @@ export function createPushTriggers(opts: PushTriggersOpts): { dispose(): void } 
         const errors = Array.isArray(ev.errors) ? ev.errors.filter((e) => typeof e === 'string') : [];
         t.result = {
           ok: !failed,
-          finished: !failed && ev.continuation !== true && !waits(ev),
+          // continuation: the SDK's empty-result boundary; stopReason cancelled:
+          // an ACP prompt answered by the user's Stop.
+          finished: !failed && ev.continuation !== true && ev.stopReason !== 'cancelled' && !waits(ev),
           text: str(ev.result) || (failed ? String(errors[0] ?? '') : ''),
         };
         if (!failed) t.error = null;

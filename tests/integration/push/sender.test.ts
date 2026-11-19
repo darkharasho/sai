@@ -11,6 +11,7 @@ import type { PushPlain } from '../../../src/lib/push/types';
 interface Hit { url: string; method: string; headers: http.IncomingHttpHeaders; body: string }
 const hits: Hit[] = [];
 const statusFor = new Map<string, number>(); // pushId → status; 'sleep' pushes hang 10s
+const bodyFor = new Map<string, string>(); // pushId → raw answer body (default JSON {error})
 const SLEEP = -1;
 let server: http.Server;
 let base = '';
@@ -30,8 +31,9 @@ beforeAll(async () => {
         return;
       }
       res.statusCode = status;
-      res.setHeader('content-type', 'application/json');
-      res.end(status === 202 ? '{"ok":true}' : '{"error":"x"}');
+      const raw = bodyFor.get(pushId);
+      res.setHeader('content-type', raw && raw.startsWith('<') ? 'text/html' : 'application/json');
+      res.end(raw ?? (status === 202 ? '{"ok":true}' : '{"error":"x"}'));
     });
   });
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()));
@@ -41,7 +43,7 @@ afterAll(async () => {
   server.closeAllConnections();
   await new Promise<void>((r) => server.close(() => r()));
 });
-beforeEach(() => { hits.length = 0; statusFor.clear(); });
+beforeEach(() => { hits.length = 0; statusFor.clear(); bodyFor.clear(); });
 
 let n = 0;
 function reg(): PushRegistration {
@@ -100,14 +102,14 @@ describe('push sender', () => {
 
   it('relay 401 deletes registration', async () => {
     const { registry, send, logs } = mk();
-    for (const status of [401, 404, 410]) {
+    for (const status of [401, 404]) {
       const r = reg();
       registry.set(`dev-${status}`, r);
       statusFor.set(r.pushId, status);
       expect(await send({ deviceId: `dev-${status}`, reg: r }, plain)).toBe('removed');
       expect(registry.get(`dev-${status}`)).toBeNull();
     }
-    expect(logs.map((l) => l.data.status)).toEqual([401, 404, 410]);
+    expect(logs.map((l) => l.data.status)).toEqual([401, 404]);
     // A stale target never deletes the phone's newer registration.
     const old = reg();
     const fresh = { ...reg(), pushId: old.pushId, sendSecret: 'T'.repeat(43) };
@@ -115,6 +117,35 @@ describe('push sender', () => {
     statusFor.set(old.pushId, 401);
     await send({ deviceId: 'dev-x', reg: old }, plain);
     expect(registry.get('dev-x')).toEqual(fresh);
+  });
+
+  it('410 drops the push but keeps the registration (it can race a re-register)', async () => {
+    const { registry, send } = mk();
+    const r = reg();
+    registry.set('dev-1', r);
+    statusFor.set(r.pushId, 410);
+    bodyFor.set(r.pushId, '{"error":"unregistered","reason":"Unregistered"}');
+    expect(await send({ deviceId: 'dev-1', reg: r }, plain)).toBe('dropped');
+    expect(registry.get('dev-1')).toEqual(r);
+  });
+
+  it('a 401/404 that is not the relay JSON error never deletes', async () => {
+    const { registry, send } = mk();
+    const cases: Array<[number, string]> = [
+      [404, '<!doctype html><title>Not Found</title>'], // a misrouted SAI_PUSH_RELAY_URL
+      [404, ''],
+      [401, '{"message":"unauthorized"}'],              // JSON, but no error string
+      [404, '{"error":42}'],
+      [404, '["error"]'],
+    ];
+    for (const [status, body] of cases) {
+      const r = reg();
+      registry.set('dev-1', r);
+      statusFor.set(r.pushId, status);
+      bodyFor.set(r.pushId, body);
+      expect(await send({ deviceId: 'dev-1', reg: r }, plain)).toBe('dropped');
+      expect(registry.get('dev-1')).toEqual(r);
+    }
   });
 
   it('429 and relay errors drop quietly and keep the registration', async () => {

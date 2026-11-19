@@ -51,6 +51,8 @@ export interface ChatV2Opts {
   push?: {
     registry: Pick<PushRegistry, 'set' | 'delete'>;
     presence: Pick<PhonePresence, 'set' | 'clear'>;
+    /** False once the device is revoked or superseded by a re-pair (its old sockets may still be open). */
+    isLiveDevice: (deviceId: string) => boolean;
   };
 }
 
@@ -358,7 +360,7 @@ export class ChatV2 {
   private pushFrame(ws: V2Socket, msg: Frame, deviceId: string | null): void {
     const push = this.opts.push;
     if (!push) return this.error(ws, null, 'unavailable', 'push notifications are not available', msg.reqId);
-    if (!deviceId) return this.error(ws, null, 'unauthorized', 'no paired device', msg.reqId);
+    if (!deviceId || !push.isLiveDevice(deviceId)) return this.error(ws, null, 'unauthorized', 'no paired device', msg.reqId);
     if (msg.type === 'phone.presence') {
       if (typeof msg.foreground !== 'boolean') return;
       const chatId = msg.chatId === null ? null : chatIdOf(msg.chatId);

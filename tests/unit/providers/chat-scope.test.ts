@@ -190,6 +190,22 @@ describe('Kimi (ACP) scope', () => {
     expect(recorded.filter(m => m.projectPath === PROJECT)).toEqual(events);
   });
 
+  it('the ACP result carries the prompt stopReason (a cancelled turn is not a finish)', async () => {
+    acp.onPrompt = async () => ({ stopReason: 'cancelled', usage: { input_tokens: 1, output_tokens: 0 } });
+    listeners.get('kimi:send')![0]({}, PROJECT, 'hello', [], 'auto_edit', undefined, 'kimi-k3', 'chat-k3');
+    for (let i = 0; i < 5; i++) await tick();
+    const result = v1Sent().find(m => m.projectPath === PROJECT && m.type === 'result');
+    expect(result).toMatchObject({ scope: 'chat-k3', stopReason: 'cancelled' });
+    // A prompt result without a stopReason adds none.
+    acp.onPrompt = null;
+    win.webContents.send.mockClear();
+    listeners.get('kimi:send')![0]({}, PROJECT, 'again', [], 'auto_edit', undefined, 'kimi-k3', 'chat-k4');
+    for (let i = 0; i < 5; i++) await tick();
+    const plain = v1Sent().find(m => m.projectPath === PROJECT && m.type === 'result');
+    expect(plain).toBeDefined();
+    expect('stopReason' in plain).toBe(false);
+  });
+
   it('kimi:stop with a chat id ends that chat', async () => {
     const ws = getOrCreate(PROJECT);
     ws.kimi.terminalSessions.set('chat-k2', 'kimi-sx');

@@ -135,6 +135,11 @@ export class PairingStore {
     for (const cb of this.revokeListeners) { try { cb(deviceId); } catch { /* isolate one listener */ } }
   }
 
+  /** True for a paired device that is not revoked (or superseded by a re-pair). */
+  isLive(deviceId: string): boolean {
+    return this.rows.some((r) => r.id === deviceId && !r.revokedAt);
+  }
+
   list(): PairedDevice[] {
     return [...this.rows]
       .sort((a, b) => b.pairedAt - a.pairedAt)
