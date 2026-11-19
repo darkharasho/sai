@@ -7,7 +7,11 @@ export interface UseChatLog {
   /** null until the first open resolves */
   state: ChatState | null;
   meta: ChatMeta | null;
-  /** The entries applied in the most recent batch; set when that batch's state update is scheduled. */
+  /**
+   * Entries applied since the consumer last drained it. The hook APPENDS (never replaces) when a batch's
+   * state update is scheduled; the consumer drains it by setting `lastApplied.current = []`. Initial-open
+   * history is never added (loading history must not trigger side effects). Reset on chatId change.
+   */
   lastApplied: React.MutableRefObject<ChatLogEntry[]>;
 }
 
@@ -15,16 +19,17 @@ export interface UseChatLog {
  * Renders a chat from the durable main-process log: subscribe first (buffering), open, reduce,
  * then follow live entries with seq dedupe, per-frame batching and gap recovery.
  */
+const backoff = (attempt: number) => Math.min(250 * 2 ** attempt, 5000);
+
 export function useChatLog(chatId: string | null, fallbackSettings: ChatSettings): UseChatLog {
-  const [state, setState] = useState<ChatState | null>(null);
-  const [meta, setMeta] = useState<ChatMeta | null>(null);
+  const [held, setHeld] = useState<{ chatId: string; state: ChatState | null; meta: ChatMeta | null } | null>(null);
+  const setState = (st: ChatState | null) => setHeld((h) => ({ chatId: chatId as string, meta: null, ...(h && h.chatId === chatId ? h : {}), state: st }));
+  const setMeta = (m: ChatMeta | null) => setHeld((h) => ({ chatId: chatId as string, state: null, ...(h && h.chatId === chatId ? h : {}), meta: m }));
   const lastApplied = useRef<ChatLogEntry[]>([]);
   const settingsRef = useRef(fallbackSettings);
   settingsRef.current = fallbackSettings;
 
   useEffect(() => {
-    setState(null);
-    setMeta(null);
     lastApplied.current = [];
     const api = window.sai?.chatlog;
     if (!chatId || !api) return;
@@ -37,6 +42,10 @@ export function useChatLog(chatId: string | null, fallbackSettings: ChatSettings
     let queue: ChatLogEntry[] = [];
     let buffer: ChatLogEntry[] = []; // live entries held while an open is pending
     let raf: number | null = null;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    let recoverFails = 0;
+    let initialFails = 0;
+    let initialFailed = false; // initial open is failing: live entries are dropped (open(0) re-reads them)
 
     const flush = () => {
       if (raf !== null) { cancelAnimationFrame(raf); raf = null; }
@@ -44,7 +53,7 @@ export function useChatLog(chatId: string | null, fallbackSettings: ChatSettings
       const batch = queue;
       queue = [];
       current = reduceMany(current, batch);
-      lastApplied.current = batch;
+      lastApplied.current = [...lastApplied.current, ...batch];
       const next = current;
       setState(next);
     };
@@ -64,12 +73,18 @@ export function useChatLog(chatId: string | null, fallbackSettings: ChatSettings
           current = reduceMany(current!, applied);
         }
         head = current.lastSeq;
-        lastApplied.current = applied;
+        lastApplied.current = [...lastApplied.current, ...applied];
         setState(current);
         if (res.meta) setMeta(res.meta);
         recovering = false;
+        recoverFails = 0;
         drainBuffer();
-      }).catch(() => { if (alive) { recovering = false; drainBuffer(); } });
+      }).catch(() => {
+        if (!alive) return;
+        recovering = false;
+        // Keep the gap entry buffered; retry with capped backoff (or sooner via the next in-order entry).
+        retryTimer = setTimeout(() => { retryTimer = null; if (alive && !recovering) recover(); }, backoff(recoverFails++));
+      });
     };
 
     const handle = (entry: ChatLogEntry) => {
@@ -81,7 +96,7 @@ export function useChatLog(chatId: string | null, fallbackSettings: ChatSettings
         return;
       }
       buffer.push(entry); // gap: fetch the missing range, then replay anything held
-      if (!recovering) recover();
+      if (!recovering && retryTimer === null) recover();
     };
 
     const drainBuffer = () => {
@@ -94,29 +109,41 @@ export function useChatLog(chatId: string | null, fallbackSettings: ChatSettings
 
     const off = api.onEvent((entry) => {
       if (!alive || !entry || entry.chatId !== chatId) return;
+      if (!ready && initialFailed) return;
       if (!ready || recovering) { buffer.push(entry); return; }
       handle(entry);
     });
 
-    (async () => {
-      try { await ensureChatInLog(chatId); } catch { /* open anyway */ }
-      const res = await api.open(chatId, 0);
-      if (!alive) return;
-      const base = res.snapshot ? res.snapshot.state : emptyChatState(settingsRef.current);
-      current = reduceMany(base, res.entries);
-      head = current.lastSeq;
-      ready = true;
-      setState(current);
-      setMeta(res.meta ?? null);
-      drainBuffer();
-    })().catch(() => { /* leave state null; a later switch or remount retries */ });
+    const loadInitial = () => {
+      initialFailed = false;
+      (async () => {
+        try { await ensureChatInLog(chatId); } catch { /* open anyway */ }
+        const res = await api.open(chatId, 0);
+        if (!alive) return;
+        const base = res.snapshot ? res.snapshot.state : emptyChatState(settingsRef.current);
+        current = reduceMany(base, res.entries);
+        head = current.lastSeq;
+        ready = true;
+        setState(current);
+        setMeta(res.meta ?? null);
+        drainBuffer();
+      })().catch(() => {
+        if (!alive) return;
+        initialFailed = true;
+        buffer = []; // "need full reload": the next successful open(chatId, 0) re-reads everything
+        retryTimer = setTimeout(() => { retryTimer = null; if (alive) loadInitial(); }, backoff(initialFails++));
+      });
+    };
+    loadInitial();
 
     return () => {
       alive = false;
       off();
       if (raf !== null) cancelAnimationFrame(raf);
+      if (retryTimer !== null) clearTimeout(retryTimer);
     };
   }, [chatId]);
 
-  return { state, meta, lastApplied };
+  const cur = held && held.chatId === chatId ? held : null;
+  return { state: cur?.state ?? null, meta: cur?.meta ?? null, lastApplied };
 }

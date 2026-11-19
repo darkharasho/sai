@@ -109,4 +109,76 @@ describe('useChatLog', () => {
     expect(result.current.state).toBeNull();
     expect(openMock).not.toHaveBeenCalled();
   });
+
+  it('failing gap recovery retries with backoff, bounded, then fills', async () => {
+    vi.useFakeTimers();
+    try {
+      openMock.mockResolvedValueOnce(res([entry('a', 1)]));
+      const { result } = renderHook(() => useChatLog('a', settings));
+      await flushMicro();
+      openMock.mockRejectedValue(new Error('x'));
+      act(() => { listener(entry('a', 4)); });
+      await flushMicro();
+      expect(openMock).toHaveBeenCalledTimes(2);
+      await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+      expect(openMock.mock.calls.length).toBeLessThanOrEqual(5);
+      openMock.mockResolvedValue(res([entry('a', 2), entry('a', 3)]));
+      await act(async () => { await vi.advanceTimersByTimeAsync(6000); });
+      frame();
+      expect(result.current.state?.lastSeq).toBe(4);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('initial open failure retries and then loads', async () => {
+    vi.useFakeTimers();
+    try {
+      openMock.mockRejectedValueOnce(new Error('x')).mockResolvedValue(res([entry('a', 1)]));
+      const { result } = renderHook(() => useChatLog('a', settings));
+      await flushMicro();
+      expect(result.current.state).toBeNull();
+      act(() => { listener(entry('a', 2)); }); // dropped while failing
+      await act(async () => { await vi.advanceTimersByTimeAsync(300); });
+      expect(openMock).toHaveBeenCalledTimes(2);
+      expect(result.current.state?.lastSeq).toBe(1);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('recovery with a newer snapshot rebuilds from it', async () => {
+    const { emptyChatState } = await import('../../../src/lib/chat/reducer');
+    openMock.mockResolvedValueOnce(res([entry('a', 1)]));
+    const { result } = renderHook(() => useChatLog('a', settings));
+    await flushMicro();
+    openMock.mockResolvedValueOnce(res([entry('a', 6)], { chatId: 'a', seq: 5, state: { ...emptyChatState(settings), lastSeq: 5 } }));
+    act(() => { listener(entry('a', 4)); });
+    await flushMicro();
+    frame();
+    expect(result.current.state?.lastSeq).toBe(6);
+  });
+
+  it('live entry during pending recovery is buffered; lastApplied accumulates', async () => {
+    openMock.mockResolvedValueOnce(res([entry('a', 1)]));
+    const { result } = renderHook(() => useChatLog('a', settings));
+    await flushMicro();
+    const d = deferred<any>();
+    openMock.mockReturnValueOnce(d.promise);
+    act(() => { listener(entry('a', 2)); }); // queued
+    act(() => { listener(entry('a', 4)); }); // gap -> flush + recover
+    act(() => { listener(entry('a', 5)); }); // buffered
+    d.resolve(res([entry('a', 3)]));
+    await flushMicro();
+    frame();
+    expect(result.current.state?.lastSeq).toBe(5);
+    expect(result.current.lastApplied.current.map((e) => e.seq)).toEqual([2, 3, 4, 5]);
+  });
+
+  it('returns null state on the first render after a chatId switch', async () => {
+    openMock.mockResolvedValue(res([entry('a', 1)]));
+    const seen: Array<number | undefined> = [];
+    const { rerender } = renderHook(({ id }) => { const r = useChatLog(id, settings); seen.push(r.state?.lastSeq); return r; }, { initialProps: { id: 'a' } });
+    await flushMicro();
+    openMock.mockReturnValue(new Promise(() => {}));
+    seen.length = 0;
+    rerender({ id: 'b' });
+    expect(seen[0]).toBeUndefined();
+  });
 });
