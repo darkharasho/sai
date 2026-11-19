@@ -59,7 +59,7 @@ import { handleSaiNativeToolRequest, type PickFileOpts } from './render/saiNativ
 import { buildChartHtml, buildDiffHtml, type ChartInput, type DiffInput } from './render/builtinRenderers';
 import { registerPendingForm } from './render/formBridge';
 import { formTimeoutMs } from './render/formTimeout';
-import { RenderToolCallCard } from './components/Chat/RenderToolCallCard';
+import { renderToolCallFor } from './components/Chat/renderToolCallFor';
 import { installRemoteProxyHandler } from './lib/remoteProxyClient';
 import { applyQuestionEvent, mergeAttentionScopes, questionWorkspaces, questionSessionIdsFor, scopeKeyProjectPath } from './lib/awaitingQuestionTracker';
 import { mergeSessionRefresh } from './lib/sessionRefresh';
@@ -3254,24 +3254,7 @@ export default function App() {
                     globalEffort: effortLevel,
                   }}
                   availableModels={claudeModels}
-                  renderToolCall={(tc, _defaultExpanded, seedGrow, ctx) => {
-                    const n = tc.name || '';
-                    if (
-                      n.endsWith('sai_render_html') ||
-                      n.endsWith('sai_render_component') ||
-                      n.endsWith('sai_render_chart') ||
-                      n.endsWith('sai_render_diff') ||
-                      n.endsWith('sai_render_mermaid') ||
-                      n.endsWith('sai_render_model') ||
-                      n.endsWith('sai_render_theme') ||
-                      n.endsWith('sai_render_form') ||
-                      n.endsWith('sai_confirm') ||
-                      n.endsWith('sai_choose')
-                    ) {
-                      return <RenderToolCallCard tc={tc} cwd={projectPath} seedGrow={seedGrow} isNewestModel={ctx?.isNewestModel ?? true} onOpenFile={(p) => { void handleFileOpenRef.current?.(p); }} />;
-                    }
-                    return null;
-                  }}
+                  renderToolCall={renderToolCallFor(projectPath, (p) => { void handleFileOpenRef.current?.(p); })}
                   aiProvider={aiProvider}
                   codexModel={codexModel}
                   onCodexModelChange={handleCodexModelChange}
