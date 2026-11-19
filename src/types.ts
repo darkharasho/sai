@@ -435,7 +435,9 @@ export interface SaiSearchApi {
 /** window.sai.chatlog — the durable per-chat log in main (electron/services/chatlog). */
 export interface SaiChatLogApi {
   /** `opts.panel`: the chat panel's own open (kicks the chat's queue drain); reads elsewhere omit it. */
-  open(chatId: string, after: number, opts?: { panel?: boolean }): Promise<import('../electron/services/chatlog/store').ReadResult>;
+  open(chatId: string, after: number, opts?: { panel?: boolean }): Promise<import('../electron/services/chatlog/store').ReadResult & { olderCount?: number }>;
+  /** Phone shim only: messages [beforeIndex-limit, beforeIndex) of the chat. Desktop main returns full state and leaves this unimplemented. */
+  page?(chatId: string, beforeIndex: number, limit: number): Promise<{ messages: ChatMessage[]; olderCount: number }>;
   onEvent(cb: (entry: import('./lib/chat/types').ChatLogEntry) => void): () => void;
   /** Client event types only (CLIENT_EVENT_TYPES); `init` creates a chat that isn't logged yet. */
   appendClient(

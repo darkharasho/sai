@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type { ChatMessage } from '../types';
 import type { ChatLogEntry, ChatMeta, ChatSettings, ChatState } from '../lib/chat/types';
 import { isChatLogUnavailable } from '../lib/chat/types';
 import { emptyChatState, reduceMany } from '../lib/chat/reducer';
@@ -16,6 +17,24 @@ export interface UseChatLog {
   lastApplied: React.MutableRefObject<ChatLogEntry[]>;
   /** Set when main's chat storage failed to start ("Chat storage unavailable: …"); the hook stops retrying. */
   error: string | null;
+  /** Messages older than the loaded window that main still holds (phone only; 0 on desktop). */
+  olderCount: number;
+  /** Fetch and prepend the next page of older messages. No-op while one is in flight, or when there is nothing older. */
+  loadOlder(): Promise<void>;
+}
+
+/** Page size for loadOlder. */
+export const OLDER_PAGE_LIMIT = 200;
+
+/** Stitch an older page in front of a state's messages; turn.startIndex shifts by the number prepended. */
+export function prependOlder(state: ChatState, older: ChatMessage[]): ChatState {
+  if (older.length === 0) return state;
+  const si = state.turn.startIndex;
+  return {
+    ...state,
+    messages: [...older, ...state.messages],
+    turn: si == null ? state.turn : { ...state.turn, startIndex: si + older.length },
+  };
 }
 
 /** The unavailable-storage toast shows once per renderer, however many panels hit it. */
@@ -36,16 +55,20 @@ const backoff = (attempt: number) => Math.min(250 * 2 ** attempt, 5000);
 export const HIDDEN_FLUSH_MS = 250;
 
 export function useChatLog(chatId: string | null, fallbackSettings: ChatSettings): UseChatLog {
-  const [held, setHeld] = useState<{ chatId: string; state: ChatState | null; meta: ChatMeta | null } | null>(null);
+  const [held, setHeld] = useState<{ chatId: string; state: ChatState | null; meta: ChatMeta | null; olderCount: number } | null>(null);
   const [failure, setFailure] = useState<{ chatId: string; message: string } | null>(null);
-  const setState = (st: ChatState | null) => setHeld((h) => ({ chatId: chatId as string, meta: null, ...(h && h.chatId === chatId ? h : {}), state: st }));
-  const setMeta = (m: ChatMeta | null) => setHeld((h) => ({ chatId: chatId as string, state: null, ...(h && h.chatId === chatId ? h : {}), meta: m }));
+  const setState = (st: ChatState | null) => setHeld((h) => ({ chatId: chatId as string, meta: null, olderCount: 0, ...(h && h.chatId === chatId ? h : {}), state: st }));
+  const setMeta = (m: ChatMeta | null) => setHeld((h) => ({ chatId: chatId as string, state: null, olderCount: 0, ...(h && h.chatId === chatId ? h : {}), meta: m }));
+  const setOlder = (n: number) => setHeld((h) => ({ chatId: chatId as string, state: null, meta: null, ...(h && h.chatId === chatId ? h : {}), olderCount: n }));
+  const loadOlderRef = useRef<() => Promise<void>>(async () => {});
+  const loadOlder = useCallback(() => loadOlderRef.current(), []);
   const lastApplied = useRef<ChatLogEntry[]>([]);
   const settingsRef = useRef(fallbackSettings);
   settingsRef.current = fallbackSettings;
 
   useEffect(() => {
     lastApplied.current = [];
+    loadOlderRef.current = async () => {};
     const api = window.sai?.chatlog;
     if (!chatId || !api) return;
 
@@ -62,6 +85,9 @@ export function useChatLog(chatId: string | null, fallbackSettings: ChatSettings
     let recoverFails = 0;
     let initialFails = 0;
     let initialFailed = false; // initial open is failing: live entries are dropped (open(0) re-reads them)
+    let older = 0;             // messages main holds before current.messages[0]
+    let paging = false;        // a page request is in flight
+    let pageGen = 0;           // bumped when current is replaced by a snapshot: older pages are stale
     let epoch = 0;             // bumped by a history_imported reload: older recovery opens are stale
 
     const flush = () => {
@@ -87,6 +113,9 @@ export function useChatLog(chatId: string | null, fallbackSettings: ChatSettings
         if (res.snapshot && res.snapshot.seq > after) {
           current = reduceMany(res.snapshot.state, res.entries);
           applied = res.entries;
+          pageGen++;
+          older = res.olderCount ?? 0;
+          setOlder(older);
         } else {
           applied = res.entries.filter((e) => e.seq > after);
           current = reduceMany(current!, applied);
@@ -166,6 +195,9 @@ export function useChatLog(chatId: string | null, fallbackSettings: ChatSettings
         current = reduceMany(base, res.entries);
         head = current.lastSeq;
         ready = true;
+        pageGen++;
+        older = res.olderCount ?? 0;
+        setOlder(older);
         setState(current);
         setMeta(res.meta ?? null);
         drainBuffer();
@@ -188,6 +220,21 @@ export function useChatLog(chatId: string | null, fallbackSettings: ChatSettings
     };
     loadInitial();
 
+    loadOlderRef.current = async () => {
+      if (paging || !alive || !ready || older <= 0 || !api.page) return;
+      paging = true;
+      const gen = pageGen;
+      try {
+        const res = await api.page!(chatId, older, OLDER_PAGE_LIMIT);
+        if (!alive || gen !== pageGen || !current) return;
+        flush(); // queued live entries reduce first, so the prepend shifts the latest startIndex
+        current = prependOlder(current, res.messages);
+        older = res.olderCount;
+        setOlder(older);
+        setState(current);
+      } catch { /* the row stays; the user can retry */ } finally { paging = false; }
+    };
+
     return () => {
       alive = false;
       off();
@@ -199,5 +246,5 @@ export function useChatLog(chatId: string | null, fallbackSettings: ChatSettings
 
   const cur = held && held.chatId === chatId ? held : null;
   const error = failure && failure.chatId === chatId ? failure.message : null;
-  return { state: cur?.state ?? null, meta: cur?.meta ?? null, lastApplied, error };
+  return { state: cur?.state ?? null, meta: cur?.meta ?? null, lastApplied, error, olderCount: cur?.olderCount ?? 0, loadOlder };
 }
