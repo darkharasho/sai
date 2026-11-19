@@ -34,6 +34,15 @@ function setQueued(meta: ChatMeta, n: number): void {
   else delete meta.queued;
 }
 
+/** Default number of chats kept reduced in memory (chats mid-turn, queued or with buffered deltas are extra). */
+const DEFAULT_MAX_LOADED = 16;
+/** realpath memo for list(): a phone can ask for arbitrary paths, so it is cleared at this size. */
+const REAL_CACHE_MAX = 256;
+
+function isEnoent(err: unknown): boolean {
+  return (err as NodeJS.ErrnoException | null)?.code === 'ENOENT';
+}
+
 function realPathOf(p: string): string {
   try { return fs.realpathSync(p); } catch { return path.resolve(p); }
 }
@@ -47,15 +56,22 @@ export class ChatLogStore {
   private compactAfter: number;
   /** Null-prototype: chat ids like '__proto__' are plain keys, never Object.prototype. */
   private index: Record<string, ChatMeta> = Object.create(null);
+  /**
+   * Reduced chats, least recently used first. Bounded by maxLoaded: load()
+   * rebuilds an evicted chat from its snapshot + log tail. A chat mid-turn,
+   * with a queue, or with deltas still in the write buffer is never evicted.
+   */
   private loaded = new Map<string, Loaded>();
+  private maxLoaded: number;
   private buffers = new Map<string, string[]>();
   private indexDirty = false;
   private timer: NodeJS.Timeout | null = null;
   private realCache = new Map<string, string>();
   private onError: (err: unknown) => void;
 
-  constructor(opts: { dir: string; now?: () => number; flushMs?: number; compactAfter?: number; onError?: (err: unknown) => void }) {
+  constructor(opts: { dir: string; now?: () => number; flushMs?: number; compactAfter?: number; maxLoaded?: number; onError?: (err: unknown) => void }) {
     this.dir = opts.dir;
+    this.maxLoaded = Math.max(1, opts.maxLoaded ?? DEFAULT_MAX_LOADED);
     // eslint-disable-next-line no-console
     this.onError = opts.onError ?? ((err) => console.error('[chatlog] flush failed:', err));
     this.now = opts.now ?? Date.now;
@@ -78,13 +94,52 @@ export class ChatLogStore {
     fs.renameSync(tmp, file);
   }
 
+  /**
+   * writeAtomic for a snapshot whose log is about to be truncated: the temp
+   * file is fsynced before the rename and the directory after it, so a crash
+   * can't leave an empty log behind a snapshot that never reached the disk.
+   */
+  private writeDurable(file: string, data: string) {
+    const tmp = file + '.tmp';
+    const fd = fs.openSync(tmp, 'w');
+    try {
+      fs.writeSync(fd, data);
+      fs.fsyncSync(fd);
+    } finally {
+      fs.closeSync(fd);
+    }
+    fs.renameSync(tmp, file);
+    // Directory fsync makes the rename durable; unsupported on some platforms (Windows).
+    try {
+      const dfd = fs.openSync(this.dir, 'r');
+      try { fs.fsyncSync(dfd); } finally { fs.closeSync(dfd); }
+    } catch { /* best effort */ }
+  }
+
   private writeIndex() {
     this.writeAtomic(this.indexPath(), JSON.stringify(this.index));
     this.indexDirty = false;
   }
 
   private readSnapshot(chatId: string): ChatSnapshot | null {
-    try { return JSON.parse(fs.readFileSync(this.snapPath(chatId), 'utf8')) as ChatSnapshot; } catch { return null; }
+    return this.readSnapshotChecked(chatId).snap;
+  }
+
+  /** The snapshot, or why there is none: 'missing' (no file) or 'corrupt' (unreadable / unparsable). */
+  private readSnapshotChecked(chatId: string): { snap: ChatSnapshot | null; problem: 'missing' | 'corrupt' | null; error?: unknown } {
+    let raw: string;
+    try { raw = fs.readFileSync(this.snapPath(chatId), 'utf8'); } catch (err) {
+      return { snap: null, problem: isEnoent(err) ? 'missing' : 'corrupt', error: err };
+    }
+    try {
+      const snap = JSON.parse(raw) as ChatSnapshot;
+      if (snap && typeof snap === 'object' && typeof snap.seq === 'number' && snap.state && typeof snap.state === 'object') {
+        return { snap, problem: null };
+      }
+      return { snap: null, problem: 'corrupt', error: new Error('snapshot has no seq/state') };
+    } catch (err) {
+      return { snap: null, problem: 'corrupt', error: err };
+    }
   }
 
   /** Parses the log, dropping unparsable lines; rewrites the file if any were dropped or the tail is torn. */
@@ -107,22 +162,80 @@ export class ChatLogStore {
 
   private load(chatId: string): Loaded | null {
     const cached = this.loaded.get(chatId);
-    if (cached) return cached;
+    if (cached) {
+      // Most recently used goes last.
+      this.loaded.delete(chatId);
+      this.loaded.set(chatId, cached);
+      return cached;
+    }
     const meta = this.index[chatId];
     if (!meta) return null;
-    const snap = this.readSnapshot(chatId);
+    const { snap, problem, error } = this.readSnapshotChecked(chatId);
+    // A compacted (or folded) chat whose snapshot is gone or unreadable lost
+    // everything before snapshotSeq. A seq-0 snapshot can legitimately be
+    // absent (a chat created by an append), but never unparsable.
+    const lost = !snap && (problem === 'corrupt' || (problem === 'missing' && meta.snapshotSeq > 0));
     const base = snap ? snap.state : emptyChatState({ provider: meta.provider });
-    const snapSeq = snap ? snap.seq : 0;
+    let snapSeq = snap ? snap.seq : 0;
     const tail = this.readLog(chatId).filter(e => e.seq > snapSeq);
-    const state = reduceMany(base, tail);
-    const headSeq = Math.max(snapSeq, tail.length ? tail[tail.length - 1].seq : 0);
+    let state = reduceMany(base, tail);
+    let headSeq = Math.max(snapSeq, tail.length ? tail[tail.length - 1].seq : 0);
+    if (lost) {
+      // Clients rely on seqs never going backwards; and the history before the
+      // snapshot is re-folded from the IndexedDB mirror (ensureChatInLog sees
+      // imported unset and imports it in front of the surviving tail).
+      headSeq = Math.max(headSeq, meta.headSeq);
+      this.onError(new Error(`chatlog: snapshot ${problem} for chat ${chatId} (snapshotSeq ${meta.snapshotSeq}); `
+        + `recovering from the log tail, history will be re-imported: ${error instanceof Error ? error.message : String(error)}`));
+      delete meta.imported;
+      // A replacement snapshot AT headSeq: a client reducing read(0) must land on
+      // headSeq (not the tail's last seq, or 0 for an empty tail), or the next
+      // live entry would look like a gap it can never fill.
+      state = { ...state, lastSeq: headSeq };
+      try {
+        this.writeDurable(this.snapPath(chatId), JSON.stringify({ chatId, seq: headSeq, state } satisfies ChatSnapshot));
+        snapSeq = headSeq;
+      } catch (err) {
+        this.onError(err);
+      }
+    }
     meta.headSeq = headSeq;
     meta.snapshotSeq = snapSeq;
     meta.openTurn = state.turn.streaming;
     setQueued(meta, state.queue.length);
+    if (lost) this.writeIndex();
     const l = { state, headSeq };
-    this.loaded.set(chatId, l);
+    this.remember(chatId, l);
     return l;
+  }
+
+  /** Caches a reduced chat as most recently used, then evicts down to maxLoaded. */
+  private remember(chatId: string, l: Loaded) {
+    this.loaded.delete(chatId);
+    this.loaded.set(chatId, l);
+    if (this.loaded.size <= this.maxLoaded) return;
+    for (const id of this.loaded.keys()) {
+      if (this.loaded.size <= this.maxLoaded) break;
+      if (id === chatId || this.pinned(id)) continue;
+      this.loaded.delete(id);
+    }
+  }
+
+  /** In-memory state that isn't fully reflected on disk yet, or is hot: never evicted. */
+  private pinned(chatId: string): boolean {
+    const m = this.index[chatId];
+    if (m?.openTurn || (m?.queued ?? 0) > 0) return true;
+    return (this.buffers.get(chatId)?.length ?? 0) > 0;
+  }
+
+  /** Chat ids currently reduced in memory, least recently used first (diagnostics/tests). */
+  loadedChatIds(): string[] {
+    return [...this.loaded.keys()];
+  }
+
+  /** Size of the realpath memo (diagnostics/tests). */
+  realCacheSize(): number {
+    return this.realCache.size;
   }
 
   private flushBuffers() {
@@ -154,7 +267,6 @@ export class ChatLogStore {
       this.index[chatId] = meta;
     }
     const l = this.load(chatId) ?? { state: emptyChatState({ provider: meta.provider }), headSeq: 0 };
-    this.loaded.set(chatId, l);
     const entry: ChatLogEntry = { chatId, seq: l.headSeq + 1, ts, ev };
     l.headSeq = entry.seq;
     l.state = reduceChat(l.state, entry);
@@ -162,6 +274,7 @@ export class ChatLogStore {
     meta.updatedAt = ts;
     meta.openTurn = l.state.turn.streaming;
     setQueued(meta, l.state.queue.length);
+    this.remember(chatId, l);
     const line = JSON.stringify(entry) + '\n';
     if (isDeltaEvent(ev)) {
       let buf = this.buffers.get(chatId);
@@ -212,7 +325,11 @@ export class ChatLogStore {
 
   private real(p: string): string {
     let r = this.realCache.get(p);
-    if (r === undefined) { r = realPathOf(p); this.realCache.set(p, r); }
+    if (r === undefined) {
+      if (this.realCache.size >= REAL_CACHE_MAX) this.realCache.clear();
+      r = realPathOf(p);
+      this.realCache.set(p, r);
+    }
     return r;
   }
 
@@ -261,7 +378,7 @@ export class ChatLogStore {
         ? { ...l.state.turn, startIndex: l.state.turn.startIndex + prefix.length } : l.state.turn;
       const state: ChatState = { ...l.state, messages: [...prefix, ...l.state.messages], turn };
       const snap: ChatSnapshot = { chatId, seq: entry.seq, state };
-      this.writeAtomic(this.snapPath(chatId), JSON.stringify(snap));
+      this.writeDurable(this.snapPath(chatId), JSON.stringify(snap));
       fs.writeFileSync(this.logPath(chatId), '');
       l.state = state;
       meta.snapshotSeq = entry.seq;
@@ -273,14 +390,15 @@ export class ChatLogStore {
     if (!init?.projectPath || fs.existsSync(this.logPath(chatId)) || fs.existsSync(this.snapPath(chatId))) return false;
     const state = stateFromMessages(messages, { provider: init.provider });
     const snap: ChatSnapshot = { chatId, seq: 0, state: persistableState(state) };
-    this.writeAtomic(this.snapPath(chatId), JSON.stringify(snap));
+    this.writeDurable(this.snapPath(chatId), JSON.stringify(snap));
     fs.writeFileSync(this.logPath(chatId), '');
     this.index[chatId] = {
       chatId, projectPath: init.projectPath, title: init.title,
       createdAt: init.createdAt, updatedAt: init.updatedAt,
       headSeq: 0, snapshotSeq: 0, provider: init.provider, openTurn: false, imported: true,
     };
-    this.loaded.set(chatId, { state, headSeq: 0 });
+    // Not cached: a first-launch migration imports every chat, and none of them
+    // should stay reduced in memory. load() reads the snapshot when it's used.
     this.writeIndex();
     return 'created';
   }
@@ -292,7 +410,7 @@ export class ChatLogStore {
     this.flushBuffers();
     // Exact live state: a snapshot must agree with the entries that follow it.
     const snap: ChatSnapshot = { chatId, seq: l.headSeq, state: l.state };
-    this.writeAtomic(this.snapPath(chatId), JSON.stringify(snap));
+    this.writeDurable(this.snapPath(chatId), JSON.stringify(snap));
     fs.writeFileSync(this.logPath(chatId), '');
     meta.snapshotSeq = l.headSeq;
     meta.headSeq = l.headSeq;
@@ -318,7 +436,9 @@ export class ChatLogStore {
     for (const chatId of Object.keys(this.index)) {
       for (const p of [this.snapPath(chatId), this.logPath(chatId)]) {
         let text: string;
-        try { text = fs.readFileSync(p, 'utf8'); } catch { continue; }
+        // Only a missing file is skippable: any other read error throws, so the
+        // image/model GC aborts instead of deleting what this file references.
+        try { text = fs.readFileSync(p, 'utf8'); } catch (err) { if (isEnoent(err)) continue; throw err; }
         for (const m of text.matchAll(new RegExp(re.source, flags))) out.add(m[0]);
       }
     }

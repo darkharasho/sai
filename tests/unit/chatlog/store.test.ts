@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -326,5 +326,209 @@ describe('ChatLogStore', () => {
     await new Promise(r => setTimeout(r, 30));
     expect(errors).toHaveLength(1);
     fs.mkdirSync(dir, { recursive: true });
+  });
+});
+
+describe('ChatLogStore memory bound (LRU of loaded chats)', () => {
+  const closedTurn = (s: ChatLogStore, id: string, withInit = true) => {
+    s.append(id, um('hi ' + id), withInit ? init : undefined);
+    s.append(id, { type: 'streaming_start', turnSeq: 1 });
+    s.append(id, assistant(1, { type: 'text', text: 'reply ' + id }));
+    s.append(id, done);
+  };
+
+  it('importMessages "created" does not pin the chat in memory', () => {
+    const { s } = mk(tmp(), { maxLoaded: 4 });
+    const msgs = [{ id: 'm1', role: 'user', content: 'hello', timestamp: 5 }] as any;
+    for (let i = 0; i < 10; i++) s.importMessages('i' + i, { ...init, createdAt: 1, updatedAt: 2 }, msgs);
+    expect(s.loadedChatIds()).toEqual([]);
+    expect(s.state('i3')!.messages.map(m => m.id)).toEqual(['m1']);
+    expect(s.loadedChatIds()).toEqual(['i3']);
+  });
+
+  it('reading more chats than the cap keeps at most N loaded', () => {
+    const { s } = mk(tmp(), { maxLoaded: 3 });
+    for (let i = 0; i < 8; i++) closedTurn(s, 'c' + i);
+    expect(s.loadedChatIds().length).toBeLessThanOrEqual(3);
+    for (let i = 0; i < 8; i++) s.read('c' + i, 0);
+    expect(s.loadedChatIds().length).toBeLessThanOrEqual(3);
+    // Most recently used survive.
+    expect(s.loadedChatIds()).toEqual(['c5', 'c6', 'c7']);
+  });
+
+  it('an evicted chat reloads with an identical state and continues its seq', () => {
+    const { s } = mk(tmp(), { maxLoaded: 2 });
+    closedTurn(s, 'a');
+    s.compact('a');
+    s.append('a', um('after compaction'));
+    const before = structuredClone(s.state('a'));
+    const head = s.meta('a')!.headSeq;
+    closedTurn(s, 'b');
+    closedTurn(s, 'c');
+    expect(s.loadedChatIds()).not.toContain('a');
+    expect(s.state('a')).toEqual(before);
+    expect(s.append('a', um('next')).seq).toBe(head + 1);
+  });
+
+  it('never evicts a chat with an open turn, a queue, or buffered deltas', () => {
+    const { s } = mk(tmp(), { maxLoaded: 2, flushMs: 60_000 });
+    for (let i = 0; i < 6; i++) closedTurn(s, 'x' + i);
+    s.append('open', um('go'), init);
+    s.append('open', { type: 'streaming_start', turnSeq: 1 });
+    s.append('queued', um('go'), init);
+    s.append('queued', { type: 'queue_added', item: { clientId: 'q1', text: 'later', queuedAt: 1 } });
+    closedTurn(s, 'buffered');
+    s.append('buffered', dl('partial')); // buffered, not yet on disk
+    for (let i = 0; i < 6; i++) s.state('x' + i); // churn without flushing
+    const ids = s.loadedChatIds();
+    expect(ids).toEqual(expect.arrayContaining(['open', 'queued', 'buffered']));
+    expect(ids.length).toBeLessThanOrEqual(2 + 3);
+    // Once unpinned the chats become evictable again.
+    s.append('open', done);
+    s.append('queued', { type: 'queue_cleared' });
+    s.flush();
+    for (let i = 0; i < 6; i++) s.state('x' + i);
+    expect(s.loadedChatIds()).toEqual(['x4', 'x5']);
+    expect(s.state('buffered')!.messages.at(-1)).toMatchObject({ role: 'assistant' });
+  });
+});
+
+describe('ChatLogStore GC references fail safe', () => {
+  it('referencedStrings skips a missing file but throws on any other read error', () => {
+    const { s, dir } = mk();
+    s.append('c1', um('see /img/one.png'), init);
+    s.append('c2', um('see /img/two.png'), init);
+    // c1 has no snapshot (ENOENT): fine.
+    expect([...s.referencedStrings(/\/img\/\w+\.png/)].sort()).toEqual(['/img/one.png', '/img/two.png']);
+    // A log path that can't be read as a file (EISDIR) must abort the scan.
+    fs.rmSync(path.join(dir, 'c2.jsonl'));
+    fs.mkdirSync(path.join(dir, 'c2.jsonl'));
+    expect(() => s.referencedStrings(/\/img\/\w+\.png/)).toThrow();
+  });
+});
+
+describe('ChatLogStore snapshot durability and recovery', () => {
+  function recordFsOrder() {
+    const calls: string[] = [];
+    const realRename = fs.renameSync;
+    const realWrite = fs.writeFileSync;
+    const realFsync = fs.fsyncSync;
+    const spies = [
+      vi.spyOn(fs, 'renameSync').mockImplementation(((a: fs.PathLike, b: fs.PathLike) => {
+        calls.push('rename:' + path.basename(String(b)));
+        return realRename(a, b);
+      }) as typeof fs.renameSync),
+      vi.spyOn(fs, 'writeFileSync').mockImplementation(((f: any, d: any, o?: any) => {
+        calls.push('write:' + path.basename(String(f)));
+        return realWrite(f, d, o);
+      }) as typeof fs.writeFileSync),
+      vi.spyOn(fs, 'fsyncSync').mockImplementation(((fd: number) => {
+        calls.push('fsync');
+        return realFsync(fd);
+      }) as typeof fs.fsyncSync),
+    ];
+    return { calls, restore: () => spies.forEach(sp => sp.mockRestore()) };
+  }
+  function assertDurableOrder(calls: string[]) {
+    const snapRename = calls.indexOf('rename:c1.snap.json');
+    // (appendFileSync goes through writeFileSync too: the truncate is the last write.)
+    const truncate = calls.lastIndexOf('write:c1.jsonl');
+    expect(snapRename).toBeGreaterThan(0);
+    expect(calls.slice(0, snapRename)).toContain('fsync');
+    expect(truncate).toBeGreaterThan(snapRename);
+  }
+
+  it('compaction fsyncs the snapshot temp file before the rename, and both before truncating the log', () => {
+    const { s, dir } = mk();
+    s.append('c1', um('a'), init);
+    const rec = recordFsOrder();
+    try { s.compact('c1'); } finally { rec.restore(); }
+    assertDurableOrder(rec.calls);
+    expect(fs.readFileSync(path.join(dir, 'c1.jsonl'), 'utf8')).toBe('');
+    expect(JSON.parse(fs.readFileSync(path.join(dir, 'c1.snap.json'), 'utf8')).seq).toBe(1);
+  });
+
+  it('a history fold fsyncs its snapshot before truncating the log', () => {
+    const { s } = mk();
+    s.append('c1', um('new'), init);
+    const msgs = [{ id: 'h1', role: 'user', content: 'old', timestamp: 1 }] as any;
+    const rec = recordFsOrder();
+    try { expect(s.importMessages('c1', { ...init, createdAt: 1, updatedAt: 2 }, msgs)).toBe('folded'); } finally { rec.restore(); }
+    assertDurableOrder(rec.calls);
+  });
+
+  function compacted() {
+    const { s, dir } = mk();
+    s.append('c1', um('one'), init);
+    s.append('c1', um('two'));
+    s.compact('c1');                 // snapshotSeq 2
+    s.append('c1', um('three'));     // seq 3 in the log tail
+    s.importMessages('c1', { ...init, createdAt: 1, updatedAt: 2 }, []); // marks imported
+    expect(s.meta('c1')!.imported).toBe(true);
+    s.close();
+    return dir;
+  }
+
+  for (const kind of ['missing', 'corrupt'] as const) {
+    it(`a ${kind} snapshot after compaction keeps seqs monotonic and clears imported for a re-fold`, () => {
+      const dir = compacted();
+      const snap = path.join(dir, 'c1.snap.json');
+      if (kind === 'missing') fs.rmSync(snap); else fs.writeFileSync(snap, '{"chatId":"c1","seq":2,"sta');
+      const errors: unknown[] = [];
+      const { s } = mk(dir, { onError: (e) => errors.push(e) });
+      const r = s.read('c1', 0);
+      expect(r.headSeq).toBeGreaterThanOrEqual(3);
+      expect(r.meta!.headSeq).toBe(3);
+      expect(r.meta!.imported).toBeFalsy();
+      expect(errors.length).toBe(1);
+      expect(s.append('c1', um('four')).seq).toBe(4);
+      // Persisted: a restart still sees the chat unimported and the seq continues.
+      s.close();
+      const { s: s2 } = mk(dir);
+      expect(s2.meta('c1')!.imported).toBeFalsy();
+      expect(s2.append('c1', um('five')).seq).toBe(5);
+      // The re-fold puts the mirror's history back in front of the surviving tail.
+      const msgs = [
+        { id: 'h1', role: 'user', content: 'one', timestamp: 1 },
+        { id: 'h2', role: 'user', content: 'two', timestamp: 2 },
+      ] as any;
+      expect(s2.importMessages('c1', { ...init, createdAt: 1, updatedAt: 2 }, msgs)).toBe('folded');
+      const st = s2.state('c1')!;
+      expect(st.messages.slice(0, 2).map(m => m.id)).toEqual(['h1', 'h2']);
+      expect(st.messages.length).toBe(5);
+      expect(s2.meta('c1')).toMatchObject({ imported: true, headSeq: 6, snapshotSeq: 6 });
+    });
+  }
+});
+
+describe('ChatLogStore lost snapshot: what a client sees', () => {
+  for (const withTail of [true, false]) {
+    it(`a client reducing read(0) lands on headSeq, so the next live entry is in order (${withTail ? 'with' : 'empty'} tail)`, () => {
+      const { s, dir } = mk();
+      s.append('c1', um('one'), init);
+      s.append('c1', um('two'));
+      s.compact('c1');
+      if (withTail) s.append('c1', um('three'));
+      s.close();
+      fs.rmSync(path.join(dir, 'c1.snap.json'));
+      const { s: s2 } = mk(dir, { onError: () => {} });
+      const r = s2.read('c1', 0);
+      const head = withTail ? 3 : 2;
+      expect(r.headSeq).toBe(head);
+      const client = reduceMany(r.snapshot ? r.snapshot.state : emptyChatState({ provider: 'claude' }), r.entries);
+      expect(client.lastSeq).toBe(head);
+      expect(s2.state('c1')!.lastSeq).toBe(head);
+      // A client that held the old head gets nothing new and no stale snapshot.
+      expect(s2.read('c1', head).entries).toEqual([]);
+      expect(s2.append('c1', um('next')).seq).toBe(head + 1);
+    });
+  }
+});
+
+describe('ChatLogStore realpath cache bound', () => {
+  it('list() with many distinct paths keeps the realpath cache bounded', () => {
+    const { s } = mk();
+    for (let i = 0; i < 1000; i++) s.list('/nope/' + i);
+    expect(s.realCacheSize()).toBeLessThanOrEqual(256);
   });
 });
