@@ -108,9 +108,10 @@ describe('ChatLogStore', () => {
     const { s, dir } = mk(undefined, { compactAfter: 1, now: () => 5000 });
     s.append('c1', um('go'), init);
     s.append('c1', { type: 'streaming_start', turnSeq: 1 });
+    s.append('c1', { type: 'done', turnSeq: 1, wait: { kind: 'background', resumeInSeconds: null, taskCount: 1 } });
     s.append('c1', { type: 'followup', state: 'following', waitingFor: 'CI' });
     s.append('c1', { type: 'question_needed', toolUseId: 'q1' });
-    s.append('c1', { type: 'done', turnSeq: 1, wait: { kind: 'background', resumeInSeconds: null, taskCount: 1 } });
+    s.compact('c1'); // a turn end would clear the question, so compact explicitly
     expect(s.meta('c1')!.snapshotSeq).toBe(s.meta('c1')!.headSeq);
     s.close();
     const { s: s2 } = mk(dir);

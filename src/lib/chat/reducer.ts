@@ -125,14 +125,10 @@ function closeTurn(s: ChatState, ts: number): ChatState {
   };
 }
 
-function reduceDone(s: ChatState, ev: Record<string, unknown>, ts: number): ChatState {
-  if (isStale(ev.turnSeq, s)) return s;
-  // A normal parent completion can precede child terminal activity; only a
-  // forced termination or a physical EOF proves no child event can follow.
-  const clearSubagents = ev.subagentsAborted === true || ev.subagentsSettled === true;
-  s = closeTurn(s, ts);
+/** The wait a turn-end frame carries (kind background/scheduled), else null. */
+function waitingFrom(ev: Record<string, unknown>, ts: number): ChatWaiting | null {
   const wait = ev.wait as { kind?: unknown; resumeInSeconds?: unknown; taskCount?: unknown } | undefined;
-  const waiting: ChatWaiting | null = wait && (wait.kind === 'background' || wait.kind === 'scheduled')
+  return wait && (wait.kind === 'background' || wait.kind === 'scheduled')
     ? {
         kind: wait.kind,
         ...(typeof wait.resumeInSeconds === 'number' ? { resumeInSeconds: wait.resumeInSeconds } : {}),
@@ -140,6 +136,17 @@ function reduceDone(s: ChatState, ev: Record<string, unknown>, ts: number): Chat
         since: ts,
       }
     : null;
+}
+
+function reduceDone(s: ChatState, ev: Record<string, unknown>, ts: number): ChatState {
+  // Like App's applyQuestionEvent, a turn end retires the question even when stale.
+  if (s.awaitingQuestion) s = { ...s, awaitingQuestion: false };
+  if (isStale(ev.turnSeq, s)) return s;
+  // A normal parent completion can precede child terminal activity; only a
+  // forced termination or a physical EOF proves no child event can follow.
+  const clearSubagents = ev.subagentsAborted === true || ev.subagentsSettled === true;
+  s = closeTurn(s, ts);
+  const waiting = waitingFrom(ev, ts);
   return {
     ...s,
     waiting,
@@ -300,10 +307,11 @@ function apply(s: ChatState, entry: ChatLogEntry): ChatState {
     }
 
     case 'result':
+      if (s.awaitingQuestion) s = { ...s, awaitingQuestion: false };
       if (isStale(ev.turnSeq, s)) return s;
       // App treats result as the turn end (busy clears here), so durations
       // are stamped now; done still ends streaming and retires turnSeq.
-      return stampTurnDurations(reduceResultText({ ...s, pendingApproval: null, waiting: null }, entry), ts);
+      return stampTurnDurations(reduceResultText({ ...s, pendingApproval: null, waiting: waitingFrom(ev, ts) }, entry), ts);
 
     case 'done':
       return reduceDone(s, ev, ts);

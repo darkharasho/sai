@@ -349,4 +349,31 @@ describe('reduceChat: waiting, follow-up and question state', () => {
     expect(reduceChat(s, e(6, { type: 'streaming_start', turnSeq: 1 })).awaitingQuestion).toBe(false);
     expect(reduceChat(s, e(6, { type: 'cleared' })).awaitingQuestion).toBe(false);
   });
+
+  it('result and done clear awaitingQuestion, even when stale', () => {
+    const asked = reduceMany(claude(), [
+      e(1, { type: 'streaming_start', turnSeq: 2 }),
+      e(2, { type: 'question_needed', toolUseId: 'q1' }),
+    ]);
+    expect(asked.awaitingQuestion).toBe(true);
+    expect(reduceChat(asked, e(3, { type: 'done', turnSeq: 2 })).awaitingQuestion).toBe(false);
+    expect(reduceChat(asked, e(3, { type: 'done', turnSeq: 1 })).awaitingQuestion).toBe(false);
+    expect(reduceChat(asked, e(3, { type: 'done', turnSeq: 1 })).turn.streaming).toBe(true);
+    expect(reduceChat(asked, e(3, { type: 'result', turnSeq: 2 })).awaitingQuestion).toBe(false);
+    expect(reduceChat(asked, e(3, { type: 'result', turnSeq: 1 })).awaitingQuestion).toBe(false);
+  });
+
+  it('a result carrying a wait sets waiting; a plain result clears it; stale ones do nothing to waiting', () => {
+    const s = reduceMany(claude(), [
+      e(1, { type: 'streaming_start', turnSeq: 1 }),
+      e(2, { type: 'result', turnSeq: 1, wait: bgWait }),
+    ]);
+    expect(s.waiting).toEqual({ kind: 'background', taskCount: 2, since: 1002 });
+    expect(reduceChat(s, e(3, { type: 'result', turnSeq: null })).waiting).toBeNull();
+    const stale = reduceMany(claude(), [
+      e(1, { type: 'streaming_start', turnSeq: 2 }),
+      e(2, { type: 'result', turnSeq: 1, wait: bgWait }),
+    ]);
+    expect(stale.waiting).toBeNull();
+  });
 });
