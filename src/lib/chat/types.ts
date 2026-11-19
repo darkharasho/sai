@@ -57,6 +57,8 @@ export interface ChatMeta {
   chatId: string; projectPath: string; title?: string;
   createdAt: number; updatedAt: number; headSeq: number; snapshotSeq: number;
   provider: ChatSettings['provider'];
+  /** Equals the post-reduce state's turn.streaming; lets startup find open turns without reducing logs. */
+  openTurn: boolean;
 }
 
 export interface PendingApproval {
