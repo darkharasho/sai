@@ -16,6 +16,8 @@ export interface SendArgs {
   model?: string;
   scope?: string;
   origin?: 'desktop' | 'remote';
+  /** ChatCommands already logged this user message; the user_message echo carries logged:true so the chat log skips it. */
+  logged?: boolean;
 }
 export interface CompactArgs {
   projectPath: string;
@@ -62,6 +64,8 @@ export interface ClaudeBackend {
   markMcpStale?(projectPath: string, scope?: string, opts?: { restart?: boolean; projectOnly?: boolean }): void;
   send(args: SendArgs): void;
   interrupt(projectPath: string, scope?: string): void;
+  /** The scope has an active turn (ChatCommands queues sends behind it). */
+  isScopeBusy?(projectPath: string, scope?: string): boolean;
   /** SDK only: stop one background task without interrupting the turn. */
   stopTask?(projectPath: string, scope: string | undefined, taskId: string): Promise<boolean>;
   /** Re-assert backend truth for a scope the renderer believes is streaming.

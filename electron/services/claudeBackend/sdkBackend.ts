@@ -598,7 +598,7 @@ export class SdkBackend implements ClaudeBackend {
   // ─── send ──────────────────────────────────────────────────────────────────
 
   send(args: SendArgs): void {
-    const { projectPath, message, scope, permMode, effort, model, imagePaths, origin } = args;
+    const { projectPath, message, scope, permMode, effort, model, imagePaths, origin, logged } = args;
     const scopeKey = toScopeKey(projectPath, scope);
     const effectiveScope = scope ?? 'chat';
 
@@ -689,6 +689,7 @@ export class SdkBackend implements ClaudeBackend {
         text: message,
         origin: origin ?? 'desktop',
         turnSeq: session.turnSeq,
+        ...(logged ? { logged: true } : {}),
       });
     } catch (err) {
       // Surface SDK/session-creation failures to the chat instead of silently
@@ -2049,6 +2050,10 @@ export class SdkBackend implements ClaudeBackend {
   /** True when any session for the workspace is mid-turn, blocked on user
    *  input, or sleeping on a live ScheduleWakeup — the auto-suspend timer must
    *  not reap it (workspace.ts isWorkspaceQuiescent can't see SDK sessions). */
+  isScopeBusy(projectPath: string, scope?: string): boolean {
+    return this.sessions.get(toScopeKey(projectPath, scope))?.mapperState.streaming === true;
+  }
+
   isWorkspaceBusy(projectPath: string): boolean {
     const now = Date.now();
     for (const session of this.sessions.values()) {

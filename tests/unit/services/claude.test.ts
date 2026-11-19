@@ -217,7 +217,7 @@ vi.mock('node:child_process', async (importOriginal) => {
 import { spawn } from 'node:child_process';
 import { createMockBrowserWindow } from '../../helpers/electron-mock';
 import { MockChildProcess } from '../../helpers/process-mock';
-import { registerClaudeHandlers, setSessionIdImpl, emitStreamingStart, reconcileScopeImpl } from '@electron/services/claude';
+import { registerClaudeHandlers, setSessionIdImpl, emitStreamingStart, reconcileScopeImpl, sendImpl } from '@electron/services/claude';
 import { notifyCompletion } from '@electron/services/notify';
 
 // ---------------------------------------------------------------------------
@@ -1542,6 +1542,20 @@ describe('setSessionIdImpl', () => {
     setSessionIdImpl(PROJECT, 'sess-next', 'chat');
     expect(kill).toHaveBeenCalled();
     expect(claude.sessionId).toBe('sess-next');
+  });
+});
+
+describe('sendImpl logged flag', () => {
+  const PROJECT = '/test/logged';
+
+  it('stamps logged:true on the user_message echo only when asked', async () => {
+    workspaceState.getOrCreate(PROJECT).claudeScopes.get('chat')!.cwd = PROJECT;
+    sendImpl(PROJECT, 'one', [], undefined, undefined, undefined, 'chat', 'desktop', true);
+    await flushAsync();
+    sendImpl(PROJECT, 'two', [], undefined, undefined, undefined, 'chat');
+    await flushAsync();
+    const ums = sentMessages(win).filter((m) => m.type === 'user_message');
+    expect(ums.map((m) => [m.text, m.logged])).toEqual([['one', true], ['two', undefined]]);
   });
 });
 

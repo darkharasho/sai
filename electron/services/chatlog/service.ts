@@ -61,10 +61,16 @@ export class ChatLogService {
   private readonly legacy = new Map<string, string>();
   /** `${chatId}\0${msg.id}` of fanned-out '*' events, so a re-emitted card isn't appended twice. */
   private readonly seenIds = new Set<string>();
+  /** Called after an append flips the chat's turn from streaming to idle (ChatCommands drains its queue). */
+  private onTurnEnded: ((chatId: string) => void) | null = null;
 
   constructor(opts: ChatLogServiceOpts) {
     this.opts = opts;
     this.store = opts.store;
+  }
+
+  setOnTurnEnded(fn: ((chatId: string) => void) | null): void {
+    this.onTurnEnded = fn;
   }
 
   /** The chat id bound to the legacy 'chat' scope for this project, if any. */
@@ -81,6 +87,9 @@ export class ChatLogService {
   record(msg: Record<string, unknown>): ChatLogEntry[] {
     const type = msg?.type;
     if (typeof type !== 'string') return [];
+    // ChatCommands logged this user message before dispatching; the backend's
+    // echo (stamped logged:true) only feeds v1 IPC and the bus.
+    if (type === 'user_message' && msg.logged === true) return [];
     const withScope = (chatId: string): ChatEvent => ({ ...msg, type, scope: chatId });
     const scope = typeof msg.scope === 'string' && msg.scope ? msg.scope : 'chat';
     const projectPath = typeof msg.projectPath === 'string' ? msg.projectPath : '';
@@ -189,12 +198,18 @@ export class ChatLogService {
   }
 
   private appendAndFanOut(chatId: string, ev: ChatEvent, init?: { projectPath: string; provider: ChatSettings['provider'] }): ChatLogEntry {
+    const wasStreaming = this.store.meta(chatId)?.openTurn === true;
     const entry = this.store.append(chatId, ev, init);
     try { this.opts.sendToRenderer('chatlog:event', entry); } catch (err) {
       this.opts.devlog('chatlog.sendError', { chatId, error: errText(err) });
     }
     try { this.opts.bus()?.publish(`chatlog:${chatId}`, entry as unknown as Record<string, unknown>); } catch (err) {
       this.opts.devlog('chatlog.busError', { chatId, error: errText(err) });
+    }
+    if (wasStreaming && this.onTurnEnded && this.store.meta(chatId)?.openTurn === false) {
+      try { this.onTurnEnded(chatId); } catch (err) {
+        this.opts.devlog('chatlog.turnEndedError', { chatId, error: errText(err) });
+      }
     }
     return entry;
   }

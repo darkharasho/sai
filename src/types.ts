@@ -451,6 +451,8 @@ export interface SaiChatLogApi {
   delete(chatIds: string[]): Promise<void>;
   bindLegacyScope(projectPath: string, chatId: string): Promise<void>;
   patchMeta(chatId: string, patch: Partial<Pick<import('./lib/chat/types').ChatMeta, 'title' | 'provider'>>): Promise<void>;
+  /** Idempotent chat command (send/approve/answer/planReview/interrupt/settings/queue); a repeated clientId is acked with duplicate:true. */
+  command(cmd: import('../electron/services/chatlog/commands').ChatCommand): Promise<import('../electron/services/chatlog/commands').CommandResult>;
 }
 
 declare global {

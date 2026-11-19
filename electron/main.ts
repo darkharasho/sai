@@ -74,11 +74,13 @@ async function _resolveTailnetEndpointWithEnv() {
   });
 }
 import { registerTerminalHandlers, destroyAllTerminals, listTerminalPids } from './services/pty';
-import { registerClaudeHandlers, destroyClaude, setRemoteCeiling, setRemoteBus, setSubprocessMemoryCapMB, emitChatMessage, setChatLog } from './services/claude';
+import { registerClaudeHandlers, destroyClaude, setRemoteCeiling, getRemoteCeiling, setRemoteBus, setSubprocessMemoryCapMB, emitChatMessage, setChatLog } from './services/claude';
 import { initSudoService, lockSudo } from './services/sudo';
 import { getClaudeBackend, listClaudeLiveScopes } from './services/claudeBackend';
 import { ChatLogStore } from './services/chatlog/store';
 import { ChatLogService, liveChatIds, realPath } from './services/chatlog/service';
+import { ChatCommands, type ChatCommand } from './services/chatlog/commands';
+import { createProviderDispatch } from './services/chatlog/providerDispatch';
 import { setLogImageReferences } from './services/toolResultImageStore';
 import { RendererProxy } from './services/remote/renderer-proxy';
 import { registerGitHandlers } from './services/git';
@@ -174,12 +176,17 @@ let mainWindow: BrowserWindow | null = null;
 /** System load guard; linux only, null elsewhere. */
 let loadGuard: LoadGuard | null = null;
 let loadGuardEventSeq = 0;
+let loadGuardWasPaused = false;
 
 // Durable per-chat log (chat sync). Created once per process: createWindow can
 // run again (macOS activate) and ipcMain.handle throws on re-registration.
 let chatLogStore: ChatLogStore | null = null;
 let chatLog: ChatLogService | null = null;
 let chatLogRepaired = false;
+// The one command path into chats (send/approve/queue/settings); the phone
+// bridge gets it via getChatCommands() (chat sync Task 10).
+let chatCommands: ChatCommands | null = null;
+export function getChatCommands(): ChatCommands | null { return chatCommands; }
 
 /** Live backend scopes for a provider, across every project. */
 function liveScopesOf(provider: string): Array<{ projectPath: string; scope: string }> {
@@ -228,6 +235,16 @@ function initChatLog(): void {
   service.registerIpc(ipcMain);
   chatLog = service;
   setChatLog(service);
+  const commands = new ChatCommands({
+    log: service,
+    store: chatLogStore,
+    dispatch: createProviderDispatch((event, data) => devlog('chatlog', event, data)),
+    getRemoteCeiling,
+    devlog: (event, data) => devlog('chatlog', event, data),
+  });
+  service.setOnTurnEnded((chatId) => commands.onTurnEnded(chatId));
+  ipcMain.handle('chatlog:command', (_e, cmd: ChatCommand) => commands.run(cmd));
+  chatCommands = commands;
   setLogImageReferences(() => service.referencedImageFiles());
   setLogModelKeyReferences(() => service.referencedModelKeys());
 }
@@ -681,6 +698,9 @@ function createWindow() {
       signaller,
       broadcastState: (state) => {
         if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('loadGuard:state', state);
+        // Un-paused: ChatCommands drains the queues the pause held back.
+        if (loadGuardWasPaused && !state.paused) chatCommands?.onLoadResumed();
+        loadGuardWasPaused = state.paused;
       },
       // The id lets the renderer dedupe a live panel's card against App's buffered copy.
       emitChat: (projectPath, scope, provider, ev) =>

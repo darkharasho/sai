@@ -1544,6 +1544,20 @@ describe('SdkBackend', () => {
     fakeQuery.close();
   });
 
+  it('(28b) send with logged:true stamps logged on the user_message echo', async () => {
+    const fakeQuery = makeFakeQuery([], { hang: true });
+    const queryFn = vi.fn(() => fakeQuery);
+    const backend = new SdkBackend({ queryFn, emit: (p) => emits.push(p), resolveClaudePath: () => undefined });
+    backend.start({ projectPath: PROJECT, scope: SCOPE, scopeCwd: PROJECT });
+    backend.send({ projectPath: PROJECT, message: 'a', scope: SCOPE, permMode: 'default', logged: true });
+    backend.send({ projectPath: PROJECT, message: 'b', scope: SCOPE, permMode: 'default' });
+    await new Promise(r => setTimeout(r, 10));
+
+    const ums = emits.filter(e => e.type === 'user_message');
+    expect(ums.map(u => [u.text, u.logged])).toEqual([['a', true], ['b', undefined]]);
+    fakeQuery.close();
+  });
+
   it('(29) send mid-turn: pre-emptive done for the old turn; the old result is stamped with the OLD seq (stale-droppable)', async () => {
     // Query yields nothing until we push the old turn's result manually.
     let releaseResult: (() => void) | null = null;

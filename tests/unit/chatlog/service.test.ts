@@ -107,6 +107,39 @@ describe('ChatLogService.record', () => {
     svc.record({ type: 'status', projectPath: '/p', scope: 'c1', provider: 'codex' });
     expect(store.meta('c1')!.provider).toBe('codex');
   });
+
+  it('skips a user_message the command path already logged (logged: true); v1 delivery is not its job', () => {
+    const { svc, store, sent } = mk();
+    svc.record({ type: 'streaming_start', projectPath: '/p', scope: 'c1', turnSeq: 1 });
+    expect(svc.record({ type: 'user_message', projectPath: '/p', scope: 'c1', text: 'hi', logged: true })).toEqual([]);
+    expect(store.read('c1', 0).entries.map(e => e.ev.type)).toEqual(['streaming_start']);
+    expect(sent).toHaveLength(1);
+    // An unlogged one (legacy desktop/v1 path) is still recorded.
+    expect(svc.record({ type: 'user_message', projectPath: '/p', scope: 'c1', text: 'hi' })).toHaveLength(1);
+  });
+
+  it('calls onTurnEnded once when an appended event ends the turn', () => {
+    const { svc } = mk();
+    const ended: string[] = [];
+    svc.setOnTurnEnded((id) => ended.push(id));
+    svc.record({ type: 'done', projectPath: '/p', scope: 'c1', turnSeq: null });
+    expect(ended).toEqual([]); // not streaming: no flip
+    svc.record({ type: 'streaming_start', projectPath: '/p', scope: 'c1', turnSeq: 1 });
+    svc.record({ type: 'status', projectPath: '/p', scope: 'c1' });
+    expect(ended).toEqual([]);
+    svc.record({ type: 'done', projectPath: '/p', scope: 'c1', turnSeq: 1 });
+    expect(ended).toEqual(['c1']);
+    svc.record({ type: 'done', projectPath: '/p', scope: 'c1', turnSeq: 1 });
+    expect(ended).toEqual(['c1']);
+  });
+
+  it('a throwing onTurnEnded never breaks recording', () => {
+    const { svc, devlog } = mk();
+    svc.setOnTurnEnded(() => { throw new Error('boom'); });
+    svc.record({ type: 'streaming_start', projectPath: '/p', scope: 'c1', turnSeq: 1 });
+    expect(svc.record({ type: 'done', projectPath: '/p', scope: 'c1', turnSeq: 1 })).toHaveLength(1);
+    expect(devlog).toHaveBeenCalledWith('chatlog.turnEndedError', expect.objectContaining({ chatId: 'c1' }));
+  });
 });
 
 describe('ChatLogService.appendClient', () => {

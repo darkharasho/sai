@@ -694,7 +694,7 @@ export function registerAcpProviderHandlers(win: BrowserWindow, config: AcpProvi
     setScopeSessionId(ws, scope, sessionId, config);
   });
 
-  ipcMain.on(`${config.key}:stop`, async (_event, projectPath: string, scope: string = 'chat') => {
+  const onStop = async (_event: unknown, projectPath: string, scope: string = 'chat') => {
     const ws = get(projectPath);
     if (!ws) return;
     const sessionId = getScopeSessionId(ws, scope, config);
@@ -726,9 +726,10 @@ export function registerAcpProviderHandlers(win: BrowserWindow, config: AcpProvi
       scope,
       turnSeq: stoppedTurnSeq,
     });
-  });
+  };
+  ipcMain.on(`${config.key}:stop`, onStop);
 
-  ipcMain.on(`${config.key}:approve`, async (_event, projectPath: string, toolUseId: string, approved: boolean, modifiedCommand?: string, scope: string = 'chat') => {
+  const onApprove = async (_event: unknown, projectPath: string, toolUseId: string, approved: boolean, modifiedCommand?: string, scope: string = 'chat') => {
     const ws = get(projectPath);
     if (!ws) return;
     const pending = state(ws).pendingApproval;
@@ -748,11 +749,11 @@ export function registerAcpProviderHandlers(win: BrowserWindow, config: AcpProvi
       state(ws).pendingApproval = null;
       emitChat(win, { type: 'error', projectPath: ws.projectPath, scope, text: `${config.displayName} approval failed: ${error?.message || 'Unknown error'}` });
     }
-  });
+  };
+  ipcMain.on(`${config.key}:approve`, onApprove);
 
-  ipcMain.on(
-    `${config.key}:send`,
-    async (_event, projectPath: string, message: string, imagePaths?: string[], approvalMode?: string, conversationMode?: string, model?: string, scope: string = 'chat') => {
+  const onSend =
+    async (_event: unknown, projectPath: string, message: string, imagePaths?: string[], approvalMode?: string, conversationMode?: string, model?: string, scope: string = 'chat') => {
       const ws = get(projectPath);
       if (!ws) return;
       touchActivity(projectPath);
@@ -892,6 +893,26 @@ export function registerAcpProviderHandlers(win: BrowserWindow, config: AcpProvi
           });
         }
       }
-    },
-  );
+    };
+  ipcMain.on(`${config.key}:send`, onSend);
+
+  acpCommands.set(config.key, {
+    send: (a) => { void onSend(null, a.projectPath, a.message, a.imagePaths, a.approvalMode, a.conversationMode, a.model, a.scope); },
+    stop: (projectPath, scope) => { void onStop(null, projectPath, scope); },
+    approve: (a) => onApprove(null, a.projectPath, a.toolUseId, a.approved, a.modifiedCommand, a.scope),
+  });
+}
+
+/** Main-process entry points for an ACP provider (same code as its IPC handlers). */
+export interface AcpCommandApi {
+  send(a: { projectPath: string; message: string; imagePaths?: string[]; approvalMode?: string; conversationMode?: string; model?: string; scope: string }): void;
+  stop(projectPath: string, scope: string): void;
+  approve(a: { projectPath: string; toolUseId: string; approved: boolean; modifiedCommand?: string; scope: string }): Promise<void>;
+}
+
+const acpCommands = new Map<AcpProviderConfig['key'], AcpCommandApi>();
+
+/** Null until registerAcpProviderHandlers ran for `key`. */
+export function getAcpCommands(key: AcpProviderConfig['key']): AcpCommandApi | null {
+  return acpCommands.get(key) ?? null;
 }

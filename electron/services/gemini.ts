@@ -235,7 +235,7 @@ export function registerGeminiHandlers(win: BrowserWindow) {
     const ws = get(projectPath);
     if (ws) setScopeSession(ws, scope, sessionId);
   });
-  ipcMain.on('gemini:stop', (_event, projectPath: string, scope = 'chat') => {
+  const onStop = (_event: unknown, projectPath: string, scope = 'chat') => {
     const ws = get(projectPath);
     if (!ws) return;
     // Stop only this chat's turn; a sibling chat in the project keeps running.
@@ -245,11 +245,12 @@ export function registerGeminiHandlers(win: BrowserWindow) {
     if (child && ws.gemini.process === child) ws.gemini.process = null;
     // No live turn for this chat: null is never dropped as stale.
     safeSend(win, { type: 'done', projectPath, scope, turnSeq: turn ? turn.turnSeq : null });
-  });
+  };
+  ipcMain.on('gemini:stop', onStop);
   // Antigravity print mode cannot pause for an IPC approval round-trip. The
   // appropriate permission mode is selected before each launch instead.
   ipcMain.on('gemini:approve', () => undefined);
-  ipcMain.on('gemini:send', async (_event, projectPath: string, message: string, imagePaths: string[] = [], approvalMode?: string, conversationMode?: string, model?: string, scope = 'chat') => {
+  const onSend = async (_event: unknown, projectPath: string, message: string, imagePaths: string[] = [], approvalMode?: string, conversationMode?: string, model?: string, scope = 'chat') => {
     const ws = get(projectPath);
     if (!ws) return;
     touchActivity(projectPath);
@@ -267,5 +268,24 @@ export function registerGeminiHandlers(win: BrowserWindow) {
       endAcpTurn(ws.gemini, scope, turnSeq);
       safeSend(win, { type: 'done', projectPath, scope, turnSeq });
     }
-  });
+  };
+  ipcMain.on('gemini:send', onSend);
+
+  geminiCommands = {
+    send: (a) => { void onSend(null, a.projectPath, a.message, a.imagePaths ?? [], a.approvalMode, a.conversationMode, a.model, a.scope); },
+    stop: (projectPath, scope) => onStop(null, projectPath, scope),
+  };
+}
+
+/** Main-process entry points for Antigravity (same code as its IPC handlers). gemini:approve is a no-op. */
+export interface GeminiCommandApi {
+  send(a: { projectPath: string; message: string; imagePaths?: string[]; approvalMode?: string; conversationMode?: string; model?: string; scope: string }): void;
+  stop(projectPath: string, scope: string): void;
+}
+
+let geminiCommands: GeminiCommandApi | null = null;
+
+/** Null until registerGeminiHandlers ran. */
+export function getGeminiCommands(): GeminiCommandApi | null {
+  return geminiCommands;
 }

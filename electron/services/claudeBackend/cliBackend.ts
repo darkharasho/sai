@@ -2,7 +2,7 @@ import {
   startImpl, sendImpl, interruptImpl, setSessionIdImpl, compactImpl, approveImpl,
   answerQuestionImpl, answerPlanReviewImpl, alwaysAllowImpl,
   generateCommitMessageImpl, generateTitleImpl, getAvailableClaudeModels,
-  reconcileScopeImpl,
+  reconcileScopeImpl, isScopeBusyImpl,
 } from '../claude';
 import { readCachedSlashCommands } from '../slashCommands';
 import { listAllWorkspaces } from '../workspace';
@@ -15,8 +15,9 @@ export class CliBackend implements ClaudeBackend {
   // The CLI has no supportedCommands() equivalent — its list only ever arrives
   // on an init frame, so a refresh can do no better than the cache.
   refreshSlashCommands(projectPath: string) { return Promise.resolve(readCachedSlashCommands(projectPath)); }
-  send(a: SendArgs) { sendImpl(a.projectPath, a.message, a.imagePaths, a.permMode, a.effort, a.model, a.scope, a.origin); }
+  send(a: SendArgs) { sendImpl(a.projectPath, a.message, a.imagePaths, a.permMode, a.effort, a.model, a.scope, a.origin, a.logged); }
   interrupt(projectPath: string, scope?: string) { interruptImpl(projectPath, scope); }
+  isScopeBusy(projectPath: string, scope?: string) { return isScopeBusyImpl(projectPath, scope); }
   reconcileScope(projectPath: string, scope?: string) { reconcileScopeImpl(projectPath, scope); }
   setSessionId(projectPath: string, sessionId: string | undefined, scope?: string) { setSessionIdImpl(projectPath, sessionId, scope); }
   compact(a: CompactArgs) { compactImpl(a); }

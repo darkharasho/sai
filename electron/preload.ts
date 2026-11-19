@@ -524,6 +524,7 @@ contextBridge.exposeInMainWorld('sai', {
     delete: (chatIds: string[]) => ipcRenderer.invoke('chatlog:delete', chatIds),
     bindLegacyScope: (projectPath: string, chatId: string) => ipcRenderer.invoke('chatlog:bindLegacyScope', projectPath, chatId),
     patchMeta: (chatId: string, patch: { title?: string; provider?: string }) => ipcRenderer.invoke('chatlog:patchMeta', chatId, patch),
+    command: (cmd: unknown) => ipcRenderer.invoke('chatlog:command', cmd),
   },
   respondSaiTool: (id: string, result: unknown) => ipcRenderer.send('sai-tool:response', id, result),
   respondSaiToolError: (id: string, error: string) => ipcRenderer.send('sai-tool:response-error', id, error),

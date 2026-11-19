@@ -779,6 +779,7 @@ export function sendImpl(
   model?: string,
   scope?: string,
   origin: 'desktop' | 'remote' = 'desktop',
+  logged = false,
 ): void {
   if (!mainWin) return;
   const ws = get(projectPath);
@@ -863,7 +864,13 @@ export function sendImpl(
     text: message,
     origin,
     turnSeq: claude.turnSeq,
+    ...(logged ? { logged: true } : {}),
   });
+}
+
+/** The scope has an active turn (CLI backend). */
+export function isScopeBusyImpl(projectPath: string, scope?: string): boolean {
+  return get(projectPath)?.claudeScopes.get(scope || 'chat')?.busy === true;
 }
 
 export function interruptImpl(projectPath: string, scope?: string): void {
