@@ -4,8 +4,9 @@
 // content (chatFrameGate.scopeMessageBuffer), so it is merged on select, drained by the
 // panel on mount and persisted by the background done flush, all deduped by id.
 
-import type { ChatMessage, ChatSession, LoadGuardChatEvent } from '../types';
+import type { ChatMessage, ChatSession } from '../types';
 import { hasChatListener, scopeMessageBuffer } from './chatFrameGate';
+import { loadGuardCard as reducerLoadGuardCard } from './chat/reducer';
 
 interface WorkspaceSessions {
   activeSession: Pick<ChatSession, 'id' | 'aiProvider'>;
@@ -16,12 +17,9 @@ let fallbackSeq = 0;
 
 /** The chat card for a `load_guard` envelope; null for anything else or an unknown kind. */
 export function loadGuardCard(msg: any, now: number = Date.now()): ChatMessage | null {
-  if (!msg || msg.type !== 'load_guard') return null;
-  const ev = msg.loadGuard as LoadGuardChatEvent | undefined;
-  if (ev?.kind !== 'note' && ev?.kind !== 'killed') return null;
   // main stamps the id, so App's buffered copy and a live panel's copy dedupe
-  const id = typeof msg.id === 'string' && msg.id ? msg.id : `load-guard-${now}-${++fallbackSeq}`;
-  return { id, role: 'system', content: '', timestamp: now, loadGuard: ev };
+  const hasId = typeof msg?.id === 'string' && msg.id;
+  return reducerLoadGuardCard(msg, now, hasId ? msg.id : `load-guard-${now}-${++fallbackSeq}`);
 }
 
 /**

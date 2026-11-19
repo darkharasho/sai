@@ -146,61 +146,9 @@ export interface ToolResultImage {
   mimeType?: string;
 }
 
-export interface PendingApproval {
-  toolName: string;
-  toolUseId: string;
-  command: string;
-  description: string;
-  input: Record<string, any>;
-  /** Present only for the capability-gated Codex App Server preview. */
-  provider?: 'codex';
-  requestHandle?: string;
-  kind?: 'command' | 'file-change' | 'permissions';
-  availableDecisions?: string[];
-  reason?: string;
-  cwd?: string;
-  network?: { host?: string; protocol?: string };
-  grantRoot?: string;
-  permissionsSummary?: string[];
-  /** JSON-safe opaque copies of the Codex App Server permissions being requested. */
-  requestedPermissions?: unknown[];
-  proposedExecpolicyAmendment?: string[];
-}
-
-export interface PendingSudoPrompt {
-  promptId: string;
-  toolUseId: string;
-  command: string;
-  /** Reason the previous attempt failed (e.g. "Incorrect password"). */
-  error?: string;
-}
-
-/** Renderer-safe, capability-gated Codex App Server input request. */
-export interface PendingCodexUserInput {
-  provider: 'codex';
-  requestHandle: string;
-  questions: Array<{
-    id: string;
-    header: string;
-    prompt: string;
-    options?: Array<{ id: string; label: string; description?: string }>;
-    allowOther?: boolean;
-    isSecret?: boolean;
-  }>;
-  /** Present only when the server supplied an automatic-resolution deadline. */
-  autoResolutionMs?: number;
-}
-
-/** Renderer-safe MCP elicitation request from the Codex App Server preview. */
-export type PendingCodexMcpElicitation = {
-  provider: 'codex';
-  requestHandle: string;
-  serverName: string;
-  message: string;
-} & (
-  | { mode: 'form'; requestedSchema: Record<string, unknown> }
-  | { mode: 'url'; url: string; elicitationId?: string }
-);
+// Pending* live with the shared chat state (src/lib/chat/types.ts); re-exported here
+// so existing imports keep working.
+export type { PendingApproval, PendingSudoPrompt, PendingCodexUserInput, PendingCodexMcpElicitation } from './lib/chat/types';
 
 export interface QueuedMessage {
   id: string;
