@@ -40,8 +40,13 @@ export type ChatCommand =
   | { kind: 'queueClear'; chatId: string; clientId: string }
   /** Clears the chat's transcript (appends `cleared`, like the composer's /clear). */
   | { kind: 'clear'; chatId: string; clientId: string }
-  /** Compacts the chat's context with its settings (Claude only; the same call as claude:compact). */
-  | { kind: 'compact'; chatId: string; clientId: string; origin?: Origin }
+  /**
+   * Compacts the chat's context with its settings (Claude only; the same call
+   * as claude:compact). Like the desktop composer's /compact, it waits in the
+   * queue as a `/compact` send while the load guard is paused, or — with
+   * `queue` (palette, Ctrl+Enter) — while a turn runs or items wait.
+   */
+  | { kind: 'compact'; chatId: string; clientId: string; origin?: Origin; queue?: boolean }
   /**
    * Appends a client-side event that has no backend effect: a `local_note`, a
    * `watcher_snapshot`, or a `user_message` marked `local: true` (the /help
@@ -303,6 +308,16 @@ export class ChatCommands {
       case 'compact': {
         const { provider, projectPath, state } = this.chat(cmd.chatId);
         if (provider !== 'claude' || !this.dispatch.compact) throw new Error(`compact is not supported for ${provider}`);
+        // ChatPanel's compactWaits: paused, or a queued compact while the turn
+        // is live (backend busy or the log's turn open) or items wait. A
+        // compact spawns a session, so it must never bypass the pause.
+        const turnLive = this.isBusy(projectPath, cmd.chatId) || state.turn.streaming;
+        if (this.dispatch.isLoadPaused() || (cmd.queue === true && (turnLive || state.queue.length > 0))) {
+          return this.send({
+            kind: 'send', chatId: cmd.chatId, clientId: cmd.clientId, text: '/compact',
+            origin: cmd.origin === 'remote' ? 'remote' : 'desktop', projectPath,
+          });
+        }
         const settings = cmd.origin === 'remote' ? capSettings(state.settings, provider, this.getRemoteCeiling()) : state.settings;
         this.dispatch.compact(provider, { projectPath, scope: cmd.chatId, settings });
         return {};

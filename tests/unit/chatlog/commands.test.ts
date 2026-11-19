@@ -722,4 +722,48 @@ describe('ChatCommands: clear, compact, clientEvent, stopTask', () => {
     expect(d.stopTask).toHaveBeenCalledTimes(1);
     expect(await cmds.run({ kind: 'stopTask', chatId: 'c1', clientId: 't2', taskId: 'gone' })).toMatchObject({ ok: false, error: 'task not stopped: gone' });
   });
+
+  it('compact while load paused queues a /compact send and does not dispatch', async () => {
+    const { store, log, d, cmds } = mk();
+    await cmds.run(send('u1', 'hi'));
+    runTurn(log);
+    d.setPaused(true);
+    const r = await cmds.run({ kind: 'compact', chatId: 'c1', clientId: 'k1', origin: 'remote' });
+    expect(r.ok).toBe(true);
+    expect((await cmds.run({ kind: 'compact', chatId: 'c1', clientId: 'k1', origin: 'remote' })).duplicate).toBe(true);
+    expect(d.compact).not.toHaveBeenCalled();
+    expect(d.send).toHaveBeenCalledTimes(1); // only u1
+    expect(store.state('c1')!.queue.map((q) => [q.clientId, q.text])).toEqual([['k1', '/compact']]);
+    // Resumed: the queued /compact drains as a send with the chat's settings.
+    d.setPaused(false);
+    cmds.onLoadResumed();
+    await tick();
+    expect(d.send).toHaveBeenCalledTimes(2);
+    expect((d.send as any).mock.calls[1][1]).toMatchObject({ prompt: '/compact', scope: 'c1', origin: 'remote' });
+    expect(d.compact).not.toHaveBeenCalled();
+  });
+
+  it('compact while turn open queues (a queued compact, like the desktop palette/Ctrl+Enter)', async () => {
+    const { store, log, d, cmds } = mk();
+    await cmds.run(send('u1', 'hi'));
+    startTurn(log);
+    d.setBusy(true);
+    expect((await cmds.run({ kind: 'compact', chatId: 'c1', clientId: 'k1', queue: true })).ok).toBe(true);
+    expect(d.compact).not.toHaveBeenCalled();
+    expect(store.state('c1')!.queue.map((q) => q.text)).toEqual(['/compact']);
+    // Without queue (plain Enter on the desktop) a live turn doesn't hold it.
+    expect((await cmds.run({ kind: 'compact', chatId: 'c1', clientId: 'k2' })).ok).toBe(true);
+    expect(d.compact).toHaveBeenCalledTimes(1);
+  });
+
+  it('compact when idle dispatches', async () => {
+    const { store, log, d, cmds } = mk();
+    await cmds.run(send('u1', 'hi'));
+    runTurn(log);
+    expect((await cmds.run({ kind: 'compact', chatId: 'c1', clientId: 'k1', queue: true })).ok).toBe(true);
+    expect(d.compact).toHaveBeenCalledTimes(1);
+    expect(d.send).toHaveBeenCalledTimes(1);
+    expect(store.state('c1')!.queue).toEqual([]);
+    expect(store.read('c1', 0).entries.filter((e) => e.ev.type === 'user_message')).toHaveLength(1);
+  });
 });

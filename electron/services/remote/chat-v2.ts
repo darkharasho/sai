@@ -270,7 +270,7 @@ export class ChatV2 {
     const real = store.realPath(projectPath);
     const ex = this.extrasOf(ws);
     if (!ex.chats.has(real) && ex.chats.size >= MAX_CHAT_LIST_SUBS) {
-      return this.error(ws, null, 'bad_request', 'too many chat-list subscriptions');
+      return this.error(ws, null, 'bad_request', 'too many chat-list subscriptions', reqId);
     }
     this.unsubscribeChats(ws, real);
     const throttleMs = this.opts.chatsThrottleMs ?? CHATS_THROTTLE_MS;
@@ -515,7 +515,7 @@ export class ChatV2 {
       case 'queuePromote': return { kind: 'queuePromote', ...base, target: target() };
       case 'queueClear': return { kind: 'queueClear', ...base };
       case 'clear': return { kind: 'clear', ...base };
-      case 'compact': return { kind: 'compact', ...base, origin: 'remote' };
+      case 'compact': return { kind: 'compact', ...base, origin: 'remote', ...(raw.queue === true ? { queue: true } : {}) };
       case 'clientEvent': {
         // ChatCommands checks the event type (local_note, watcher_snapshot, local user_message) and keeps only its fields.
         if (!raw.ev || typeof raw.ev !== 'object' || Array.isArray(raw.ev)) throw new Error('ev required');

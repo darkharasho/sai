@@ -216,6 +216,9 @@ describe('ChatV2 new commands', () => {
     expect(await cmd({ kind: 'compact', clientId: 'k1' })).toMatchObject({ ok: true });
     // Remote: compacted with the ceiling-capped settings.
     expect((dispatch.compact as any).mock.calls[0][1].settings.permMode).toBe('default');
+    // queue passes through: idle, so it still dispatches.
+    expect(await cmd({ kind: 'compact', clientId: 'k2', queue: true })).toMatchObject({ ok: true });
+    expect(dispatch.compact).toHaveBeenCalledTimes(2);
 
     expect(await cmd({ kind: 'stopTask', clientId: 't1', taskId: 'bg1' })).toMatchObject({ ok: true });
     expect(dispatch.stopTask).toHaveBeenCalledWith('claude', { projectPath: P, scope: 'c1', taskId: 'bg1' });
@@ -240,7 +243,7 @@ describe('ChatV2 chats.subscribe cap', () => {
     await v2.handle(ws, { type: 'chats.subscribe', reqId: 'again', projectPath: '/p0' });
     expect(frames.at(-1)).toMatchObject({ type: 'chats.list.result', reqId: 'again' });
     await v2.handle(ws, { type: 'chats.subscribe', reqId: 'x', projectPath: '/p32' });
-    expect(frames.at(-1)).toEqual({ v: 2, type: 'chat.error', code: 'bad_request', message: 'too many chat-list subscriptions' });
+    expect(frames.at(-1)).toEqual({ v: 2, type: 'chat.error', reqId: 'x', code: 'bad_request', message: 'too many chat-list subscriptions' });
     // Freeing one makes room; another socket has its own budget.
     await v2.handle(ws, { type: 'chats.unsubscribe', projectPath: '/p1' });
     await v2.handle(ws, { type: 'chats.subscribe', reqId: 'y', projectPath: '/p32' });

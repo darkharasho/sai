@@ -174,9 +174,14 @@ reuse it only for the same command. Only the fields a phone may set are kept:
   `interrupt`, `queueRemove` / `queuePromote` (`target` = the queued item's
   `clientId`), `queueClear`.
 - `clear` — appends `cleared` (the composer's `/clear`).
-- `compact` — compacts the chat's context with its settings, capped by the
-  remote ceiling (the desktop's `claude:compact`). Claude chats only; other
-  providers ack `ok: false, error: "compact is not supported for <provider>"`.
+- `compact` (`queue?`) — compacts the chat's context with its settings, capped
+  by the remote ceiling (the desktop's `claude:compact`). Claude chats only;
+  other providers ack `ok: false, error: "compact is not supported for <provider>"`.
+  Like the desktop composer's `/compact`, it never bypasses the load guard:
+  while paused — or, with `queue: true` (a queued send), while the chat's turn
+  is live or items wait — it is logged and queued as a `/compact` send (its
+  `clientId` is the command's) and drains like any send. So a phone can always
+  send `compact`.
 - `clientEvent` (`ev`, plus `projectPath` / `provider` only to create a chat)
   — appends an event with no backend effect: `local_note` (`noteId`,
   `content`, `error?`), `watcher_snapshot` (`messageId`, `snapshot`), or
