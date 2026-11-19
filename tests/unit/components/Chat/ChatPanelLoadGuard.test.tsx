@@ -29,7 +29,6 @@ const state = (paused: boolean) => ({
   level: paused ? 'critical' : 'normal', paused, override: false, saiCaused: false, saiAppHeavy: false,
   memUsedPct: 95, swapUsedPct: 50, game: null, recoveredAt: null, enabled: true,
 });
-const item = { id: 'q1', text: 'queued', fullText: 'queued' };
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
 describe('ChatPanel load guard pause', () => {
@@ -46,7 +45,6 @@ describe('ChatPanel load guard pause', () => {
     onGeminiConversationModeChange: vi.fn(), initialMessages: [], onMessagesChange: vi.fn(),
     onTurnComplete: vi.fn(), onClaudeSessionId: vi.fn(), onGeminiSessionId: vi.fn(),
     onCodexSessionId: vi.fn(), activeFilePath: null, onFileOpen: vi.fn(), isActive: true,
-    messageQueue: [], onQueueAdd: vi.fn(), onQueueRemove: vi.fn(), onQueueShift: vi.fn(),
     sessionId: 'session-1', terminalTabs: [], onSlashCommandsUpdate: vi.fn(),
   });
 
@@ -64,7 +62,14 @@ describe('ChatPanel load guard pause', () => {
     Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { writable: true, value: vi.fn() });
   });
 
-  const setPaused = async (p: boolean) => { await act(async () => { broadcast(state(p)); }); };
+  // The guard pauses main (ChatCommands holds sends) and the renderer (banner, composer) together.
+  const setPaused = async (p: boolean) => {
+    await act(async () => { mockSai.chatlog.setPaused(p); broadcast(state(p)); });
+    await flushChatlog();
+  };
+  const queueInLog = (clientId: string, text: string) => {
+    mockSai.chatlog.append('session-1', { type: 'queue_added', item: { clientId, text, queuedAt: 1 } }, { projectPath: '/project' });
+  };
   const mount = async (props: Props) => {
     const r = render(<ChatPanel {...props} />);
     await waitFor(() => expect((window.sai as any).loadGuardOnState).toHaveBeenCalled());
@@ -72,50 +77,42 @@ describe('ChatPanel load guard pause', () => {
     return r;
   };
 
-  it('queues composer sends while paused, drains exactly once on resume', async () => {
+  it('sends while paused go to main, which holds them in the queue and drains exactly once on resume', async () => {
     const props = baseProps();
-    const { rerender } = await mount(props);
+    await mount(props);
     await setPaused(true);
     expect(inputProps.sendsQueued).toBe(true);
 
     act(() => { screen.getByTestId('chat-input').click(); });
     await sleep(20);
-    expect(props.onQueueAdd).toHaveBeenCalledWith('session-1', 'new prompt', 'new prompt', undefined);
+    await flushChatlog();
+    expect(mockSai.chatlog.commands('send')).toEqual([expect.objectContaining({ text: 'new prompt' })]);
+    expect(mockSai.chatlog.commands('send')[0].now).toBeUndefined();
     expect(mockSai.claudeSend).not.toHaveBeenCalled();
+    // Held in the log's queue, shown in the strip.
+    expect(inputProps.messageQueue.map((q: any) => q.text)).toEqual(['new prompt']);
 
-    // Queue holds an item while paused: no drain.
-    rerender(<ChatPanel {...props} messageQueue={[item]} />);
     await sleep(450);
-    expect(props.onQueueShift).not.toHaveBeenCalled();
-
-    await setPaused(false);
-    await waitFor(() => expect(mockSai.claudeSend).toHaveBeenCalledTimes(1), { timeout: 2000 });
-    expect(props.onQueueShift).toHaveBeenCalledTimes(1);
-    expect(mockSai.claudeSend.mock.calls[0][1]).toBe('queued');
-  });
-
-  it('a pause inside the 300ms drain window leaves the item queued and resume picks it up', async () => {
-    const props = baseProps();
-    const { rerender } = await mount(props);
-    rerender(<ChatPanel {...props} messageQueue={[item]} />);
-    await setPaused(true); // lands before the 300ms timer fires
-    await sleep(500);
-    expect(props.onQueueShift).not.toHaveBeenCalled();
     expect(mockSai.claudeSend).not.toHaveBeenCalled();
 
     await setPaused(false);
     await waitFor(() => expect(mockSai.claudeSend).toHaveBeenCalledTimes(1), { timeout: 2000 });
-    expect(props.onQueueShift).toHaveBeenCalledTimes(1);
+    expect(mockSai.claudeSend.mock.calls[0][1]).toBe('new prompt');
+    await waitFor(() => expect(inputProps.messageQueue).toEqual([]));
+    await sleep(50);
+    expect(mockSai.claudeSend).toHaveBeenCalledTimes(1);
   });
 
   it('"send now" does not bypass the pause or stop the running turn', async () => {
-    const props = { ...baseProps(), messageQueue: [item], isStreaming: true };
+    queueInLog('q1', 'queued');
+    const props = { ...baseProps(), isStreaming: true };
     await mount(props);
     await setPaused(true);
-    act(() => { inputProps.onQueueSendNow('q1'); });
-    expect(props.onQueueRemove).not.toHaveBeenCalled();
+    await act(async () => { await inputProps.onQueueSendNow('q1'); });
+    expect(mockSai.chatlog.commands('queueRemove')).toEqual([]);
     expect(mockSai.claudeStop).not.toHaveBeenCalled();
     expect(mockSai.claudeSend).not.toHaveBeenCalled();
+    expect(inputProps.messageQueue.map((q: any) => q.id)).toEqual(['q1']);
   });
 
   it('does not queue when not paused', async () => {
@@ -123,7 +120,7 @@ describe('ChatPanel load guard pause', () => {
     await mount(props);
     act(() => { screen.getByTestId('chat-input').click(); });
     await waitFor(() => expect(mockSai.claudeSend).toHaveBeenCalledTimes(1));
-    expect(props.onQueueAdd).not.toHaveBeenCalled();
+    expect(mockSai.chatlog.entries('session-1').some((e) => e.ev.type === 'queue_added')).toBe(false);
   });
 
   it('hands the load state to the composer toolbar, not the scrolling conversation header', async () => {

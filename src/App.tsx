@@ -36,7 +36,7 @@ import { dropLegacySwarmData } from './lib/dropLegacySwarmData';
 import { migrateChatsToLog } from './lib/chat/migrateToLog';
 import { dbGetSessions, dbGetAllSessions, dbPatchSessionMeta, dbPurgeExpired, dbExternalizeStoredImages, dbCollectReferencedImagePaths, dbCollectReferencedModelKeys, migrateFromLocalStorage } from './chatDb';
 import { queueSaveSession } from './lib/sessionSaveQueue';
-import type { ChatSession, ChatMessage, GitFile, OpenFile, WorkspaceContext, QueuedMessage, TerminalTab, PendingApproval, EffortLevel, CodexEffort, CodexModelOption, ModelChoice, ClaudeModelOption, AIProvider } from './types';
+import type { ChatSession, ChatMessage, GitFile, OpenFile, WorkspaceContext, TerminalTab, PendingApproval, EffortLevel, CodexEffort, CodexModelOption, ModelChoice, ClaudeModelOption, AIProvider } from './types';
 import type { MetaWorkspaceListItem, MetaWorkspaceRuntime } from './types';
 import { loadHomeInfo } from './lib/homeWorkspace';
 import { isAIProvider } from './types';
@@ -318,7 +318,6 @@ export default function App() {
   const [kimiModels, setKimiModels] = useState<{ id: string; name: string }[]>([]);
   const [kimiApprovalMode, setKimiApprovalMode] = useState<GeminiApprovalMode>('default');
   const [workspaces, setWorkspaces] = useState<Map<string, WorkspaceContext>>(new Map());
-  const [messageQueues, setMessageQueues] = useState<Map<string, QueuedMessage[]>>(new Map());
   const [pendingClose, setPendingClose] = useState<string | null>(null);
   // Ref to hold latest messages per workspace without triggering re-renders during streaming
   const wsMessagesRef = useRef<Map<string, ChatMessage[]>>(new Map());
@@ -457,6 +456,8 @@ export default function App() {
   // Shared mention-insert ref: populated by ChatInput, consumed by the
   // accordion-bar IncludedProjectsControl so both share the same callback.
   const mentionInsertRef = useRef<((linkName: string) => void) | null>(null);
+  /** The active chat panel's send (command palette slash commands). */
+  const chatSendTextRef = useRef<((text: string) => void) | null>(null);
   const workspacesRef = useRef(workspaces);
   const workspaceStatusRef = useRef<{ busy: Set<string>; streaming: Set<string>; completed: Set<string>; approval: Set<string>; awaitingQuestion: Set<string> }>({
     busy: new Set(), streaming: new Set(), completed: new Set(), approval: new Set(), awaitingQuestion: new Set(),
@@ -1260,47 +1261,6 @@ export default function App() {
     if (!ws || ws.terminalTabs.length > 0 || ws.status === 'suspended' || ws.status === 'recent') return;
     handleTabCreate();
   }, [activeProjectPath, handleTabCreate, getWorkspace]);
-
-  const handleQueueAdd = useCallback((sessionId: string, text: string, fullText: string, images?: string[], attachments?: { images: number; files: number; terminal: boolean }) => {
-    setMessageQueues(prev => {
-      const queue = prev.get(sessionId) || [];
-      if (queue.length >= 5) return prev;
-      const next = new Map(prev);
-      next.set(sessionId, [...queue, { id: `q-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, text, fullText, images, attachments }]);
-      return next;
-    });
-  }, []);
-
-  const handleQueueRemove = useCallback((sessionId: string, id: string) => {
-    setMessageQueues(prev => {
-      const queue = prev.get(sessionId) || [];
-      const next = new Map(prev);
-      next.set(sessionId, queue.filter(m => m.id !== id));
-      return next;
-    });
-  }, []);
-
-  const handleQueueShift = useCallback((sessionId: string): void => {
-    setMessageQueues(prev => {
-      const queue = prev.get(sessionId) || [];
-      if (queue.length === 0) return prev;
-      const next = new Map(prev);
-      next.set(sessionId, queue.slice(1));
-      return next;
-    });
-  }, []);
-
-  const handleQueuePromote = useCallback((sessionId: string, id: string) => {
-    setMessageQueues(prev => {
-      const queue = prev.get(sessionId) || [];
-      const idx = queue.findIndex(m => m.id === id);
-      if (idx <= 0) return prev;
-      const next = new Map(prev);
-      const reordered = [queue[idx], ...queue.slice(0, idx), ...queue.slice(idx + 1)];
-      next.set(sessionId, reordered);
-      return next;
-    });
-  }, []);
 
   // Derived state for the active workspace
   const projectPath = activeProjectPath;
@@ -2747,21 +2707,10 @@ export default function App() {
       }));
       return;
     }
-    // Send as a slash command message to the active chat
-    if (activeProjectPath) {
-      const ws = getWorkspace(activeProjectPath);
-      if (!ws) return;
-      const sessionId = ws.activeSession.id;
-      const text = `/${command}`;
-      const msg: QueuedMessage = { id: `q-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, text, fullText: text, images: [] };
-      setMessageQueues(prev => {
-        const next = new Map(prev);
-        const queue = next.get(sessionId) || [];
-        next.set(sessionId, [...queue, msg]);
-        return next;
-      });
-    }
-  }, [activeProjectPath, updateWorkspace, getWorkspace]);
+    // Send as a slash command message to the active chat (main queues it
+    // behind a running turn).
+    if (activeProjectPath) chatSendTextRef.current?.(`/${command}`);
+  }, [activeProjectPath, updateWorkspace]);
 
   const handleEditorSave = useCallback(async (filePath: string, content: string) => {
     await window.sai.fsWriteFile(filePath, content);
@@ -3002,12 +2951,6 @@ export default function App() {
         if (!removedKeys.some(k => prev.has(k))) return prev;
         const next = new Set(prev);
         for (const k of removedKeys) next.delete(k);
-        return next;
-      });
-      setMessageQueues(prev => {
-        if (!removedIds.some(id => prev.has(id))) return prev;
-        const next = new Map(prev);
-        for (const id of removedIds) next.delete(id);
         return next;
       });
       for (const k of removedKeys) {
@@ -3374,12 +3317,8 @@ export default function App() {
                   onDraftChange={(draft: string) => handleDraftChange(wsPath, draft)}
                   initialContextItems={(chatContextItemsRef.current.get(wsPath) as any) || []}
                   onContextItemsChange={(items: any[]) => handleContextItemsChange(wsPath, items)}
-                  messageQueue={messageQueues.get(ws.activeSession.id) || []}
                   overlayControl={overlayEnabled ? { mode: overlayMode, onChange: handleOverlayModeChange } : undefined}
-                  onQueueAdd={handleQueueAdd}
-                  onQueueRemove={handleQueueRemove}
-                  onQueueShift={handleQueueShift}
-                  onQueuePromote={handleQueuePromote}
+                  sendTextRef={wsPath === activeProjectPath ? chatSendTextRef : undefined}
                   sessionId={ws.activeSession.id}
                   taskUiEnabled={taskUiEnabled}
                   backgroundTasks={aiProvider === 'claude' ? selectSidebarTasks(backgroundTasksByScope, `${wsPath}:${ws.activeSession.id}`) : undefined}

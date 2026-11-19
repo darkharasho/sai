@@ -121,6 +121,55 @@ describe('client state', () => {
     expect(reduceChat(s, e(8, { type: 'queue_cleared' })).queue).toEqual([]);
   });
 
+  it('queue_promoted moves an item to the front; unknown ids are a no-op', () => {
+    const item = (clientId: string) => ({ clientId, text: clientId, queuedAt: 1 });
+    let s = reduceMany(claude(), [
+      e(1, { type: 'queue_added', item: item('a') }),
+      e(2, { type: 'queue_added', item: item('b') }),
+      e(3, { type: 'queue_added', item: item('c') }),
+      e(4, { type: 'queue_promoted', clientId: 'c' }),
+    ]);
+    expect(s.queue.map(q => q.clientId)).toEqual(['c', 'a', 'b']);
+    s = reduceChat(s, e(5, { type: 'queue_promoted', clientId: 'zz' }));
+    expect(s.queue.map(q => q.clientId)).toEqual(['c', 'a', 'b']);
+  });
+
+  it('a queued send waits in the queue, not the transcript; its drain puts the bubble at the end', () => {
+    let s = reduceMany(claude(), [
+      e(1, { type: 'user_message', clientId: 'u1', text: 'first', origin: 'desktop' }),
+      e(2, { type: 'streaming_start', turnSeq: 1 }),
+      e(3, { type: 'user_message', clientId: 'u2', text: 'second', origin: 'desktop', taskId: 't-9' }),
+      e(4, { type: 'queue_added', item: { clientId: 'u2', text: 'second', queuedAt: 1, taskId: 't-9', images: ['data:x'] } }),
+      e(5, assistant(1, { type: 'text', text: 'reply' })),
+    ]);
+    // Held: the queue strip shows it, the transcript doesn't.
+    expect(s.messages.map(m => m.id)).toEqual(['u1', expect.any(String)]);
+    expect(s.messages[1].role).toBe('assistant');
+    expect(s.queue.map(q => q.clientId)).toEqual(['u2']);
+    s = reduceMany(s, [
+      e(6, { type: 'done', turnSeq: 1 }),
+      // The drain: the next turn starts (sync backend), then the item leaves the queue as sent.
+      e(7, { type: 'streaming_start', turnSeq: 2 }),
+      e(8, { type: 'queue_removed', clientId: 'u2', sent: true }),
+    ]);
+    expect(s.queue).toEqual([]);
+    const last = s.messages[s.messages.length - 1];
+    expect(last).toMatchObject({ id: 'u2', role: 'user', content: 'second', taskId: 't-9', images: ['data:x'], timestamp: 1008 });
+    // The new turn's output lands after the bubble.
+    s = reduceChat(s, e(9, assistant(2, { type: 'text', text: 'reply 2' })));
+    expect(s.messages.map(m => m.role)).toEqual(['user', 'assistant', 'user', 'assistant']);
+  });
+
+  it('a queued item removed by the user never reaches the transcript', () => {
+    const s = reduceMany(claude(), [
+      e(1, { type: 'user_message', clientId: 'u2', text: 'second', origin: 'desktop' }),
+      e(2, { type: 'queue_added', item: { clientId: 'u2', text: 'second', queuedAt: 1 } }),
+      e(3, { type: 'queue_removed', clientId: 'u2' }),
+    ]);
+    expect(s.messages).toEqual([]);
+    expect(s.queue).toEqual([]);
+  });
+
   it('watcher_snapshot upserts by url on the owning message', () => {
     const snap = (url: string, phase: string) => ({ url, kind: 'run', phase, capturedAt: 1, data: {} });
     let s = reduceMany(claude(), [

@@ -83,8 +83,7 @@ describe('ChatPanel task feeds integration', () => {
     onTurnComplete: vi.fn(), onClaudeSessionId: vi.fn(), onGeminiSessionId: vi.fn(),
     onCodexSessionId: vi.fn(), activeFilePath: null, onFileOpen: vi.fn(), isActive: true,
     isStreaming: true,
-    messageQueue: [], onQueueAdd: vi.fn(), onQueueRemove: vi.fn(), onQueueShift: vi.fn(),
-    sessionId: 'session-1', terminalTabs: [], onSlashCommandsUpdate: vi.fn(),
+      sessionId: 'session-1', terminalTabs: [], onSlashCommandsUpdate: vi.fn(),
     taskUiEnabled: true, backgroundTasks: [], onStopBackgroundTask: vi.fn().mockResolvedValue(true),
   });
 
@@ -344,8 +343,13 @@ describe('ChatPanel task feeds integration', () => {
     });
 
     it('a queued message sent now while a task tab is open is neither tagged nor prefixed', async () => {
-      const props = { ...baseProps(), messageQueue: [{ id: 'q1', text: 'queued', fullText: 'queued' }] as any };
+      const props = baseProps();
       await mount(props);
+      // The queue lives in main's chat log.
+      await act(async () => {
+        (window.sai as any).chatlog.append('session-1', { type: 'queue_added', item: { clientId: 'q1', text: 'queued', queuedAt: 1 } }, { projectPath: '/project' });
+      });
+      await flushChatlog();
       fireEvent.click(tabFor('Alpha task'));
       await act(async () => { await inputProps.onQueueSendNow('q1'); });
       const msgs = await waitFor(() => {

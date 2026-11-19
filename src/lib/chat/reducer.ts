@@ -128,6 +128,18 @@ function appendMessage(s: ChatState, m: ChatMessage): ChatState {
   return { ...s, messages: [...s.messages, m] };
 }
 
+/** Drops a message by id, keeping the open turn's start index on the same message. */
+function withoutMessage(s: ChatState, id: string): ChatState {
+  const idx = s.messages.findIndex(m => m.id === id);
+  if (idx < 0) return s;
+  const startIndex = s.turn.startIndex;
+  return {
+    ...s,
+    messages: [...s.messages.slice(0, idx), ...s.messages.slice(idx + 1)],
+    turn: startIndex != null && idx < startIndex ? { ...s.turn, startIndex: startIndex - 1 } : s.turn,
+  };
+}
+
 /** Rewrites the tool calls with this id; fn returning null leaves a call untouched. */
 function mapToolCalls(s: ChatState, toolUseId: unknown, fn: (tc: ToolCall) => ToolCall | null): ChatState {
   let any = false;
@@ -420,11 +432,33 @@ function apply(s: ChatState, entry: ChatLogEntry): ChatState {
     case 'queue_added': {
       const item = ev.item as QueuedItem | undefined;
       if (!item || typeof item.clientId !== 'string') return s;
-      return s.queue.some(q => q.clientId === item.clientId) ? s : { ...s, queue: [...s.queue, item] };
+      if (s.queue.some(q => q.clientId === item.clientId)) return s;
+      // The send logged its bubble first; while queued it shows in the queue
+      // strip, not the transcript (its drain puts it back at the end).
+      return { ...withoutMessage(s, item.clientId), queue: [...s.queue, item] };
     }
 
-    case 'queue_removed':
-      return { ...s, queue: s.queue.filter(q => q.clientId !== ev.clientId) };
+    case 'queue_removed': {
+      const item = s.queue.find(q => q.clientId === ev.clientId);
+      if (!item) return s;
+      const next = { ...s, queue: s.queue.filter(q => q !== item) };
+      // A drain sent it: the bubble joins the transcript now, ahead of its turn's output.
+      if (ev.sent !== true) return next;
+      return appendMessage(next, {
+        id: item.clientId,
+        role: 'user',
+        content: typeof item.text === 'string' ? item.text : '',
+        timestamp: ts,
+        ...(Array.isArray(item.images) && item.images.length > 0 ? { images: item.images } : {}),
+        ...(typeof item.taskId === 'string' ? { taskId: item.taskId } : {}),
+      });
+    }
+
+    case 'queue_promoted': {
+      const idx = s.queue.findIndex(q => q.clientId === ev.clientId);
+      if (idx <= 0) return s;
+      return { ...s, queue: [s.queue[idx], ...s.queue.slice(0, idx), ...s.queue.slice(idx + 1)] };
+    }
 
     case 'queue_cleared':
       return { ...s, queue: [] };

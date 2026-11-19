@@ -744,6 +744,10 @@ function createWindow() {
     try { chatLog.startupRepair(); } catch (err) {
       devlog('chatlog', 'chatlog.repairError', { error: err instanceof Error ? err.message : String(err) });
     }
+    // Queues the previous run left behind drain now (repair already woke the chats it closed).
+    try { if (chatLogStore) chatCommands?.resumeQueues(chatLogStore.queuedChatIds()); } catch (err) {
+      devlog('chatlog', 'chatlog.resumeQueuesError', { error: err instanceof Error ? err.message : String(err) });
+    }
   }
   registerGitHandlers();
   registerFsHandlers(mainWindow!);

@@ -238,6 +238,7 @@ export function installE2EChatlog(sai: Record<string, any>): void {
       case 'answer': { const c = known(cmd.chatId); await sai.claudeAnswerQuestion?.(c.meta.projectPath, cmd.toolUseId, cmd.answers, cmd.chatId); return {}; }
       case 'planReview': { const c = known(cmd.chatId); await sai.claudeAnswerPlanReview?.(c.meta.projectPath, cmd.toolUseId, cmd.approved, cmd.chatId); return {}; }
       case 'queueRemove': known(cmd.chatId); return { seq: append(cmd.chatId, { type: 'queue_removed', clientId: cmd.target }).seq };
+      case 'queuePromote': known(cmd.chatId); return { seq: append(cmd.chatId, { type: 'queue_promoted', clientId: cmd.target }).seq };
       case 'queueClear': known(cmd.chatId); return { seq: append(cmd.chatId, { type: 'queue_cleared' }).seq };
       default: throw new Error(`unknown command ${cmd.kind}`);
     }

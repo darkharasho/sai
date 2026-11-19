@@ -28,6 +28,12 @@ function fileId(chatId: string): string {
   return SAFE_ID.test(chatId) ? chatId : 'x-' + crypto.createHash('sha256').update(chatId).digest('hex');
 }
 
+/** Keeps meta.queued in step with the state's queue (absent when empty). */
+function setQueued(meta: ChatMeta, n: number): void {
+  if (n > 0) meta.queued = n;
+  else delete meta.queued;
+}
+
 function realPathOf(p: string): string {
   try { return fs.realpathSync(p); } catch { return path.resolve(p); }
 }
@@ -112,6 +118,7 @@ export class ChatLogStore {
     meta.headSeq = headSeq;
     meta.snapshotSeq = snapSeq;
     meta.openTurn = state.turn.streaming;
+    setQueued(meta, state.queue.length);
     const l = { state, headSeq };
     this.loaded.set(chatId, l);
     return l;
@@ -153,6 +160,7 @@ export class ChatLogStore {
     meta.headSeq = entry.seq;
     meta.updatedAt = ts;
     meta.openTurn = l.state.turn.streaming;
+    setQueued(meta, l.state.queue.length);
     const line = JSON.stringify(entry) + '\n';
     if (isDeltaEvent(ev)) {
       let buf = this.buffers.get(chatId);
@@ -277,6 +285,7 @@ export class ChatLogStore {
     meta.snapshotSeq = l.headSeq;
     meta.headSeq = l.headSeq;
     meta.openTurn = l.state.turn.streaming;
+    setQueued(meta, l.state.queue.length);
     this.writeIndex();
   }
 
@@ -306,6 +315,11 @@ export class ChatLogStore {
 
   openTurnChatIds(): string[] {
     return Object.values(this.index).filter(m => m.openTurn).map(m => m.chatId);
+  }
+
+  /** Chats holding queued sends (from the index; no log is reduced). */
+  queuedChatIds(): string[] {
+    return Object.values(this.index).filter(m => (m.queued ?? 0) > 0).map(m => m.chatId);
   }
 
   flush(): void {

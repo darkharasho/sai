@@ -129,8 +129,9 @@ describe('ChatCommands', () => {
     const st = store.state('c1')!;
     expect(st.queue.map((q) => q.clientId)).toEqual(['u2']);
     expect(st.queue[0].text).toBe('second');
-    // The bubble is logged at queue time.
-    expect(st.messages.map((m) => m.id)).toContain('u2');
+    // The bubble is logged at queue time, then held in the queue (not the transcript) until it drains.
+    expect(store.read('c1', 0).entries.some((e) => e.ev.type === 'user_message' && e.ev.clientId === 'u2')).toBe(true);
+    expect(st.messages.map((m) => m.id)).not.toContain('u2');
   });
 
   it('turn end drains exactly one queued item in order', async () => {
@@ -371,7 +372,7 @@ describe('ChatCommands', () => {
     expect(store.state('c1')!.queue).toEqual([]);
   });
 
-  it('startup repair leaves a persisted queue intact and dispatches nothing', async () => {
+  it('startup repair drains a persisted queue for the chats it closes (R16)', async () => {
     const first = mk();
     await first.cmds.run(send('u1', 'first'));
     startTurn(first.log, 1);
@@ -383,8 +384,75 @@ describe('ChatCommands', () => {
     second.log.startupRepair();
     await new Promise((r) => setTimeout(r, 20));
     expect(second.store.state('c1')!.turn.streaming).toBe(false);
+    expect(second.d.send).toHaveBeenCalledTimes(1);
+    expect((second.d.send as any).mock.calls[0][1]).toMatchObject({ projectPath: P, scope: 'c1', prompt: 'queued' });
+    expect(second.store.state('c1')!.queue).toEqual([]);
+    expect(second.store.state('c1')!.messages.map((m) => m.id)).toEqual(['u1', 'u2']);
+  });
+
+  it('startup repair: a provider with no workspace yet keeps its queue through the bounded retry', async () => {
+    const first = mk();
+    await first.cmds.run(send('u1', 'first'));
+    startTurn(first.log, 1);
+    first.d.setBusy(true);
+    await first.cmds.run(send('u2', 'queued'));
+    first.store.close();
+    const second = mk({ dir: first.dir });
+    let ready = false;
+    second.d.canDispatch = () => ready;
+    second.log.startupRepair();
+    await new Promise((r) => setTimeout(r, 10));
     expect(second.d.send).not.toHaveBeenCalled();
     expect(second.store.state('c1')!.queue.map((q) => q.clientId)).toEqual(['u2']);
+    // The workspace appears while the backoff is still polling: the retry dispatches it.
+    ready = true;
+    await new Promise((r) => setTimeout(r, 300));
+    expect(second.d.send).toHaveBeenCalledTimes(1);
+    expect(second.store.state('c1')!.queue).toEqual([]);
+  });
+
+  it('resumeQueues drains persisted queues of chats with no open turn at startup (R16)', async () => {
+    const first = mk();
+    first.d.setPaused(true);
+    await first.cmds.run(send('u1', 'held a'));
+    await first.cmds.run(send('u2', 'held b'));
+    await first.cmds.run({ kind: 'settings', chatId: 'c2', clientId: 's-c2', projectPath: P, settings: { provider: 'codex' } });
+    expect(first.store.meta('c1')!.openTurn).toBe(false);
+    expect(first.store.queuedChatIds()).toEqual(['c1']);
+    first.store.close();
+
+    const second = mk({ dir: first.dir });
+    second.log.startupRepair(); // nothing open: repair wakes nothing
+    await new Promise((r) => setTimeout(r, 10));
+    expect(second.d.send).not.toHaveBeenCalled();
+    // The persisted index finds the queue without reducing every log.
+    expect(second.store.queuedChatIds()).toEqual(['c1']);
+    second.cmds.resumeQueues(second.store.queuedChatIds());
+    await new Promise((r) => setTimeout(r, 10));
+    expect(second.d.send).toHaveBeenCalledTimes(1);
+    expect((second.d.send as any).mock.calls[0][1].prompt).toBe('held a');
+    // The rest waits for that turn's end, in order.
+    expect(second.store.state('c1')!.queue.map((q) => q.clientId)).toEqual(['u2']);
+    runTurn(second.log);
+    await tick();
+    expect((second.d.send as any).mock.calls[1][1].prompt).toBe('held b');
+    expect(second.store.queuedChatIds()).toEqual([]);
+  });
+
+  it('queuePromote moves an item to the front so it drains next', async () => {
+    const { store, log, d, cmds } = mk();
+    await cmds.run(send('u1', 'first'));
+    startTurn(log, 1);
+    d.setBusy(true);
+    await cmds.run(send('u2', 'a'));
+    await cmds.run(send('u3', 'b'));
+    const r = await cmds.run({ kind: 'queuePromote', chatId: 'c1', clientId: 'p1', target: 'u3' });
+    expect(r.ok).toBe(true);
+    expect(store.state('c1')!.queue.map((q) => q.clientId)).toEqual(['u3', 'u2']);
+    d.setBusy(false);
+    endTurn(log, 1);
+    await tick();
+    expect((d.send as any).mock.calls[1][1].prompt).toBe('b');
   });
 
   it('a drain whose provider is not ready or whose dispatch throws leaves the item queued', async () => {
@@ -428,5 +496,87 @@ describe('ChatCommands', () => {
     expect(r.ok).toBe(true);
     expect(store.meta('c9')).toMatchObject({ provider: 'kimi', projectPath: P });
     expect(store.state('c9')!.settings).toMatchObject({ provider: 'kimi', approvalMode: 'plan' });
+  });
+});
+
+// R17: the Task 9 Step 5 dogfood scenarios, driven through the real store,
+// service, reducer and ChatCommands with a fake provider dispatch.
+describe('Task 9 dogfood scenarios (log-driven)', () => {
+  it('queue three messages mid-turn: they run in order, each bubble ahead of its own reply', async () => {
+    const { store, log, d, cmds } = mk();
+    await cmds.run(send('u1', 'start'));
+    startTurn(log, 1);
+    d.setBusy(true);
+    for (const [id, t] of [['q1', 'one'], ['q2', 'two'], ['q3', 'three']]) await cmds.run(send(id, t));
+    expect(store.state('c1')!.queue.map((q) => q.text)).toEqual(['one', 'two', 'three']);
+    expect(d.send).toHaveBeenCalledTimes(1);
+
+    // The fake backend: busy while a turn runs; each dispatch starts the next turn synchronously.
+    let turn = 1;
+    (d.send as any).mockImplementation(() => { turn += 1; d.setBusy(true); startTurn(log, turn); });
+    for (let i = 0; i < 3; i++) {
+      log.record({ type: 'assistant', projectPath: P, scope: 'c1', turnSeq: turn, message: { content: [{ type: 'text', text: `reply ${turn}` }] } });
+      d.setBusy(false);
+      endTurn(log, turn);
+      await tick();
+    }
+    const prompts = (d.send as any).mock.calls.map((c: any[]) => c[1].prompt);
+    expect(prompts).toEqual(['start', 'one', 'two', 'three']);
+    expect(store.state('c1')!.queue).toEqual([]);
+    const transcript = store.state('c1')!.messages.map((m) => `${m.role}:${m.content}`);
+    expect(transcript).toEqual([
+      'user:start', 'assistant:reply 1',
+      'user:one', 'assistant:reply 2',
+      'user:two', 'assistant:reply 3',
+      'user:three',
+    ]);
+  });
+
+  it('change the model mid-chat: the next turn uses it', async () => {
+    const { store, log, d, cmds } = mk();
+    await cmds.run({ kind: 'settings', chatId: 'c1', clientId: 's0', projectPath: P, origin: 'desktop', settings: { provider: 'claude', model: 'sonnet', permMode: 'default', effort: 'high' } });
+    await cmds.run(send('u1', 'first'));
+    expect((d.send as any).mock.calls[0][1].settings.model).toBe('sonnet');
+    startTurn(log, 1);
+    // Picked while the turn runs.
+    await cmds.run({ kind: 'settings', chatId: 'c1', clientId: 's1', origin: 'desktop', settings: { model: 'opus' } });
+    expect(store.state('c1')!.settings).toMatchObject({ provider: 'claude', model: 'opus', permMode: 'default', effort: 'high' });
+    endTurn(log, 1);
+    await cmds.run(send('u2', 'second'));
+    expect((d.send as any).mock.calls[1][1].settings).toMatchObject({ provider: 'claude', model: 'opus', effort: 'high' });
+  });
+
+  it('quit with items queued and relaunch: the queue is still there and drains on the next turn end', async () => {
+    const first = mk();
+    await first.cmds.run(send('u1', 'long job'));
+    startTurn(first.log, 1);
+    first.d.setBusy(true);
+    await first.cmds.run(send('u2', 'after'));
+    first.store.close();
+
+    // Relaunch while the backend still runs that chat's turn: repair leaves it open.
+    const dir = first.dir;
+    const store = new ChatLogStore({ dir });
+    stores.push(store);
+    const log = new ChatLogService({
+      store, sendToRenderer: () => {}, bus: () => null,
+      liveChats: () => ['c1'], providerOf: () => 'claude', devlog: () => {},
+    });
+    const { d } = fakeDispatch();
+    const cmds = new ChatCommands({ log, store, dispatch: d, retryBaseMs: 2, inFlightTimeoutMs: 200 });
+    wire(log, cmds);
+    d.setBusy(true);
+    log.startupRepair();
+    cmds.resumeQueues(store.queuedChatIds());
+    await new Promise((r) => setTimeout(r, 20));
+    // Still shown (the queue strip reads state.queue), not sent: the turn is running.
+    expect(store.state('c1')!.queue.map((q) => q.text)).toEqual(['after']);
+    expect(d.send).not.toHaveBeenCalled();
+    d.setBusy(false);
+    endTurn(log, 1);
+    await tick();
+    expect(d.send).toHaveBeenCalledTimes(1);
+    expect((d.send as any).mock.calls[0][1].prompt).toBe('after');
+    expect(store.state('c1')!.queue).toEqual([]);
   });
 });

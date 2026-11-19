@@ -11,7 +11,10 @@ import type { ChatMessage } from '../../src/types';
  * event the way ChatLogService.record does; `command` logs the client events
  * and then "dispatches" by calling the legacy window.sai provider methods
  * (claudeSend, codexStop, …) the way providerDispatch.ts does, so tests can
- * keep asserting on those.
+ * keep asserting on those. Like ChatCommands, a send queues (queue_added)
+ * while the chat's logged turn is open, items are already waiting or the
+ * mock is load-paused (`setPaused`), and a turn end drains one item
+ * (queue_removed sent:true, then the dispatch).
  */
 type Provider = ChatSettings['provider'];
 
@@ -41,6 +44,8 @@ export interface MockChatlog {
   commands(kind?: string): any[];
   /** Live delivery pauses while false (entries still append). */
   setLive(on: boolean): void;
+  /** Load guard: sends queue while paused; un-pausing drains one item per queued chat. */
+  setPaused(on: boolean): void;
 }
 
 export function createMockChatlog(sai: Record<string, any> = {}): MockChatlog {
@@ -50,6 +55,9 @@ export function createMockChatlog(sai: Record<string, any> = {}): MockChatlog {
   const ledger = new Map<string, Promise<unknown>>();
   const seenCards = new Set<string>();
   let live = true;
+  let paused = false;
+  /** A send-now stopped this chat's turn: that turn's end must not drain (cleared by streaming_start). */
+  const suppressDrain = new Set<string>();
 
   const ensure = (chatId: string, init?: { projectPath?: string; provider?: Provider }): Chat => {
     let c = chats.get(chatId);
@@ -75,6 +83,7 @@ export function createMockChatlog(sai: Record<string, any> = {}): MockChatlog {
   };
 
   const append = (chatId: string, ev: ChatEvent, init?: { projectPath?: string; provider?: Provider }): ChatLogEntry => {
+    const wasStreaming = chats.has(chatId) && stateOf(chatId)!.turn.streaming;
     const c = ensure(chatId, init);
     c.head += 1;
     // Main stamps entries with its wall clock.
@@ -82,8 +91,19 @@ export function createMockChatlog(sai: Record<string, any> = {}): MockChatlog {
     c.entries.push(entry);
     c.meta = { ...c.meta, headSeq: c.head, updatedAt: entry.ts, openTurn: stateOf(chatId)?.turn.streaming === true };
     if (live) for (const l of [...listeners]) l(entry);
+    if (ev.type === 'streaming_start') suppressDrain.delete(chatId);
+    if (wasStreaming && !stateOf(chatId)!.turn.streaming && !suppressDrain.delete(chatId)) drainOne(chatId);
     return entry;
   };
+
+  /** ChatCommands.drainOne, synchronously. */
+  function drainOne(chatId: string): void {
+    const st = stateOf(chatId);
+    if (paused || !st || st.queue.length === 0 || st.turn.streaming) return;
+    const item = st.queue[0] as typeof st.queue[0] & { prompt?: string; imagePaths?: string[] };
+    dispatchSend(chatId, typeof item.prompt === 'string' ? item.prompt : item.text, item.imagePaths);
+    append(chatId, { type: 'queue_removed', clientId: item.clientId, sent: true });
+  }
 
   const record = (msg: Record<string, unknown>): ChatLogEntry[] => {
     const type = msg?.type;
@@ -161,8 +181,25 @@ export function createMockChatlog(sai: Record<string, any> = {}): MockChatlog {
           ...(cmd.images?.length ? { images: cmd.images } : {}),
           ...(typeof cmd.taskId === 'string' ? { taskId: cmd.taskId } : {}),
         }, { projectPath: cmd.projectPath, ...(cmd.provider ? { provider: cmd.provider } : {}) });
-        if (cmd.now) dispatchStop(cmd.chatId);
-        dispatchSend(cmd.chatId, typeof cmd.promptOverride === 'string' ? cmd.promptOverride : cmd.text, cmd.imagePaths);
+        const prompt = typeof cmd.promptOverride === 'string' ? cmd.promptOverride : cmd.text;
+        const st = stateOf(cmd.chatId)!;
+        if (paused || (!cmd.now && (st.turn.streaming || st.queue.length > 0))) {
+          append(cmd.chatId, { type: 'queue_added', item: {
+            clientId: cmd.clientId, text: cmd.text ?? '', queuedAt: Date.now(), origin: cmd.origin ?? 'desktop',
+            ...(cmd.images?.length ? { images: cmd.images } : {}),
+            ...(typeof cmd.taskId === 'string' ? { taskId: cmd.taskId } : {}),
+            ...(prompt !== cmd.text ? { prompt } : {}),
+            ...(cmd.imagePaths?.length ? { imagePaths: cmd.imagePaths } : {}),
+          } });
+          // Queued behind other items while idle: nothing else wakes the drain.
+          if (!paused && !st.turn.streaming) drainOne(cmd.chatId);
+          return { seq: entry.seq };
+        }
+        if (cmd.now) {
+          if (st.turn.streaming) suppressDrain.add(cmd.chatId);
+          dispatchStop(cmd.chatId);
+        }
+        dispatchSend(cmd.chatId, prompt, cmd.imagePaths);
         return { seq: entry.seq };
       }
       case 'settings': {
@@ -190,6 +227,7 @@ export function createMockChatlog(sai: Record<string, any> = {}): MockChatlog {
         return {};
       }
       case 'queueRemove': known(cmd.chatId); return { seq: append(cmd.chatId, { type: 'queue_removed', clientId: cmd.target }).seq };
+      case 'queuePromote': known(cmd.chatId); return { seq: append(cmd.chatId, { type: 'queue_promoted', clientId: cmd.target }).seq };
       case 'queueClear': known(cmd.chatId); return { seq: append(cmd.chatId, { type: 'queue_cleared' }).seq };
       default: throw new Error(`unknown command ${cmd.kind}`);
     }
@@ -259,6 +297,11 @@ export function createMockChatlog(sai: Record<string, any> = {}): MockChatlog {
     state: stateOf,
     commands: (kind) => api.command.mock.calls.map(([c]) => c).filter((c: any) => !kind || c.kind === kind),
     setLive(on) { live = on; },
+    setPaused(on) {
+      const resumed = paused && !on;
+      paused = on;
+      if (resumed) for (const id of chats.keys()) drainOne(id);
+    },
   };
   return api;
 }

@@ -57,7 +57,6 @@ const baseProps = (over: Partial<Props> = {}): Props => ({
   kimiApprovalMode: 'default', onKimiApprovalModeChange: vi.fn(),
   onMessagesChange: vi.fn(), onTurnComplete: vi.fn(),
   activeFilePath: null, onFileOpen: vi.fn(), isActive: true,
-  messageQueue: [], onQueueAdd: vi.fn(), onQueueRemove: vi.fn(), onQueueShift: vi.fn(),
   sessionId: 'c1', claudeScope: 'c1', terminalTabs: [],
   ...over,
 });

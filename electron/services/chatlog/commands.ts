@@ -29,6 +29,8 @@ export type ChatCommand =
     projectPath?: string;
   }
   | { kind: 'queueRemove'; chatId: string; clientId: string; target: string }
+  /** Moves a queued item to the front (it drains next). */
+  | { kind: 'queuePromote'; chatId: string; clientId: string; target: string }
   | { kind: 'queueClear'; chatId: string; clientId: string };
 
 export interface CommandResult { clientId: string; ok: boolean; duplicate: boolean; seq?: number; error?: string }
@@ -143,13 +145,28 @@ export class ChatCommands {
     this.suppressDrain.delete(chatId);
   }
 
-  /** A logged turn ended (streaming went true → false). Drains one queued item. */
-  onTurnEnded(chatId: string, ev?: ChatEvent): void {
-    // Startup repair closes turns a previous run left open; backends aren't
-    // ready, so persisted queues wait for the chat's next real turn end or send.
-    if (ev?.reason === 'app_restart') return;
+  /**
+   * A logged turn ended (streaming went true → false). Drains one queued item.
+   * Turns startup repair closes (reason app_restart) drain too: what was queued
+   * before quitting sends on relaunch, gated by canDispatch and the bounded
+   * retry like any drain (a provider with no workspace yet keeps its queue).
+   */
+  onTurnEnded(chatId: string, _ev?: ChatEvent): void {
     if (this.suppressDrain.delete(chatId)) return;
     this.scheduleDrain(chatId, 0, 0);
+  }
+
+  /**
+   * Startup, once backends are registered: chats that kept a queue from the
+   * previous run with no turn left open (startup repair only wakes the chats
+   * it closes) get one drain attempt each.
+   */
+  resumeQueues(chatIds: string[]): void {
+    for (const chatId of chatIds) {
+      if (!this.store.meta(chatId)) continue;
+      this.queuedChats.add(chatId);
+      this.scheduleDrain(chatId, 0, 0);
+    }
   }
 
   /** A done was logged with no turn open: a dispatch that failed before it started. */
@@ -194,6 +211,10 @@ export class ChatCommands {
       case 'queueRemove': {
         this.chat(cmd.chatId);
         return { seq: this.log.appendClient(cmd.chatId, { type: 'queue_removed', clientId: cmd.target }).seq };
+      }
+      case 'queuePromote': {
+        this.chat(cmd.chatId);
+        return { seq: this.log.appendClient(cmd.chatId, { type: 'queue_promoted', clientId: cmd.target }).seq };
       }
       case 'queueClear': {
         this.chat(cmd.chatId);
@@ -255,6 +276,7 @@ export class ChatCommands {
       const item: QueuedSend = {
         clientId: cmd.clientId, text, queuedAt: Date.now(), origin,
         ...(images ? { images } : {}),
+        ...(typeof cmd.taskId === 'string' ? { taskId: cmd.taskId } : {}),
         ...(prompt !== text ? { prompt } : {}),
         ...(imagePaths ? { imagePaths } : {}),
       };
@@ -349,7 +371,8 @@ export class ChatCommands {
         this.devlog('chatcmd.drainDispatchError', { chatId, clientId: item.clientId, error: err instanceof Error ? err.message : String(err) });
         return;
       }
-      this.log.appendClient(chatId, { type: 'queue_removed', clientId: item.clientId });
+      // sent: the bubble joins the transcript (a user's queueRemove drops it instead).
+      this.log.appendClient(chatId, { type: 'queue_removed', clientId: item.clientId, sent: true });
       if (this.store.state(chatId)?.queue.length === 0) this.queuedChats.delete(chatId);
     } catch (err) {
       this.devlog('chatlog.drainError', { chatId, error: err instanceof Error ? err.message : String(err) });

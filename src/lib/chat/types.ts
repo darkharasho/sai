@@ -14,7 +14,11 @@ export interface ChatSettings {
   approvalMode?: string; conversationMode?: string;
 }
 
-export interface QueuedItem { clientId: string; text: string; images?: string[]; queuedAt: number }
+export interface QueuedItem {
+  clientId: string; text: string; images?: string[]; queuedAt: number;
+  /** The send's task tag: the bubble keeps it when the item is sent. */
+  taskId?: string;
+}
 
 export interface TurnState {
   streaming: boolean;
@@ -59,6 +63,8 @@ export interface ChatMeta {
   provider: ChatSettings['provider'];
   /** Equals the post-reduce state's turn.streaming; lets startup find open turns without reducing logs. */
   openTurn: boolean;
+  /** Equals the post-reduce state's queue length; lets startup find persisted queues without reducing logs. */
+  queued?: number;
   /**
    * The chat's pre-log (IndexedDB) history is settled: imported, or the chat
    * was created by a client (which checks IndexedDB first). False/absent for a
@@ -126,6 +132,6 @@ export type PendingCodexMcpElicitation = {
 /** Event types the client (desktop or phone) writes; every other type comes from a backend. */
 export const CLIENT_EVENT_TYPES = [
   'user_message', 'local_note', 'cleared', 'watcher_snapshot',
-  'settings_changed', 'queue_added', 'queue_removed', 'queue_cleared',
+  'settings_changed', 'queue_added', 'queue_removed', 'queue_cleared', 'queue_promoted',
 ] as const;
 export type ClientEventType = (typeof CLIENT_EVENT_TYPES)[number];

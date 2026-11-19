@@ -121,10 +121,6 @@ describe('ChatPanel', () => {
       activeFilePath: null,
       onFileOpen: vi.fn(),
       isActive: true,
-      messageQueue: [],
-      onQueueAdd: vi.fn(),
-      onQueueRemove: vi.fn(),
-      onQueueShift: vi.fn(),
       sessionId: 'session-1',
       terminalTabs: [],
       onSlashCommandsUpdate: vi.fn(),
@@ -375,10 +371,6 @@ describe('ChatPanel', () => {
       activeFilePath: null,
       onFileOpen: vi.fn(),
       isActive: true,
-      messageQueue: [],
-      onQueueAdd: vi.fn(),
-      onQueueRemove: vi.fn(),
-      onQueueShift: vi.fn(),
       sessionId: 'session-1',
       terminalTabs: [],
       onSlashCommandsUpdate: vi.fn(),
@@ -444,10 +436,6 @@ describe('ChatPanel', () => {
       activeFilePath: null,
       onFileOpen: vi.fn(),
       isActive: true,
-      messageQueue: [],
-      onQueueAdd: vi.fn(),
-      onQueueRemove: vi.fn(),
-      onQueueShift: vi.fn(),
       sessionId: 'session-1',
       terminalTabs: [],
       onSlashCommandsUpdate: vi.fn(),
@@ -488,10 +476,6 @@ describe('ChatPanel', () => {
       activeFilePath: null,
       onFileOpen: vi.fn(),
       isActive: true,
-      messageQueue: [],
-      onQueueAdd: vi.fn(),
-      onQueueRemove: vi.fn(),
-      onQueueShift: vi.fn(),
       sessionId: 'session-1',
       terminalTabs: [],
       onSlashCommandsUpdate: vi.fn(),
@@ -544,10 +528,6 @@ describe('ChatPanel', () => {
       activeFilePath: null,
       onFileOpen: vi.fn(),
       isActive: true,
-      messageQueue: [],
-      onQueueAdd: vi.fn(),
-      onQueueRemove: vi.fn(),
-      onQueueShift: vi.fn(),
       sessionId: 'session-1',
       terminalTabs: [],
       onSlashCommandsUpdate: vi.fn(),
@@ -604,10 +584,6 @@ describe('ChatPanel', () => {
     activeFilePath: null,
     onFileOpen: vi.fn(),
     isActive: true,
-    messageQueue: [],
-    onQueueAdd: vi.fn(),
-    onQueueRemove: vi.fn(),
-    onQueueShift: vi.fn(),
     sessionId: 'session-1',
     terminalTabs: [],
     onSlashCommandsUpdate: vi.fn(),
@@ -1230,10 +1206,8 @@ describe('ChatPanel', () => {
   });
 
   it('does not render MessageQueue as a standalone child of the bottom strip', () => {
-    const props = {
-      ...baseProps(),
-      messageQueue: [{ id: 'q-0', text: 'a', fullText: 'a' }],
-    };
+    mockSai.chatlog.append('session-1', { type: 'queue_added', item: { clientId: 'q-0', text: 'a', queuedAt: 1 } }, { projectPath: '/project' });
+    const props = baseProps();
     const { container } = render(<ChatPanel {...props} />);
     const bottomStrip = container.querySelector('[data-testid="chat-bottom-strip"]');
     expect(bottomStrip?.querySelector('[data-testid="queue-badge"]')).toBeNull();
@@ -1496,22 +1470,26 @@ describe('ChatPanel', () => {
   });
 
   describe('bypass-queue-on-enter', () => {
+    // The queue lives in main's chat log (Task 9): seed it there. The mock's
+    // send queues like ChatCommands and drains one item per turn end.
+    const queueInLog = (text: string, clientId = 'q-0') => {
+      mockSai.chatlog.append('session-1', { type: 'user_message', clientId, text, origin: 'desktop' }, { projectPath: '/project' });
+      mockSai.chatlog.append('session-1', { type: 'queue_added', item: { clientId, text, queuedAt: 1 } });
+    };
+
     it('plain-Enter while streaming with non-empty queue stops current turn and dispatches immediately', async () => {
-      const onQueueShift = vi.fn();
-      const props: ChatPanelProps = {
-        ...baseProps(),
-        messageQueue: [{ id: 'q-0', text: 'queued one', fullText: 'queued one' }],
-        onQueueShift,
-      };
+      const props: ChatPanelProps = { ...baseProps() };
       const { rerender } = render(<ChatPanel {...props} />);
 
       await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
       const handler = mockSai.claudeOnMessage.mock.calls[0][0] as (msg: any) => void;
 
       await act(async () => {
-        handler({ type: 'streaming_start', projectPath: '/project', scope: 'chat' });
+        handler({ type: 'streaming_start', projectPath: '/project', scope: 'chat', turnSeq: 1 });
       });
+      await act(async () => { queueInLog('queued one'); });
       rerender(<ChatPanel {...props} isStreaming />);
+      await waitFor(() => expect(latestChatInputProps.messageQueue).toHaveLength(1));
 
       mockSai.claudeSend.mockClear();
       mockSai.claudeStop.mockClear();
@@ -1519,19 +1497,16 @@ describe('ChatPanel', () => {
         await latestChatInputProps.onSend('jump-the-line message');
       });
 
+      expect(mockSai.chatlog.commands('send').at(-1)).toMatchObject({ text: 'jump-the-line message', now: true });
       expect(mockSai.claudeStop).toHaveBeenCalledTimes(1);
       expect(mockSai.claudeSend).toHaveBeenCalledTimes(1);
       expect(mockSai.claudeSend.mock.calls[0][1]).toContain('jump-the-line message');
-      expect(onQueueShift).not.toHaveBeenCalled();
+      // The queue is untouched.
+      expect(latestChatInputProps.messageQueue.map((q: any) => q.id)).toEqual(['q-0']);
     });
 
     it('after the bypass message turn ends, the queue resumes draining from index 0', async () => {
-      const onQueueShift = vi.fn();
-      const props: ChatPanelProps = {
-        ...baseProps(),
-        messageQueue: [{ id: 'q-0', text: 'queued one', fullText: 'queued one' }],
-        onQueueShift,
-      };
+      const props: ChatPanelProps = { ...baseProps() };
       const { rerender } = render(<ChatPanel {...props} />);
 
       await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
@@ -1539,83 +1514,68 @@ describe('ChatPanel', () => {
 
       // Initial turn starts streaming, user bypasses with a new message.
       await act(async () => {
-        handler({ type: 'streaming_start', projectPath: '/project', scope: 'chat' });
+        handler({ type: 'streaming_start', projectPath: '/project', scope: 'chat', turnSeq: 1 });
       });
+      await act(async () => { queueInLog('queued one'); });
       rerender(<ChatPanel {...props} isStreaming />);
+      await waitFor(() => expect(latestChatInputProps.messageQueue).toHaveLength(1));
       await act(async () => {
         await latestChatInputProps.onSend('jump-the-line message');
       });
 
-      // Simulate the stop's `done` — the suppress flag should consume this.
-      await act(async () => {
-        handler({ type: 'done', projectPath: '/project', scope: 'chat' });
-      });
-      rerender(<ChatPanel {...props} isStreaming={false} />);
-      expect(onQueueShift).not.toHaveBeenCalled();
-
-      // The bypass message starts streaming, then ends — queue should drain now.
+      // The stop's `done` ends the interrupted turn: main does not drain on it.
       mockSai.claudeSend.mockClear();
       await act(async () => {
-        handler({ type: 'streaming_start', projectPath: '/project', scope: 'chat' });
+        handler({ type: 'done', projectPath: '/project', scope: 'chat', turnSeq: 1 });
+      });
+      rerender(<ChatPanel {...props} isStreaming={false} />);
+      expect(mockSai.claudeSend).not.toHaveBeenCalled();
+      expect(latestChatInputProps.messageQueue).toHaveLength(1);
+
+      // The bypass message starts streaming, then ends — the queue drains now.
+      await act(async () => {
+        handler({ type: 'streaming_start', projectPath: '/project', scope: 'chat', turnSeq: 2 });
       });
       rerender(<ChatPanel {...props} isStreaming />);
       await act(async () => {
-        handler({ type: 'done', projectPath: '/project', scope: 'chat' });
+        handler({ type: 'done', projectPath: '/project', scope: 'chat', turnSeq: 2 });
       });
       rerender(<ChatPanel {...props} isStreaming={false} />);
-      await act(async () => { await new Promise(resolve => setTimeout(resolve, 350)); });
+      await waitFor(() => expect(latestChatInputProps.messageQueue).toHaveLength(0));
 
-      expect(onQueueShift).toHaveBeenCalledTimes(1);
       expect(mockSai.claudeSend).toHaveBeenCalledTimes(1);
       expect(mockSai.claudeSend.mock.calls[0][1]).toContain('queued one');
     });
 
-    it('drains a message that landed in the queue just AFTER the turn ended (race)', async () => {
-      // Hit-or-miss bug: the user queues a message in the tiny window as the
-      // turn is wrapping up. The `done` IPC flips isStreaming false and runs the
-      // drain effect while the queue is still empty; the queued item arrives one
-      // render later. Because the drain only keyed on the isStreaming edge, that
-      // item was never sent. It must drain on arrival while idle.
-      const onQueueShift = vi.fn();
-      const props: ChatPanelProps = { ...baseProps(), messageQueue: [], onQueueShift };
+    it('a message queued just AFTER the turn ended still drains (main owns the queue)', async () => {
+      // The old renderer queue raced the turn-end edge. Main's send sees the
+      // chat idle with items waiting and drains them itself.
+      const props: ChatPanelProps = { ...baseProps() };
       const { rerender } = render(<ChatPanel {...props} />);
 
       await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
       const handler = mockSai.claudeOnMessage.mock.calls[0][0] as (msg: any) => void;
 
-      // Turn streams, then ends while the queue is still empty.
       await act(async () => {
-        handler({ type: 'streaming_start', projectPath: '/project', scope: 'chat' });
+        handler({ type: 'streaming_start', projectPath: '/project', scope: 'chat', turnSeq: 1 });
       });
       rerender(<ChatPanel {...props} isStreaming />);
-      await act(async () => {
-        handler({ type: 'done', projectPath: '/project', scope: 'chat' });
-      });
-      rerender(<ChatPanel {...props} isStreaming={false} />);
-      expect(onQueueShift).not.toHaveBeenCalled();
-
-      // The queued message lands a render AFTER the turn already ended.
+      // Ctrl+Enter while the composer still shows the turn running...
       mockSai.claudeSend.mockClear();
-      const withQueue: ChatPanelProps = {
-        ...props,
-        isStreaming: false,
-        messageQueue: [{ id: 'q-0', text: 'late one', fullText: 'late one' }],
-      };
-      await act(async () => { rerender(<ChatPanel {...withQueue} />); });
-      await act(async () => { await new Promise(resolve => setTimeout(resolve, 350)); });
+      await act(async () => {
+        handler({ type: 'done', projectPath: '/project', scope: 'chat', turnSeq: 1 });
+      });
+      // ...lands after the done: it is sent, not stranded.
+      await act(async () => { await latestChatInputProps.onQueue('late one', 'late one'); });
+      rerender(<ChatPanel {...props} isStreaming={false} />);
 
-      expect(onQueueShift).toHaveBeenCalledTimes(1);
       expect(mockSai.claudeSend).toHaveBeenCalledTimes(1);
       expect(mockSai.claudeSend.mock.calls[0][1]).toContain('late one');
+      expect(latestChatInputProps.messageQueue).toEqual([]);
     });
 
-    it('plain-Enter while not streaming with non-empty queue dispatches immediately without stop', async () => {
-      const onQueueShift = vi.fn();
-      const props: ChatPanelProps = {
-        ...baseProps(),
-        messageQueue: [{ id: 'q-0', text: 'queued one', fullText: 'queued one' }],
-        onQueueShift,
-      };
+    it('plain-Enter while not streaming with an empty queue dispatches immediately without stop', async () => {
+      const props: ChatPanelProps = { ...baseProps() };
       render(<ChatPanel {...props} />);
 
       await waitFor(() => expect(latestChatInputProps).toBeTruthy());
@@ -1629,7 +1589,6 @@ describe('ChatPanel', () => {
       expect(mockSai.claudeStop).not.toHaveBeenCalled();
       expect(mockSai.claudeSend).toHaveBeenCalledTimes(1);
       expect(mockSai.claudeSend.mock.calls[0][1]).toContain('immediate message');
-      expect(onQueueShift).not.toHaveBeenCalled();
     });
   });
 
@@ -2027,25 +1986,47 @@ describe('ChatPanel', () => {
   });
 
   describe('queue-drain handoff', () => {
-    it('keeps Stop button + thinking animation while a follow-up sits queued (turn ended)', async () => {
-      // Reproduces: sending a message right as the turn finishes left the
-      // composer showing Send (not Stop) and dropped the thinking animation
-      // during the gap between the old turn's `done` and the follow-up's start.
-      const props = {
-        ...baseProps(),
-        isStreaming: false,
-        messageQueue: [{ id: 'q-0', text: 'follow up', fullText: 'follow up' }],
-      };
+    it('keeps Stop button + thinking animation while main drains the next queued item (turn ended)', async () => {
+      // Reproduces: a follow-up queued as the turn finished left the composer
+      // showing Send (not Stop) and dropped the thinking animation during the
+      // gap between the old turn's `done` and the follow-up's start.
+      const props = { ...baseProps(), isStreaming: false };
       const { container } = render(<ChatPanel {...props} />);
       await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
+      const handler = mockSai.claudeOnMessage.mock.calls[0][0] as (msg: any) => void;
+      await act(async () => {
+        handler({ type: 'streaming_start', projectPath: '/project', scope: 'chat', turnSeq: 1 });
+      });
+      await act(async () => { await latestChatInputProps.onQueue('follow up', 'follow up'); });
+      await waitFor(() => expect(latestChatInputProps.messageQueue).toHaveLength(1));
+      // The turn ends; main sends the follow-up, whose turn hasn't started yet.
+      await act(async () => {
+        handler({ type: 'done', projectPath: '/project', scope: 'chat', turnSeq: 1 });
+      });
+      await waitFor(() => expect(latestChatInputProps.messageQueue).toHaveLength(0));
       // Composer must present as streaming so the Stop button stays put...
       expect(latestChatInputProps.isStreaming).toBe(true);
       // ...and the thinking animation must not vanish mid-handoff.
       expect(container.querySelector('[data-testid="thinking-animation"]')).toBeTruthy();
+      // The follow-up's own turn takes over, then ends: back to Send.
+      await act(async () => {
+        handler({ type: 'streaming_start', projectPath: '/project', scope: 'chat', turnSeq: 2 });
+      });
+      await act(async () => {
+        handler({ type: 'done', projectPath: '/project', scope: 'chat', turnSeq: 2 });
+      });
+      await waitFor(() => expect(latestChatInputProps.isStreaming).toBe(false));
+    });
+
+    it('a queue that is not draining (paused) does not hold the Stop button up', async () => {
+      mockSai.chatlog.append('session-1', { type: 'queue_added', item: { clientId: 'q-0', text: 'held', queuedAt: 1 } }, { projectPath: '/project' });
+      render(<ChatPanel {...baseProps()} isStreaming={false} />);
+      await waitFor(() => expect(latestChatInputProps.messageQueue).toHaveLength(1));
+      expect(latestChatInputProps.isStreaming).toBe(false);
     });
 
     it('shows Send (not Stop) when idle with an empty queue', async () => {
-      const props = { ...baseProps(), isStreaming: false, messageQueue: [] };
+      const props = { ...baseProps(), isStreaming: false };
       render(<ChatPanel {...props} />);
       await waitFor(() => expect(mockSai.claudeOnMessage).toHaveBeenCalled());
       expect(latestChatInputProps.isStreaming).toBe(false);

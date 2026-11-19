@@ -14,6 +14,7 @@ import { markRevealed } from './revealRegistry';
 import { useChatLog } from '../../hooks/useChatLog';
 import { reduceChat, persistableState } from '../../lib/chat/reducer';
 import type { ChatLogEntry, ChatSettings, ChatState } from '../../lib/chat/types';
+import { effectiveChatSettings, settingsSeed } from '../../lib/chat/composerSettings';
 import { itemKey } from './tasks/declaredCards';
 import { buildPendingQuestionAnswer } from '../../lib/pendingQuestionAnswer';
 import { normalizeSlashCommands, type SlashCommandInfo } from '../../lib/slashCommands';
@@ -226,12 +227,12 @@ interface ChatPanelProps {
   onDraftChange?: (draft: string) => void;
   initialContextItems?: ContextItem[];
   onContextItemsChange?: (items: ContextItem[]) => void;
-  messageQueue?: QueuedMessage[];
-  onQueueAdd?: (sessionId: string, text: string, fullText: string, images?: string[], attachments?: { images: number; files: number; terminal: boolean }) => void;
-  onQueueRemove?: (sessionId: string, id: string) => void;
-  onQueueShift?: (sessionId: string) => void;
-  onQueuePromote?: (sessionId: string, id: string) => void;
   sessionId?: string;
+  /**
+   * Optional: populated with a callback that sends text into this chat the
+   * way the composer does (App's command palette). A busy chat queues it.
+   */
+  sendTextRef?: React.MutableRefObject<((text: string) => void) | null>;
   terminalTabs?: TerminalTab[];
   onSlashCommandsUpdate?: (commands: SlashCommandInfo[]) => void;
   /**
@@ -507,13 +508,59 @@ const LOAD_MORE_CHUNK = 30; // messages to load when scrolling up
 const LOG_TURN_RECONCILE_MS = 20_000;
 
 
-export default function ChatPanel({ projectPath, overlayControl, permissionMode, onPermissionChange, effortLevel, onEffortChange, modelChoice, onModelChange, availableModels, claudeOverrideState, aiProvider, codexModel, onCodexModelChange, codexModels, onCodexModelsRefresh, codexPermission, onCodexPermissionChange, codexEffort, onCodexEffortChange, geminiModel, onGeminiModelChange, geminiModels, geminiApprovalMode, onGeminiApprovalModeChange, geminiConversationMode, onGeminiConversationModeChange, kimiModel, onKimiModelChange, kimiModels, kimiApprovalMode, onKimiApprovalModeChange, onMessagesChange, onTurnComplete, onClaudeSessionId, onGeminiSessionId, onKimiSessionId, onCodexSessionId, activeFilePath, onFileOpen, isActive, isStreaming = false, awaitingQuestion = false, initialDraft, onDraftChange, initialContextItems, onContextItemsChange, messageQueue = [], onQueueAdd, onQueueRemove, onQueueShift, onQueuePromote, sessionId, terminalTabs = [], onSlashCommandsUpdate, claudeScope = 'chat', onOpenMcpPanel, renderToolCall, activeMetaRuntime, mentionInsertRef: mentionInsertRefProp, waiting = null, followUp = null, onDismissFollowUp, liveBackgroundTaskCount, onToggleBackgroundTasks, backgroundTasksOpen, taskUiEnabled = false, backgroundTasks, onStopBackgroundTask, claudeSessionId }: ChatPanelProps) {
+export default function ChatPanel({ projectPath, overlayControl, permissionMode: defaultPermissionMode, onPermissionChange: onDefaultPermissionChange, effortLevel: defaultEffortLevel, onEffortChange: onDefaultEffortChange, modelChoice: defaultModelChoice, onModelChange: onDefaultModelChange, availableModels, claudeOverrideState: workspaceOverrideState, aiProvider, codexModel: defaultCodexModel, onCodexModelChange: onDefaultCodexModelChange, codexModels, onCodexModelsRefresh, codexPermission: defaultCodexPermission, onCodexPermissionChange: onDefaultCodexPermissionChange, codexEffort: defaultCodexEffort, onCodexEffortChange: onDefaultCodexEffortChange, geminiModel: defaultGeminiModel, onGeminiModelChange: onDefaultGeminiModelChange, geminiModels, geminiApprovalMode: defaultGeminiApprovalMode, onGeminiApprovalModeChange: onDefaultGeminiApprovalModeChange, geminiConversationMode: defaultGeminiConversationMode, onGeminiConversationModeChange: onDefaultGeminiConversationModeChange, kimiModel: defaultKimiModel, onKimiModelChange: onDefaultKimiModelChange, kimiModels, kimiApprovalMode: defaultKimiApprovalMode, onKimiApprovalModeChange: onDefaultKimiApprovalModeChange, onMessagesChange, onTurnComplete, onClaudeSessionId, onGeminiSessionId, onKimiSessionId, onCodexSessionId, activeFilePath, onFileOpen, isActive, isStreaming = false, awaitingQuestion = false, initialDraft, onDraftChange, initialContextItems, onContextItemsChange, sessionId, sendTextRef, terminalTabs = [], onSlashCommandsUpdate, claudeScope = 'chat', onOpenMcpPanel, renderToolCall, activeMetaRuntime, mentionInsertRef: mentionInsertRefProp, waiting = null, followUp = null, onDismissFollowUp, liveBackgroundTaskCount, onToggleBackgroundTasks, backgroundTasksOpen, taskUiEnabled = false, backgroundTasks, onStopBackgroundTask, claudeSessionId }: ChatPanelProps) {
   // The chat renders from the durable main-process log (useChatLog): every
   // provider stamps the chat id as scope; the legacy 'chat' scope stands for
   // the session main binds it to (bindLegacyScope below).
   const chatId = claudeScope !== 'chat' ? claudeScope : (sessionId ?? null);
   const fallbackSettings = useMemo<ChatSettings>(() => ({ provider: aiProvider }), [aiProvider]);
   const { state: logState, lastApplied } = useChatLog(chatId, fallbackSettings);
+
+  // Composer settings are the chat's own (state.settings in main's log, shared
+  // with the phone). The parent's values are the workspace defaults: they fill
+  // what the chat never set and seed a new chat's first settings_changed.
+  const workspaceDefaults = useMemo<ChatSettings>(() => {
+    const base: ChatSettings = aiProvider === 'codex'
+      ? {
+        provider: 'codex', model: defaultCodexModel, permMode: defaultCodexPermission,
+        effort: normalizeCodexEffort(defaultCodexEffort ?? 'high', codexModels.find(m => m.id === defaultCodexModel)),
+      }
+      : aiProvider === 'gemini'
+        ? { provider: 'gemini', model: defaultGeminiModel, approvalMode: defaultGeminiApprovalMode, conversationMode: defaultGeminiConversationMode }
+        : aiProvider === 'kimi'
+          ? { provider: 'kimi', model: defaultKimiModel, approvalMode: defaultKimiApprovalMode }
+          : { provider: 'claude', model: defaultModelChoice, permMode: defaultPermissionMode, effort: defaultEffortLevel };
+    for (const k of Object.keys(base) as Array<keyof ChatSettings>) if (base[k] === undefined) delete base[k];
+    return base;
+  }, [aiProvider, defaultCodexModel, defaultCodexPermission, defaultCodexEffort, codexModels, defaultGeminiModel, defaultGeminiApprovalMode, defaultGeminiConversationMode, defaultKimiModel, defaultKimiApprovalMode, defaultModelChoice, defaultPermissionMode, defaultEffortLevel]);
+  const chatSettings = useMemo(() => effectiveChatSettings(logState?.settings, workspaceDefaults), [logState?.settings, workspaceDefaults]);
+  const settingsFor = (p: ChatSettings['provider']) => (aiProvider === p ? chatSettings : null);
+  const permissionMode = (settingsFor('claude')?.permMode ?? defaultPermissionMode) as ChatPanelProps['permissionMode'];
+  const effortLevel = (settingsFor('claude')?.effort ?? defaultEffortLevel) as ChatPanelProps['effortLevel'];
+  const modelChoice = (settingsFor('claude')?.model ?? defaultModelChoice) as ChatPanelProps['modelChoice'];
+  const codexModel = settingsFor('codex')?.model ?? defaultCodexModel;
+  const codexPermission = (settingsFor('codex')?.permMode ?? defaultCodexPermission) as CodexPermission;
+  const codexEffort = (settingsFor('codex')?.effort ?? defaultCodexEffort) as CodexEffort | undefined;
+  const geminiModel = settingsFor('gemini')?.model ?? defaultGeminiModel;
+  const geminiApprovalMode = (settingsFor('gemini')?.approvalMode ?? defaultGeminiApprovalMode) as ChatPanelProps['geminiApprovalMode'];
+  const geminiConversationMode = (settingsFor('gemini')?.conversationMode ?? defaultGeminiConversationMode) as ChatPanelProps['geminiConversationMode'];
+  const kimiModel = settingsFor('kimi')?.model ?? defaultKimiModel;
+  const kimiApprovalMode = (settingsFor('kimi')?.approvalMode ?? defaultKimiApprovalMode) as ChatPanelProps['kimiApprovalMode'];
+  // The override dot marks a chat that runs off the workspace default, whatever set it.
+  const claudeOverrideState = workspaceOverrideState && {
+    ...workspaceOverrideState,
+    modelOverridden: workspaceOverrideState.modelOverridden || modelChoice !== defaultModelChoice,
+    effortOverridden: workspaceOverrideState.effortOverridden || effortLevel !== defaultEffortLevel,
+  };
+  // The message queue is the chat's, in main's log; the strip shows it as-is.
+  const logQueue = logState?.queue;
+  const messageQueue = useMemo<QueuedMessage[]>(() => (logQueue ?? []).map(q => ({
+    id: q.clientId, text: q.text, fullText: q.text,
+    ...(q.images?.length ? { images: q.images, attachments: { images: q.images.length, files: 0, terminal: false } } : {}),
+  })), [logQueue]);
+  const settingsSeedRef = useRef<() => Partial<ChatSettings> | null>(() => null);
+  settingsSeedRef.current = () => settingsSeed(logState?.settings, workspaceDefaults);
+
   const chatIdRef = useRef(chatId);
   chatIdRef.current = chatId;
   useEffect(() => {
@@ -648,6 +695,18 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
   // `done` has flipped isStreaming false but the next turn hasn't begun, so the
   // Stop button and thinking animation don't flicker back to "idle" mid-handoff.
   const [drainInFlight, setDrainInFlight] = useState(false);
+  const drainBackstopRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Main is draining the next queued item: hold the Stop button until its turn starts (8s backstop). */
+  const bridgeDrain = useCallback((on: boolean) => {
+    if (drainBackstopRef.current) { clearTimeout(drainBackstopRef.current); drainBackstopRef.current = null; }
+    setDrainInFlight(on);
+    if (on) {
+      drainBackstopRef.current = setTimeout(() => {
+        drainBackstopRef.current = null;
+        setDrainInFlight(false);
+      }, 8000);
+    }
+  }, []);
   const [slashCommands, setSlashCommands] = useState<SlashCommandInfo[]>([]);
   const slashCommandsRef = useRef<SlashCommandInfo[]>([]);
   /** Single ingest point for every slash-command source (start cache, init
@@ -1128,6 +1187,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
       return;
     }
     let s = before;
+    let drainHandoff = false;
     for (const entry of drained) {
       const next = reduceChat(s, entry);
       const ev = entry.ev as Record<string, any>;
@@ -1144,11 +1204,16 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
       }
       // A command/service kill has no done of its own: persist its card now.
       if (ev.type === 'load_guard' && next.messages.length > s.messages.length) cardAdded = true;
+      // Main sent a queued item whose turn hasn't started yet (async providers).
+      if (ev.type === 'queue_removed' && ev.sent === true && !next.turn.streaming) drainHandoff = true;
       s = next;
     }
+    // A turn ended with items waiting: main drains the next one now.
+    if (turnEnded && s.queue.length > 0 && !loadPausedRef.current) drainHandoff = true;
+    if (drainHandoff && !s.turn.streaming) bridgeDrain(true);
     if (turnEnded) turnEndRef.current();
     else if (cardAdded) flushMessagesToParentRef.current();
-  }, [logState, chatId, lastApplied, markStreamingActive]);
+  }, [logState, chatId, lastApplied, markStreamingActive, bridgeDrain]);
 
   // Real utilization percentages arrive on usage:update from two sources:
   // the main-process OAuth poller (60s) and the SDK backend's post-turn
@@ -1502,7 +1567,10 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
     }, LOG_TURN_RECONCILE_MS);
     return () => window.clearInterval(t);
   }, [reconcileLogTurn, chatId, aiProvider, projectPath]);
-  const streamingForDisplay = turnLive || drainInFlight || messageQueue.length > 0 || subagentThinking;
+  // A turn ending with items queued keeps the Stop button up through main's
+  // drain handoff (drainInFlight), not for as long as anything is queued.
+  const streamingForDisplay = turnLive || drainInFlight || subagentThinking;
+  useEffect(() => { if (turnLive) bridgeDrain(false); }, [turnLive, bridgeDrain]);
   const isWaiting = !!waiting && waiting.wait.kind !== 'none';
   // While waiting we are NOT thinking — suppress the thinking indicator.
   const showThinking = streamingForDisplay && !awaitingQuestion && !isWaiting;
@@ -1609,36 +1677,81 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
     return res;
   }, []);
 
-  /** The composer's current picks for this chat's provider (settings move to main in Task 9). */
-  const composerSettings = useMemo<ChatSettings>(() => {
-    const base: ChatSettings = aiProvider === 'codex'
-      ? {
-        provider: 'codex', model: codexModel, permMode: codexPermission,
-        effort: normalizeCodexEffort(codexEffort ?? 'high', codexModels.find(m => m.id === codexModel)),
-      }
-      : aiProvider === 'gemini'
-        ? { provider: 'gemini', model: geminiModel, approvalMode: geminiApprovalMode, conversationMode: geminiConversationMode }
-        : aiProvider === 'kimi'
-          ? { provider: 'kimi', model: kimiModel, approvalMode: kimiApprovalMode }
-          : { provider: 'claude', model: modelChoice, permMode: permissionMode, effort: effortLevel };
-    for (const k of Object.keys(base) as Array<keyof ChatSettings>) if (base[k] === undefined) delete base[k];
-    return base;
-  }, [aiProvider, codexModel, codexPermission, codexEffort, codexModels, geminiModel, geminiApprovalMode, geminiConversationMode, kimiModel, kimiApprovalMode, modelChoice, permissionMode, effortLevel]);
+  /**
+   * The pickers write the chat's settings in main's log (one command per
+   * change; a chat with gaps is seeded from the workspace defaults first). The
+   * parent's handler still runs, so the pick also becomes the workspace
+   * preference new chats start from.
+   */
+  const updateChatSettings = useCallback((patch: Partial<ChatSettings>) => {
+    if (!chatId || !projectPath) return;
+    const seed = settingsSeedRef.current();
+    void runCommand({
+      kind: 'settings', chatId, clientId: newClientId(), settings: { ...(seed ?? {}), ...patch }, origin: 'desktop',
+      // Creates the chat in the log if this is its first entry.
+      projectPath,
+    }).catch(() => { /* devlogged */ });
+  }, [chatId, projectPath, runCommand]);
+  const onPermissionChange = (mode: ChatPanelProps['permissionMode']) => {
+    onDefaultPermissionChange(mode);
+    updateChatSettings({ permMode: mode });
+  };
+  const onEffortChange = (level: ChatPanelProps['effortLevel'] | null) => {
+    onDefaultEffortChange(level);
+    // null = follow the app-wide default.
+    updateChatSettings({ effort: level ?? workspaceOverrideState?.globalEffort ?? defaultEffortLevel });
+  };
+  const onModelChange = (model: ChatPanelProps['modelChoice'] | null) => {
+    onDefaultModelChange(model);
+    updateChatSettings({ model: model ?? workspaceOverrideState?.globalModel ?? defaultModelChoice });
+  };
+  const onCodexModelChange = (model: string) => {
+    onDefaultCodexModelChange(model);
+    const effort = normalizeCodexEffort(codexEffort ?? 'high', codexModels.find(m => m.id === model));
+    updateChatSettings({ model, ...(effort ? { effort } : {}) });
+  };
+  const onCodexPermissionChange = (perm: CodexPermission) => {
+    onDefaultCodexPermissionChange(perm);
+    updateChatSettings({ permMode: perm });
+  };
+  const onCodexEffortChange = (effort: CodexEffort) => {
+    onDefaultCodexEffortChange?.(effort);
+    const normalized = normalizeCodexEffort(effort, codexModels.find(m => m.id === codexModel));
+    if (normalized) updateChatSettings({ effort: normalized });
+  };
+  const onGeminiModelChange = (model: string) => {
+    onDefaultGeminiModelChange(model);
+    updateChatSettings({ model });
+  };
+  const onGeminiApprovalModeChange = (mode: ChatPanelProps['geminiApprovalMode']) => {
+    onDefaultGeminiApprovalModeChange(mode);
+    updateChatSettings({ approvalMode: mode });
+  };
+  const onGeminiConversationModeChange = (mode: ChatPanelProps['geminiConversationMode']) => {
+    onDefaultGeminiConversationModeChange(mode);
+    updateChatSettings({ conversationMode: mode });
+  };
+  const onKimiModelChange = (model: string) => {
+    onDefaultKimiModelChange(model);
+    updateChatSettings({ model });
+  };
+  const onKimiApprovalModeChange = (mode: ChatPanelProps['kimiApprovalMode']) => {
+    onDefaultKimiApprovalModeChange(mode);
+    updateChatSettings({ approvalMode: mode });
+  };
 
   /**
    * Send through the chat's command (main logs the user_message — the bubble —
-   * then dispatches or queues). Bridge until Task 9 moves composer settings to
-   * main: if the composer's picks differ from the chat's logged settings, one
-   * settings command goes first so the dispatch uses what the user picked.
+   * then dispatches or queues). A chat whose settings have gaps (new, or on
+   * another provider) is seeded from the workspace defaults first, so the
+   * dispatch runs with what the composer shows.
    */
   const sendToLog = async (text: string, opts: { clientId: string; images?: string[]; imagePaths?: string[]; prompt?: string; taskId?: string; now?: boolean }): Promise<boolean> => {
     if (!chatId || !projectPath) return false;
-    const current = logState?.settings;
-    const differs = !current || (Object.keys(composerSettings) as Array<keyof ChatSettings>)
-      .some(k => current[k] !== composerSettings[k]);
+    const seed = settingsSeedRef.current();
     try {
-      if (differs) {
-        await runCommand({ kind: 'settings', chatId, clientId: newClientId(), settings: composerSettings, origin: 'desktop', projectPath });
+      if (seed) {
+        await runCommand({ kind: 'settings', chatId, clientId: newClientId(), settings: seed, origin: 'desktop', projectPath });
       }
       await runCommand({
         kind: 'send', chatId, clientId: opts.clientId, text, origin: 'desktop',
@@ -1780,15 +1893,6 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
   const loadPaused = loadGuard.enabled && loadGuard.paused;
   const loadPausedRef = useRef(loadPaused);
   loadPausedRef.current = loadPaused;
-  const messageQueueRef = useRef(messageQueue);
-  messageQueueRef.current = messageQueue;
-  // Paused: hold a provider-bound send in the queue instead of dispatching.
-  const queueWhilePaused = (text: string, images?: string[]): boolean => {
-    if (!loadPausedRef.current || !sessionId || !onQueueAdd) return false;
-    onQueueAdd(sessionId, text, text, images);
-    pendingComposerRectRef.current = null;
-    return true;
-  };
 
   const interruptViaLog = useCallback(() => {
     if (!chatId) return;
@@ -1797,7 +1901,9 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
 
   // `opts.taskCard` is passed only by the composer's own send; every other
   // caller (retry, queue, suggestions) sends untagged and unprefixed.
-  const handleSend = async (text: string, images?: string[], opts?: { taskCard?: TaskCard | null }) => {
+  // `opts.queue` (Ctrl+Enter) never interrupts; `opts.now` (send-now from the
+  // queue strip) always does.
+  const handleSend = async (text: string, images?: string[], opts?: { taskCard?: TaskCard | null; queue?: boolean; now?: boolean }) => {
     // Slash commands must reach the command handler as typed, so they are never redirected.
     const directCard = taskUiEnabled && !text.trim().startsWith('/') && opts?.taskCard?.source === 'declared' ? opts.taskCard : null;
     // Handle built-in commands locally
@@ -1823,9 +1929,9 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
       handleClearContext();
       return;
     }
-    if (text === '/compact' && aiProvider === 'claude') {
-      // /compact needs the live agent, so it waits out a pause like any send.
-      if (queueWhilePaused(text)) return;
+    // /compact needs the live agent: while paused it falls through and waits
+    // in main's queue like any send.
+    if (text === '/compact' && aiProvider === 'claude' && !loadPausedRef.current) {
       window.sai.claudeCompact(projectPath, permissionMode, effortLevel, modelChoice, claudeScope);
       pendingComposerRectRef.current = null;
       return;
@@ -1848,22 +1954,17 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
       return;
     }
 
-    // Everything below dispatches to a provider: hold it while the load guard is paused.
-    if (queueWhilePaused(text, images)) return;
-
+    // Everything below goes through main's send command, which queues it while
+    // the chat is busy, items are waiting or the load guard is paused.
     // Bypass-queue-on-enter: when streaming AND the queue has items, plain
-    // Enter signals "send this now" — main interrupts the current turn first,
-    // then dispatches immediately. The queue stays untouched and resumes
-    // draining after this turn ends.
-    const now = isStreaming && messageQueue.length > 0;
-    if (now) {
-      // The stop will cause the backend to emit `done`, which flips isStreaming
-      // false and would otherwise wake the drain useEffect to shift a queued
-      // item. Suppress that one drain so only the user's new message runs.
-      suppressNextDrainRef.current = true;
-    }
+    // Enter signals "send this now" — main interrupts the current turn first
+    // (its end doesn't drain), then dispatches immediately. The queue stays
+    // untouched and resumes draining after this turn ends.
+    const now = opts?.now ?? (!opts?.queue && turnLive && messageQueue.length > 0);
 
     isAtBottomRef.current = true;
+    // A send that will wait in the queue has no bubble to fly into yet.
+    if (!now && (turnLive || loadPausedRef.current || messageQueue.length > 0)) pendingComposerRectRef.current = null;
     keepFlipRect();
 
     // Save images to temp files and get paths
@@ -1927,108 +2028,47 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
     <ChatMessage message={m} projectPath={projectPath} onFileOpen={onFileOpen} aiProvider={aiProvider} toolCallsExpanded={toolCallsExpanded} renderToolCall={renderToolCallWrapped} metaRuntime={activeMetaRuntime} onAnswerQuestion={handleAnswerQuestion} onAnswerPlanReview={handleAnswerPlanReview} />
   );
 
-  const handleQueue = (text: string, fullText: string, images?: string[], attachments?: { images: number; files: number; terminal: boolean }) => {
-    if (sessionId && onQueueAdd) {
-      onQueueAdd(sessionId, text, fullText, images, attachments);
-    }
+  // The queue lives in main's log (state.queue): Ctrl+Enter is a plain send
+  // that main queues behind the running turn and drains one per turn end.
+  const handleQueue = (_text: string, fullText: string, images?: string[]) => {
+    void handleSend(fullText, images, { queue: true });
   };
 
-  const handleQueueSendNow = (id: string) => {
+  const handleQueueRemove = (id: string) => {
+    if (!chatId) return;
+    void runCommand({ kind: 'queueRemove', chatId, clientId: newClientId(), target: id }).catch(() => { /* devlogged */ });
+  };
+
+  const handleQueuePromote = (id: string) => {
+    if (!chatId) return;
+    void runCommand({ kind: 'queuePromote', chatId, clientId: newClientId(), target: id }).catch(() => { /* devlogged */ });
+  };
+
+  const handleQueueSendNow = async (id: string) => {
     const item = messageQueue.find(m => m.id === id);
-    if (!item || !sessionId) return;
+    if (!item || !chatId) return;
     // Paused: leave it queued and don't interrupt the running turn.
     if (loadPausedRef.current) return;
-    onQueueRemove?.(sessionId, id);
     // Same semantics as bypass-queue-on-enter: main interrupts the current
     // turn and dispatches immediately; the rest of the queue resumes after.
-    if (isStreaming) suppressNextDrainRef.current = true;
-    handleSend(item.fullText, item.images);
+    try {
+      await runCommand({ kind: 'queueRemove', chatId, clientId: newClientId(), target: id });
+    } catch { return; /* devlogged; still queued */ }
+    await handleSend(item.fullText, item.images, { now: true });
   };
 
-  const prevStreamingRef = useRef(false);
-  const prevQueueLenRef = useRef(messageQueue.length);
-  const prevLoadPausedRef = useRef(loadPaused);
-  const suppressNextDrainRef = useRef(false);
-  const drainPendingRef = useRef(false);
-  const autoSendTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const drainBackstopRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Drives queue draining. Keyed on BOTH isStreaming and messageQueue because a
-  // drain can be triggered two ways:
-  //   1. A turn ends (isStreaming true->false) with items already queued.
-  //   2. An item lands in the queue when we're ALREADY idle — the hit-or-miss
-  //      race where the user queues a message in the same instant the turn is
-  //      wrapping up, so `done` flips isStreaming false a render before the
-  //      queued item arrives. An edge-only effect never woke for that item.
+  // App's command palette sends into the active chat like the composer does.
+  const handleSendRef = useRef(handleSend);
+  handleSendRef.current = handleSend;
   useEffect(() => {
-    const wasStreaming = prevStreamingRef.current;
-    const prevQueueLen = prevQueueLenRef.current;
-    prevStreamingRef.current = isStreaming;
-    prevQueueLenRef.current = messageQueue.length;
-    const resumedWithQueue = prevLoadPausedRef.current && !loadPaused && messageQueue.length > 0;
-    prevLoadPausedRef.current = loadPaused;
+    if (!sendTextRef) return;
+    const send = (text: string) => { void handleSendRef.current(text); };
+    sendTextRef.current = send;
+    return () => { if (sendTextRef.current === send) sendTextRef.current = null; };
+  }, [sendTextRef]);
 
-    const turnJustEnded = wasStreaming && !isStreaming;
-    // Item(s) appeared while we were already settled and idle.
-    const queueGrewWhileIdle = !isStreaming && !wasStreaming && messageQueue.length > prevQueueLen;
-
-    // A real turn started — clear the in-flight guard so the next end can drain.
-    if (isStreaming) {
-      drainPendingRef.current = false;
-      setDrainInFlight(false);
-      if (drainBackstopRef.current) { clearTimeout(drainBackstopRef.current); drainBackstopRef.current = null; }
-    }
-
-    if (!isStreaming && !loadPaused && (turnJustEnded || queueGrewWhileIdle || resumedWithQueue)) {
-      // suppressNextDrainRef is set right before an interrupting stop (bypass /
-      // send-now). It must only ever consume the turn-end edge it was set for —
-      // not a queue-grew-while-idle wake — otherwise it could swallow an
-      // unrelated drain.
-      if (suppressNextDrainRef.current && turnJustEnded) {
-        suppressNextDrainRef.current = false;
-      } else if (
-        !suppressNextDrainRef.current &&
-        !drainPendingRef.current &&
-        !autoSendTimerRef.current &&
-        messageQueue.length > 0 && onQueueShift && sessionId
-      ) {
-        const next = messageQueue[0];
-        drainPendingRef.current = true;
-        setDrainInFlight(true);
-        autoSendTimerRef.current = setTimeout(() => {
-          autoSendTimerRef.current = null;
-          // A pause (or the user removing/reordering the head) inside the 300ms
-          // window: leave the item queued, in place, and release the drain. The
-          // resume edge picks it up. The shift happens here, not earlier, so
-          // there's nothing to put back.
-          if (loadPausedRef.current || messageQueueRef.current[0]?.id !== next.id) {
-            drainPendingRef.current = false;
-            setDrainInFlight(false);
-            if (drainBackstopRef.current) { clearTimeout(drainBackstopRef.current); drainBackstopRef.current = null; }
-            return;
-          }
-          onQueueShift(sessionId);
-          handleSend(next.fullText, next.images);
-        }, 300);
-        // Safety: if the follow-up never produces a streaming_start (e.g. a spawn
-        // error), don't leave the Stop button stuck — release the bridge AND the
-        // drain guard. Releasing only the bridge left drainPendingRef set
-        // forever, permanently blocking every future drain (queued messages
-        // never flushed again until a manual send).
-        if (drainBackstopRef.current) clearTimeout(drainBackstopRef.current);
-        drainBackstopRef.current = setTimeout(() => {
-          drainBackstopRef.current = null;
-          drainPendingRef.current = false;
-          setDrainInFlight(false);
-        }, 8000);
-      }
-    }
-  }, [isStreaming, messageQueue, loadPaused]);
-
-  // Unmount-only: a pending queue-drain send must not fire into an unmounted
-  // panel. Not cleared on isStreaming changes — that would drop a message the
-  // queue has already shifted.
+  // Unmount-only: the drain handoff backstop must not fire into an unmounted panel.
   useEffect(() => () => {
-    if (autoSendTimerRef.current) clearTimeout(autoSendTimerRef.current);
     if (drainBackstopRef.current) clearTimeout(drainBackstopRef.current);
   }, []);
 
@@ -2323,8 +2363,8 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode,
             onKimiApprovalModeChange={onKimiApprovalModeChange}
             terminalTabs={terminalTabs}
             messageQueue={messageQueue}
-            onQueueRemove={(id) => sessionId && onQueueRemove?.(sessionId, id)}
-            onQueuePromote={(id) => sessionId && onQueuePromote?.(sessionId, id)}
+            onQueueRemove={handleQueueRemove}
+            onQueuePromote={handleQueuePromote}
             onQueueSendNow={handleQueueSendNow}
             initialDraft={initialDraft}
             onDraftChange={onDraftChange}
