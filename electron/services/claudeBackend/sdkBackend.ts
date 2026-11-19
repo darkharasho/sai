@@ -2041,6 +2041,11 @@ export class SdkBackend implements ClaudeBackend {
     }
   }
 
+  /** Every scope with a live query (one per sessions entry). */
+  liveScopes(): Array<{ projectPath: string; scope: string }> {
+    return [...this.sessions.values()].map((s) => ({ projectPath: s._projectPath, scope: s._scopeName }));
+  }
+
   /** True when any session for the workspace is mid-turn, blocked on user
    *  input, or sleeping on a live ScheduleWakeup — the auto-suspend timer must
    *  not reap it (workspace.ts isWorkspaceQuiescent can't see SDK sessions). */

@@ -260,4 +260,15 @@ describe('ChatLogStore', () => {
     const { s: s3 } = mk(dir);
     expect(s3.read('c1', 0).entries.map(e => e.seq)).toEqual([1, 2, 3]);
   });
+
+  it('a disk error in the timer flush goes to onError instead of throwing', async () => {
+    const errors: unknown[] = [];
+    const { s, dir } = mk(tmp(), { flushMs: 5, onError: (err) => errors.push(err) });
+    s.append('c1', um('hi'), init);
+    s.append('c1', dl('a'));
+    fs.rmSync(dir, { recursive: true, force: true });
+    await new Promise(r => setTimeout(r, 30));
+    expect(errors).toHaveLength(1);
+    fs.mkdirSync(dir, { recursive: true });
+  });
 });

@@ -562,6 +562,10 @@ export class AppServerBackend implements CodexBackend {
     for (const [key, meta] of this.metadata) if (meta.projectPath === projectPath) this.metadata.delete(key);
   }
 
+  liveScopes(): Array<{ projectPath: string; scope: string }> {
+    return [...this.runtimes.values()].map((runtime) => ({ projectPath: runtime.projectPath, scope: runtime.scope }));
+  }
+
   isWorkspaceBusy(projectPath: string): boolean {
     return [...this.runtimes.values()].some((runtime) => runtime.projectPath === projectPath && Boolean(runtime.active));
   }

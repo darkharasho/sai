@@ -376,6 +376,8 @@ export interface CodexBackend {
   isWorkspaceBusy(projectPath: string): boolean;
   /** Optional finer-grained busy check used when routing concurrent scopes. */
   isScopeBusy?(projectPath: string, scope?: string): boolean;
+  /** Scopes with a live runtime right now (chat log routing + startup repair). */
+  liveScopes?(): Array<{ projectPath: string; scope: string }>;
   destroy(): void;
 }
 

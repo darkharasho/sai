@@ -115,8 +115,22 @@ export function emitBackgroundTasks(payload: BackgroundTasksPayload): void {
   if (mainWin) safeSend(mainWin, 'claude:backgroundTasks', payload);
 }
 
+/** The durable chat log (ChatLogService); set by main.ts. */
+let chatLog: { record(msg: Record<string, unknown>): unknown } | null = null;
+export function setChatLog(log: { record(msg: Record<string, unknown>): unknown } | null): void {
+  chatLog = log;
+}
+
 export function emitChatMessage(raw: Record<string, unknown>): void {
   const msg = externalizeToolResultImages(raw);
+  // The log must never block v1 delivery below.
+  try {
+    chatLog?.record(msg);
+  } catch (err) {
+    devlog('chatlog', 'chatlog.recordError', {
+      type: msg.type, scope: msg.scope, error: err instanceof Error ? err.message : String(err),
+    });
+  }
   if (mainWin) safeSend(mainWin, 'claude:message', msg);
   const topic = `chat:${msg.projectPath}:${msg.scope ?? 'chat'}`;
   remoteBus?.publish(topic, msg);

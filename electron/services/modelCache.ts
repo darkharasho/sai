@@ -128,8 +128,24 @@ function removeGroup(g: KeyGroup): number {
   return freed;
 }
 
+/** Extra version keys the renderer can't see (the main-process chat log). */
+let logModelKeys: (() => Iterable<string>) | null = null;
+export function setLogModelKeyReferences(fn: (() => Iterable<string>) | null): void {
+  logModelKeys = fn;
+}
+
+/** Deletes cache entries referenced neither by `referencedKeys` nor the chat log.
+ *  If the log's keys can't be read, nothing is deleted. */
 export function pruneModelCache(referencedKeys: string[], dir: string): { deleted: number; freedBytes: number } {
   const keep = new Set(referencedKeys.filter(isVersionKey));
+  if (logModelKeys) {
+    try {
+      for (const k of logModelKeys()) if (isVersionKey(k)) keep.add(k);
+    } catch (err) {
+      console.warn('[modelCache] skipping prune, chat log references unreadable:', err);
+      return { deleted: 0, freedBytes: 0 };
+    }
+  }
   let deleted = 0;
   let freedBytes = 0;
   for (const [key, g] of groupByKey(dir)) {

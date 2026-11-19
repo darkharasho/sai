@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { snapshotModel, readCachedModel, pruneModelCache, enforceCap } from '../../../electron/services/modelCache';
+import { snapshotModel, readCachedModel, pruneModelCache, enforceCap, setLogModelKeyReferences } from '../../../electron/services/modelCache';
 
 let tmp: string;
 let dir: string;
@@ -118,5 +118,19 @@ describe('modelCache', () => {
     expect(b.ext).toBe('stl');
     expect(fs.readdirSync(dir)).toEqual([`${a.versionKey}.stl`]);
     expect(readCachedModel(a.versionKey, dir)?.toString()).toBe('solid z');
+  });
+
+  it('pruneModelCache keeps keys only the chat log references, and skips when they are unreadable', () => {
+    fs.mkdirSync(dir, { recursive: true });
+    const k1 = '1'.repeat(32), k2 = '2'.repeat(32);
+    fs.writeFileSync(path.join(dir, `${k1}.stl`), 'aa');
+    fs.writeFileSync(path.join(dir, `${k2}.stl`), 'bb');
+    setLogModelKeyReferences(() => { throw new Error('EIO'); });
+    try {
+      expect(pruneModelCache([], dir)).toEqual({ deleted: 0, freedBytes: 0 });
+      setLogModelKeyReferences(() => [k1]);
+      expect(pruneModelCache([], dir)).toEqual({ deleted: 1, freedBytes: 2 });
+      expect(fs.readdirSync(dir)).toEqual([`${k1}.stl`]);
+    } finally { setLogModelKeyReferences(null); }
   });
 });

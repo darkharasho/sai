@@ -291,6 +291,10 @@ export class SdkCodexBackend implements CodexBackend {
     }
   }
 
+  liveScopes(): Array<{ projectPath: string; scope: string }> {
+    return [...this.runtimes.values()].map((runtime) => ({ projectPath: runtime.projectPath, scope: runtime.scope }));
+  }
+
   isWorkspaceBusy(projectPath: string): boolean {
     for (const runtime of this.runtimes.values()) {
       if (runtime.projectPath === projectPath && runtime.active) return true;

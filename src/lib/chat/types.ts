@@ -116,3 +116,10 @@ export type PendingCodexMcpElicitation = {
   | { mode: 'form'; requestedSchema: Record<string, unknown> }
   | { mode: 'url'; url: string; elicitationId?: string }
 );
+
+/** Event types the client (desktop or phone) writes; every other type comes from a backend. */
+export const CLIENT_EVENT_TYPES = [
+  'user_message', 'local_note', 'cleared', 'watcher_snapshot',
+  'settings_changed', 'queue_added', 'queue_removed', 'queue_cleared',
+] as const;
+export type ClientEventType = (typeof CLIENT_EVENT_TYPES)[number];

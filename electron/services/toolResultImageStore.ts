@@ -49,8 +49,16 @@ export function selectOrphanImages(filenames: string[], referencedPaths: Iterabl
   return filenames.filter((name) => !referenced.has(name));
 }
 
+/** Extra references the renderer can't see (the main-process chat log). */
+let logImageRefs: (() => Iterable<string>) | null = null;
+export function setLogImageReferences(fn: (() => Iterable<string>) | null): void {
+  logImageRefs = fn;
+}
+
 /**
- * Delete every file in `dir` not referenced by `referencedPaths`. Reference-based
+ * Delete every file in `dir` not referenced by `referencedPaths` or by the
+ * chat log (setLogImageReferences). If the log's references can't be read,
+ * nothing is deleted — a GC must never remove an image only the log points at. Reference-based
  * only — a file survives as long as any kept chat record points at it, so pinned
  * and in-retention chats never lose their images. Returns counts for logging.
  */
@@ -64,7 +72,16 @@ export function pruneOrphanImages(
   } catch {
     return { deleted: 0, freedBytes: 0 };
   }
-  const orphans = selectOrphanImages(entries, referencedPaths);
+  let all: Iterable<string> = referencedPaths;
+  if (logImageRefs) {
+    try {
+      all = [...referencedPaths, ...logImageRefs()];
+    } catch (err) {
+      console.warn('[toolResultImageStore] skipping prune, chat log references unreadable:', err);
+      return { deleted: 0, freedBytes: 0 };
+    }
+  }
+  const orphans = selectOrphanImages(entries, all);
   let deleted = 0;
   let freedBytes = 0;
   for (const name of orphans) {

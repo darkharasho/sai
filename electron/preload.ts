@@ -508,6 +508,23 @@ contextBridge.exposeInMainWorld('sai', {
       ipcRenderer.invoke('browser:deploy:open-extensions', browserId),
     revealExtensionFolder: () => ipcRenderer.invoke('browser:deploy:reveal'),
   },
+  // Durable per-chat log (chat sync). See electron/services/chatlog/service.ts.
+  chatlog: {
+    open: (chatId: string, after: number) => ipcRenderer.invoke('chatlog:open', chatId, after),
+    onEvent: (callback: (entry: unknown) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, entry: unknown) => callback(entry);
+      ipcRenderer.on('chatlog:event', listener);
+      return () => ipcRenderer.removeListener('chatlog:event', listener);
+    },
+    appendClient: (chatId: string, ev: unknown, init?: { projectPath: string; provider?: string }) =>
+      ipcRenderer.invoke('chatlog:appendClient', chatId, ev, init),
+    importMessages: (chatId: string, init: unknown, messages: unknown[]) =>
+      ipcRenderer.invoke('chatlog:importMessages', chatId, init, messages),
+    list: (projectPath: string) => ipcRenderer.invoke('chatlog:list', projectPath),
+    delete: (chatIds: string[]) => ipcRenderer.invoke('chatlog:delete', chatIds),
+    bindLegacyScope: (projectPath: string, chatId: string) => ipcRenderer.invoke('chatlog:bindLegacyScope', projectPath, chatId),
+    patchMeta: (chatId: string, patch: { title?: string; provider?: string }) => ipcRenderer.invoke('chatlog:patchMeta', chatId, patch),
+  },
   respondSaiTool: (id: string, result: unknown) => ipcRenderer.send('sai-tool:response', id, result),
   respondSaiToolError: (id: string, error: string) => ipcRenderer.send('sai-tool:response-error', id, error),
   remote: {

@@ -3,7 +3,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { selectOrphanImages, pruneOrphanImages } from '../../../electron/services/toolResultImageStore';
+import { selectOrphanImages, pruneOrphanImages, setLogImageReferences } from '../../../electron/services/toolResultImageStore';
 
 describe('selectOrphanImages', () => {
   it('keeps referenced files and returns only the unreferenced ones', () => {
@@ -61,5 +61,26 @@ describe('pruneOrphanImages', () => {
     const res = pruneOrphanImages([path.join(dir, 'a.png')], dir);
     expect(res.deleted).toBe(0);
     expect(fs.existsSync(path.join(dir, 'a.png'))).toBe(true);
+  });
+
+  it('keeps files only the chat log references', () => {
+    const dir = mkdir();
+    fs.writeFileSync(path.join(dir, 'log-only.png'), Buffer.alloc(10));
+    fs.writeFileSync(path.join(dir, 'drop.png'), Buffer.alloc(10));
+    setLogImageReferences(() => ['log-only.png']);
+    try {
+      expect(pruneOrphanImages([], dir).deleted).toBe(1);
+      expect(fs.existsSync(path.join(dir, 'log-only.png'))).toBe(true);
+    } finally { setLogImageReferences(null); }
+  });
+
+  it('deletes nothing when the chat log references cannot be read', () => {
+    const dir = mkdir();
+    fs.writeFileSync(path.join(dir, 'a.png'), Buffer.alloc(10));
+    setLogImageReferences(() => { throw new Error('EIO'); });
+    try {
+      expect(pruneOrphanImages([], dir)).toEqual({ deleted: 0, freedBytes: 0 });
+      expect(fs.existsSync(path.join(dir, 'a.png'))).toBe(true);
+    } finally { setLogImageReferences(null); }
   });
 });

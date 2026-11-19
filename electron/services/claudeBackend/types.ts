@@ -81,4 +81,6 @@ export interface ClaudeBackend {
   generateTitle(cwd: string, userMessage: string, provider?: string): Promise<string>;
   getModels(): { models: ClaudeModelOption[]; detected: boolean };
   destroy?(): void;
+  /** Scopes with a live backend process/query right now (chat log routing + startup repair). */
+  liveScopes?(): Array<{ projectPath: string; scope: string }>;
 }

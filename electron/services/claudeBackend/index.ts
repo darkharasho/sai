@@ -45,5 +45,10 @@ export function getClaudeBackend(): ClaudeBackend {
   return active;
 }
 
+/** Live Claude scopes of the active backend; [] before any backend exists (never constructs one). */
+export function listClaudeLiveScopes(): Array<{ projectPath: string; scope: string }> {
+  return active?.liveScopes?.() ?? [];
+}
+
 /** Test-only seam to inject a stub or reset the cached backend. */
 export function __setClaudeBackendForTests(b: ClaudeBackend | null): void { active = b; }

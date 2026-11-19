@@ -266,6 +266,10 @@ class ScopedCodexBackend implements CodexBackend {
     return Object.values(this.backends).some((backend) => backend?.isWorkspaceBusy(projectPath));
   }
 
+  liveScopes(): Array<{ projectPath: string; scope: string }> {
+    return Object.values(this.backends).flatMap((backend) => backend?.liveScopes?.() ?? []);
+  }
+
   isScopeBusy(projectPath: string, scope?: string): boolean {
     const key = codexScopeKey(projectPath, scope);
     const mode = this.assignments.get(key);
@@ -375,6 +379,11 @@ export function getCodexBackend(): CodexBackend {
     });
   }
   return active;
+}
+
+/** Live Codex scopes; [] before the backend exists (never constructs one). */
+export function listCodexLiveScopes(): Array<{ projectPath: string; scope: string }> {
+  return active?.liveScopes?.() ?? [];
 }
 
 export function destroyCodexBackendIfActive(): void {

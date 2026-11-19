@@ -432,8 +432,30 @@ export interface SaiSearchApi {
   searchReplaceFile(args: { filePath: string; edits: { line: number; column: number; length: number; replacement: string }[] }): Promise<void>;
 }
 
+/** window.sai.chatlog — the durable per-chat log in main (electron/services/chatlog). */
+export interface SaiChatLogApi {
+  open(chatId: string, after: number): Promise<import('../electron/services/chatlog/store').ReadResult>;
+  onEvent(cb: (entry: import('./lib/chat/types').ChatLogEntry) => void): () => void;
+  /** Client event types only (CLIENT_EVENT_TYPES); `init` creates a chat that isn't logged yet. */
+  appendClient(
+    chatId: string,
+    ev: import('./lib/chat/types').ChatEvent,
+    init?: { projectPath: string; provider?: import('./lib/chat/types').ChatSettings['provider'] },
+  ): Promise<import('./lib/chat/types').ChatLogEntry>;
+  importMessages(
+    chatId: string,
+    init: { projectPath: string; provider: import('./lib/chat/types').ChatSettings['provider']; title?: string; createdAt: number; updatedAt: number },
+    messages: ChatMessage[],
+  ): Promise<boolean>;
+  list(projectPath: string): Promise<import('./lib/chat/types').ChatMeta[]>;
+  delete(chatIds: string[]): Promise<void>;
+  bindLegacyScope(projectPath: string, chatId: string): Promise<void>;
+  patchMeta(chatId: string, patch: Partial<Pick<import('./lib/chat/types').ChatMeta, 'title' | 'provider'>>): Promise<void>;
+}
+
 declare global {
   interface SaiBridge extends Record<string, any> {
+    chatlog?: SaiChatLogApi;
     /** Developer diagnostics (maintainer account only) — see electron/services/devlog.ts. */
     devlog?: (event: string, data?: Record<string, unknown>) => void;
     devlogInfo?: () => Promise<{ enabled: boolean; path: string | null }>;

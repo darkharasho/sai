@@ -45,9 +45,12 @@ export class ChatLogStore {
   private indexDirty = false;
   private timer: NodeJS.Timeout | null = null;
   private realCache = new Map<string, string>();
+  private onError: (err: unknown) => void;
 
-  constructor(opts: { dir: string; now?: () => number; flushMs?: number; compactAfter?: number }) {
+  constructor(opts: { dir: string; now?: () => number; flushMs?: number; compactAfter?: number; onError?: (err: unknown) => void }) {
     this.dir = opts.dir;
+    // eslint-disable-next-line no-console
+    this.onError = opts.onError ?? ((err) => console.error('[chatlog] flush failed:', err));
     this.now = opts.now ?? Date.now;
     this.flushMs = opts.flushMs ?? 100;
     this.compactAfter = opts.compactAfter ?? 500;
@@ -123,7 +126,11 @@ export class ChatLogStore {
 
   private scheduleFlush() {
     if (this.timer) return;
-    this.timer = setTimeout(() => { this.timer = null; this.flush(); }, this.flushMs);
+    // A disk error here would otherwise be an uncaught exception in main.
+    this.timer = setTimeout(() => {
+      this.timer = null;
+      try { this.flush(); } catch (err) { this.onError(err); }
+    }, this.flushMs);
     this.timer.unref?.();
   }
 

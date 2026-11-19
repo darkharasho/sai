@@ -246,6 +246,23 @@ export function listAllWorkspaces(): Workspace[] {
   return Array.from(workspaces.values());
 }
 
+/**
+ * Scopes of a per-workspace provider (Antigravity under `gemini`, Kimi) whose
+ * process or ACP transport is alive. The process is shared by the workspace,
+ * so every scope with a known session counts as live while it runs.
+ */
+export function listAcpLiveScopes(provider: 'gemini' | 'kimi'): Array<{ projectPath: string; scope: string }> {
+  const out: Array<{ projectPath: string; scope: string }> = [];
+  for (const ws of workspaces.values()) {
+    const state = ws[provider];
+    if (!state.process && !state.transport) continue;
+    const scopes = new Set<string>([...state.terminalSessions.keys(), ...state.terminalCwds.keys()]);
+    if (state.chatSessionId || state.busy) scopes.add('chat');
+    for (const scope of scopes) out.push({ projectPath: ws.projectPath, scope });
+  }
+  return out;
+}
+
 export function touchActivity(projectPath: string): void {
   const ws = workspaces.get(projectPath);
   if (ws) ws.lastActivity = Date.now();

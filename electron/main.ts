@@ -34,7 +34,7 @@ import {
   mintRenderToken,
   evictRenderToken,
 } from './services/renderProtocol';
-import { snapshotModel, readCachedModel, pruneModelCache, isVersionKey } from './services/modelCache';
+import { snapshotModel, readCachedModel, pruneModelCache, isVersionKey, setLogModelKeyReferences } from './services/modelCache';
 import { execFile as _execFile, execFileSync } from 'node:child_process';
 import { promisify as _promisify } from 'node:util';
 const _execFileP = _promisify(_execFile);
@@ -74,15 +74,18 @@ async function _resolveTailnetEndpointWithEnv() {
   });
 }
 import { registerTerminalHandlers, destroyAllTerminals, listTerminalPids } from './services/pty';
-import { registerClaudeHandlers, destroyClaude, setRemoteCeiling, setRemoteBus, setSubprocessMemoryCapMB, emitChatMessage } from './services/claude';
+import { registerClaudeHandlers, destroyClaude, setRemoteCeiling, setRemoteBus, setSubprocessMemoryCapMB, emitChatMessage, setChatLog } from './services/claude';
 import { initSudoService, lockSudo } from './services/sudo';
-import { getClaudeBackend } from './services/claudeBackend';
+import { getClaudeBackend, listClaudeLiveScopes } from './services/claudeBackend';
+import { ChatLogStore } from './services/chatlog/store';
+import { ChatLogService, liveChatIds, realPath } from './services/chatlog/service';
+import { setLogImageReferences } from './services/toolResultImageStore';
 import { RendererProxy } from './services/remote/renderer-proxy';
 import { registerGitHandlers } from './services/git';
 import { registerFsHandlers } from './services/fs';
 import { registerUpdater } from './services/updater';
 import { registerUsageHandlers, destroyUsagePolling } from './services/usage';
-import { destroyAll, startSuspendTimer, stopSuspendTimer, getAll, remove, suspend, getOrCreate as getOrCreateWorkspace, DEFAULT_SUSPEND_TIMEOUT } from './services/workspace';
+import { destroyAll, startSuspendTimer, stopSuspendTimer, getAll, remove, suspend, getOrCreate as getOrCreateWorkspace, DEFAULT_SUSPEND_TIMEOUT, listAcpLiveScopes } from './services/workspace';
 import { initFocusTracking, setActiveWorkspace } from './services/notify';
 import { devlog, devlogEnabled, devlogFor, devlogPath } from './services/devlog';
 import { readIntactClipboardPng } from './services/clipboardImage';
@@ -96,7 +99,7 @@ import { OverlayManager } from './services/overlay';
 import { registerGithubAuthHandlers } from './services/github-auth';
 import { initialSync, schedulePush } from './services/github-sync';
 import { registerCodexHandlers, destroyCodexTelemetry } from './services/codex';
-import { destroyCodexBackendIfActive } from './services/codexBackend';
+import { destroyCodexBackendIfActive, listCodexLiveScopes } from './services/codexBackend';
 import { registerGeminiHandlers } from './services/gemini';
 import { registerKimiHandlers } from './services/kimi';
 import { registerPluginHandlers } from './services/plugins';
@@ -171,6 +174,63 @@ let mainWindow: BrowserWindow | null = null;
 /** System load guard; linux only, null elsewhere. */
 let loadGuard: LoadGuard | null = null;
 let loadGuardEventSeq = 0;
+
+// Durable per-chat log (chat sync). Created once per process: createWindow can
+// run again (macOS activate) and ipcMain.handle throws on re-registration.
+let chatLogStore: ChatLogStore | null = null;
+let chatLog: ChatLogService | null = null;
+let chatLogRepaired = false;
+
+/** Live backend scopes for a provider, across every project. */
+function liveScopesOf(provider: string): Array<{ projectPath: string; scope: string }> {
+  switch (provider) {
+    case 'claude': return listClaudeLiveScopes();
+    case 'codex': return listCodexLiveScopes();
+    case 'gemini': return listAcpLiveScopes('gemini');
+    case 'kimi': return listAcpLiveScopes('kimi');
+    default: return [];
+  }
+}
+
+function initChatLog(): void {
+  if (chatLog) return;
+  const dir = process.env.SAI_CHATLOG_DIR || path.join(app.getPath('userData'), 'chatlog');
+  try {
+    chatLogStore = new ChatLogStore({
+      dir,
+      onError: (err) => devlog('chatlog', 'chatlog.flushError', { error: err instanceof Error ? err.message : String(err) }),
+    });
+  } catch (err) {
+    // The app must keep working without the log (v1 IPC is untouched).
+    console.error('[chatlog] store init failed:', err);
+    devlog('chatlog', 'chatlog.initError', { dir, error: err instanceof Error ? err.message : String(err) });
+    return;
+  }
+  const service: ChatLogService = new ChatLogService({
+    store: chatLogStore,
+    sendToRenderer: (channel, entry) => {
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, entry);
+    },
+    bus: () => bus,
+    liveChats: (provider, projectPath): string[] =>
+      liveChatIds(liveScopesOf(provider), projectPath, (p) => service.legacyChatFor(p)),
+    providerOf: (projectPath, scope) => {
+      const want = realPath(projectPath);
+      for (const provider of ['codex', 'gemini', 'kimi'] as const) {
+        if (liveScopesOf(provider).some((e) => e.scope === scope && (e.projectPath === '*' || realPath(e.projectPath) === want))) {
+          return provider;
+        }
+      }
+      return 'claude';
+    },
+    devlog: (event, data) => devlog('chatlog', event, data),
+  });
+  service.registerIpc(ipcMain);
+  chatLog = service;
+  setChatLog(service);
+  setLogImageReferences(() => service.referencedImageFiles());
+  setLogModelKeyReferences(() => service.referencedModelKeys());
+}
 let quitConfirmed = false;
 let overlayManager: OverlayManager | null = null;
 
@@ -636,6 +696,7 @@ function createWindow() {
       selfCgroup: readSelfCgroup(),
     });
   }
+  initChatLog();
   registerClaudeHandlers(mainWindow);
   initSudoService(emitChatMessage);
   registerJiraHandlers();
@@ -653,6 +714,13 @@ function createWindow() {
   registerCodexHandlers();
   registerGeminiHandlers(mainWindow);
   registerKimiHandlers(mainWindow);
+  // After every backend is registered: close turns a previous run left open.
+  if (chatLog && !chatLogRepaired) {
+    chatLogRepaired = true;
+    try { chatLog.startupRepair(); } catch (err) {
+      devlog('chatlog', 'chatlog.repairError', { error: err instanceof Error ? err.message : String(err) });
+    }
+  }
   registerGitHandlers();
   registerFsHandlers(mainWindow!);
   registerPluginHandlers();
@@ -1565,6 +1633,8 @@ app.on('before-quit', (e) => {
   try { lockSudo(); } catch { /* noop */ }
   // Never leave SAI's processes SIGSTOPped behind us.
   try { loadGuard?.stop(); } catch { /* noop */ }
+  // Flush buffered chat-log deltas and the index.
+  try { chatLogStore?.close(); } catch (err) { console.error('[chatlog] close failed:', err); }
   // Synchronously release the remote bridge port before Electron exits.
   if (remote && !_quitInProgress) {
     _quitInProgress = true;

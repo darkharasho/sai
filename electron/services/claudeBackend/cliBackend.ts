@@ -5,6 +5,7 @@ import {
   reconcileScopeImpl,
 } from '../claude';
 import { readCachedSlashCommands } from '../slashCommands';
+import { listAllWorkspaces } from '../workspace';
 import type {
   ClaudeBackend, StartArgs, SendArgs, CompactArgs, ApproveArgs, AnswerQuestionArgs, AnswerPlanArgs,
 } from './types';
@@ -26,4 +27,12 @@ export class CliBackend implements ClaudeBackend {
   generateCommitMessage(cwd: string, provider?: string) { return generateCommitMessageImpl(cwd, provider); }
   generateTitle(cwd: string, userMessage: string, provider?: string) { return generateTitleImpl(cwd, userMessage, provider); }
   getModels() { return getAvailableClaudeModels(); }
+  /** Scopes whose persistent CLI process is alive. */
+  liveScopes() {
+    const out: Array<{ projectPath: string; scope: string }> = [];
+    for (const ws of listAllWorkspaces()) {
+      for (const [scope, c] of ws.claudeScopes) if (c.process) out.push({ projectPath: ws.projectPath, scope });
+    }
+    return out;
+  }
 }
