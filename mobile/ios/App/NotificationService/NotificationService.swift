@@ -6,9 +6,9 @@ import UserNotifications
 /// Opens SAI's sealed pushes on the phone.
 ///
 /// The relay only ever sees ciphertext: the APNs payload carries a generic alert ("SAI" / "New
-/// activity in a chat", the fallback), `mutable-content: 1`, the sealed blob in `s` and the kind
-/// in `k`. The blob is base64(nonce[12] || ciphertext || tag[16]), AES-256-GCM with no AAD
-/// (src/lib/push/seal.ts), sealed with one of the 32-byte keys the app keeps in the Keychain as
+/// activity in a chat", the fallback), `mutable-content: 1` and the sealed blob in `s`; the kind
+/// lives only inside the sealed plaintext. The blob is base64(nonce[12] || ciphertext || tag[16]),
+/// AES-256-GCM with no AAD (src/lib/push/seal.ts), sealed with one of the 32-byte keys the app keeps in the Keychain as
 /// `seal:<keyId>` (service `com.project96.sai.machines`, the shared access group). The relay
 /// doesn't know the keyId, so every seal key is tried until one authenticates.
 ///

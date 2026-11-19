@@ -41,7 +41,6 @@ const ID_RE = /^[A-Za-z0-9_-]{22}$/; // 16 random bytes, base64url (pushId, secr
 const TOKEN_RE = /^[A-Za-z0-9_-]{43}$/; // 32 random bytes, base64url (ownerToken, sendSecret)
 const APNS_TOKEN_RE = /^[0-9a-fA-F]{64,200}$/;
 const BASE64_RE = /^[A-Za-z0-9+/]+={0,2}$/;
-const CONTROL_RE = /[\u0000-\u001f\u007f]/;
 
 class HttpError extends Error {
   constructor(
@@ -111,12 +110,6 @@ function apnsEnv(body: Record<string, unknown>): ApnsEnv {
   return v;
 }
 
-function label(body: Record<string, unknown>): string {
-  const v = body.label ?? '';
-  if (typeof v !== 'string' || v.length > 64 || CONTROL_RE.test(v)) throw bad('label');
-  return v;
-}
-
 /** Fail open (a limiter outage must not take pushes down), but say so. The log line never includes the key. */
 async function limited(limiter: Limiter | undefined, key: string): Promise<boolean> {
   if (!limiter) {
@@ -181,7 +174,7 @@ async function createSecret(req: Request, deps: Deps): Promise<Response> {
   const body = await readJson(req);
   const pushId = str(body, 'pushId', ID_RE);
   const ownerToken = str(body, 'ownerToken', TOKEN_RE);
-  const lbl = label(body);
+  // Older phones send the machine's `label`: accepted, never read or stored.
   await authOwner(deps.store, pushId, ownerToken);
   if ((await deps.store.listSecrets(pushId)).length >= MAX_SECRETS_PER_PUSH_ID) {
     throw new HttpError(409, { error: 'too_many_secrets' });
@@ -192,7 +185,7 @@ async function createSecret(req: Request, deps: Deps): Promise<Response> {
     secretId,
     pushId,
     secretHash: await sha256Hex(sendSecret),
-    label: lbl,
+    label: '', // legacy column, always empty: the relay keeps no machine names
     createdAt: deps.now(),
   });
   return jsonResponse(200, { secretId, sendSecret });
@@ -222,8 +215,9 @@ async function pushRoute(req: Request, env: Env, deps: Deps): Promise<Response> 
   if (sealed.length > MAX_SEALED_CHARS) throw new HttpError(413, { error: 'sealed_too_large' });
   // nonce(12) + tag(16) = 28 bytes minimum, i.e. 40 base64 chars.
   if (sealed.length < 40 || sealed.length % 4 !== 0 || !BASE64_RE.test(sealed)) throw bad('sealed');
+  // Optional and never forwarded (desktops send it); a malformed one still fails loudly.
   const kind = body.kind;
-  if (typeof kind !== 'string' || !KINDS.has(kind)) throw bad('kind');
+  if (kind !== undefined && (typeof kind !== 'string' || !KINDS.has(kind))) throw bad('kind');
 
   if (await limited(deps.pushLimiter, pushId)) throw new HttpError(429, { error: 'rate_limited' });
 
@@ -251,7 +245,7 @@ async function pushRoute(req: Request, env: Env, deps: Deps): Promise<Response> 
     jwt,
     env: reg.env,
     deviceToken: reg.apnsToken,
-    body: await buildApnsBody(pushId, sealed, kind),
+    body: await buildApnsBody(pushId, sealed),
   });
   switch (outcome.kind) {
     case 'ok':

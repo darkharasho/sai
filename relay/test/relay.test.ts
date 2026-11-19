@@ -125,6 +125,20 @@ describe('secrets', () => {
       ['apns_token', 'created_at', 'env', 'owner_hash', 'push_id', 'updated_at'].sort(),
     );
   });
+
+  it('the machine label is accepted from older phones but never stored', async () => {
+    const h = await makeHarness();
+    const reg = await register(h);
+    await mintSecret(h, reg, 'My Secret Desk');
+    // Newer phones send no label at all.
+    const res = await h.call('POST', '/v1/secrets', { ...reg });
+    expect(res.status).toBe(200);
+    // Even a label the old validator refused is ignored rather than rejected.
+    expect((await h.call('POST', '/v1/secrets', { ...reg, label: 'x'.repeat(200) })).status).toBe(200);
+    const secs = (await env.DB.prepare('SELECT label FROM send_secrets').all<{ label: string }>()).results;
+    expect(secs.map((r) => r.label)).toEqual(['', '', '']);
+    expect(JSON.stringify(secs)).not.toContain('My Secret Desk');
+  });
 });
 
 describe('push', () => {
@@ -156,8 +170,9 @@ describe('push', () => {
         'thread-id': threadId,
       },
       s: sealed,
-      k: 'approval',
     });
+    // The kind is not forwarded: APNs (and anyone reading the payload) sees only the sealed blob.
+    expect(call.body).not.toContain('approval');
 
     // Nothing identifying or secret leaks into the APNs request.
     const wire = call.body + JSON.stringify(call.headers);
@@ -182,6 +197,14 @@ describe('push', () => {
     expect((await push(h, reg, sec, { sealed: 'A'.repeat(3504) })).status).toBe(413);
     expect((await push(h, reg, sec, { sealed: 'not base64 at all!' })).status).toBe(400);
     expect((await push(h, reg, sec, { kind: 'chat-text' })).status).toBe(400);
+  });
+
+  it('kind is optional (the relay ignores it)', async () => {
+    const h = await makeHarness();
+    const reg = await register(h);
+    const sec = await mintSecret(h, reg);
+    expect((await push(h, reg, sec, { kind: undefined })).status).toBe(202);
+    expect(JSON.parse(h.apnsCalls[0]!.body)).not.toHaveProperty('k');
   });
 
   it('bodies over 8 KB are 413', async () => {

@@ -72,7 +72,8 @@ export async function getApnsJwt(cfg: ApnsConfig, nowMs: number): Promise<string
   return jwt;
 }
 
-export async function buildApnsBody(pushId: string, sealed: string, kind: string): Promise<string> {
+/** The APNs payload: a generic alert, the thread id and the sealed blob. Nothing else (no kind, no label). */
+export async function buildApnsBody(pushId: string, sealed: string): Promise<string> {
   const threadId = (await sha256Hex(pushId)).slice(0, 16);
   return JSON.stringify({
     aps: {
@@ -82,7 +83,6 @@ export async function buildApnsBody(pushId: string, sealed: string, kind: string
       'thread-id': threadId,
     },
     s: sealed,
-    k: kind,
   });
 }
 

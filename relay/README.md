@@ -17,20 +17,21 @@ is `400 {error:'invalid', field}`.
 | --- | --- | --- |
 | `POST /v1/register` | `{apnsToken, env:'sandbox'\|'production', pushId?, ownerToken?}` | `200 {pushId, ownerToken}`. With a matching `pushId` and `ownerToken` it updates the token and env in place (same `pushId`, existing send secrets keep working). Otherwise it creates a new registration. Limited to 10/min per client IP (`429`). |
 | `DELETE /v1/register` | `{pushId, ownerToken}` | `200 {ok:true}`; deletes the registration and all its send secrets. `401` bad owner token, `404` unknown `pushId`. |
-| `POST /v1/secrets` | `{pushId, ownerToken, label}` | `200 {secretId, sendSecret}`, one per paired desktop. `label` is at most 64 chars. At most 32 secrets per `pushId` (`409`). |
+| `POST /v1/secrets` | `{pushId, ownerToken}` | `200 {secretId, sendSecret}`, one per paired desktop. At most 32 secrets per `pushId` (`409`). A `label` from older phones is accepted and ignored (never stored). |
 | `DELETE /v1/secrets` | `{pushId, ownerToken, secretId}` | `200 {ok:true}`; revokes that secret (idempotent). |
-| `POST /v1/push` | `{pushId, sendSecret, sealed, kind}` | `202` accepted by APNs. `400` bad input, `401` bad secret, `404` unknown `pushId`, `413` `sealed` over 3500 chars, `429` over 30/min for this `pushId`, `503 {error:'apns_not_configured'}` (or `apns_key_invalid`), `410 {error:'unregistered', reason}` when APNs says the token is gone (the registration is deleted unless the phone re-registered to a new token meanwhile; later pushes then get `404`), `502 {error:'apns_error', reason}` for any other APNs error, `502 {error:'apns_unreachable'}`. |
+| `POST /v1/push` | `{pushId, sendSecret, sealed, kind?}` | `202` accepted by APNs. `400` bad input, `401` bad secret, `404` unknown `pushId`, `413` `sealed` over 3500 chars, `429` over 30/min for this `pushId`, `503 {error:'apns_not_configured'}` (or `apns_key_invalid`), `410 {error:'unregistered', reason}` when APNs says the token is gone (the registration is deleted unless the phone re-registered to a new token meanwhile; later pushes then get `404`), `502 {error:'apns_error', reason}` for any other APNs error, `502 {error:'apns_unreachable'}`. |
 | `GET /healthz` | | `200 {ok:true}` |
 
-`kind` is one of `done | approval | question | error`. `sealed` is standard
-base64 of `nonce(12) ‖ ciphertext ‖ tag(16)`.
+`kind`, when sent, must be one of `done | approval | question | error`; the
+relay ignores it otherwise (it is never stored or forwarded). `sealed` is
+standard base64 of `nonce(12) ‖ ciphertext ‖ tag(16)`.
 
 What APNs receives (`apns-push-type: alert`, `apns-topic: com.project96.sai`,
 `apns-priority: 10`, to `api.sandbox.push.apple.com` or `api.push.apple.com` by
 the registration's env):
 
 ```json
-{"aps":{"alert":{"title":"SAI","body":"New activity in a chat"},"mutable-content":1,"sound":"default","thread-id":"<first 16 hex of SHA-256(pushId)>"},"s":"<sealed>","k":"<kind>"}
+{"aps":{"alert":{"title":"SAI","body":"New activity in a chat"},"mutable-content":1,"sound":"default","thread-id":"<first 16 hex of SHA-256(pushId)>"},"s":"<sealed>"}
 ```
 
 The phone's Notification Service Extension decrypts `s`. If it can't, the fixed
@@ -93,7 +94,8 @@ What is stored, in D1:
 - `registrations`: `pushId`, the SHA-256 of the phone's `ownerToken`, the APNs
   device token, `sandbox`/`production`, created and updated timestamps.
 - `send_secrets`: `secretId`, `pushId`, the SHA-256 of the desktop's
-  `sendSecret`, the machine label the phone chose, and a created timestamp.
+  `sendSecret`, and a created timestamp. (The `label` column is legacy and
+  always written empty: the relay keeps no machine names.)
 
 How long: a registration and its secrets live until the phone unregisters
 (`DELETE /v1/register`), the phone revokes a desktop (`DELETE /v1/secrets`), or

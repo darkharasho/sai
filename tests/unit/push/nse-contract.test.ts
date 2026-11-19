@@ -23,7 +23,9 @@ describe('NSE contract', () => {
   it('reads the sealed blob from userInfo "s", the key the relay writes', () => {
     expect(nse).toMatch(/userInfo\["s"\]/);
     expect(apns).toMatch(/\bs: sealed\b/);
-    expect(apns).toMatch(/\bk: kind\b/);
+    // Nothing but the sealed blob: the kind is not forwarded (the relay sees ids, blobs and timestamps only).
+    expect(apns).not.toMatch(/\bk: /);
+    expect(nse).not.toMatch(/userInfo\["k"\]/);
     expect(apns).toMatch(/'mutable-content': 1/);
   });
 
