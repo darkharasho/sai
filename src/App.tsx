@@ -19,7 +19,7 @@ import WorkspaceToast, { type ToastTone } from './components/WorkspaceToast';
 import { computeChatToasts } from './lib/chatToasts';
 import { computeChatNotificationCount, computeCompletedWorkspaces, isTurnErrored, workspaceSwitchViewStamps } from './lib/chatActivity';
 import { inferSessionProvider } from './lib/sessionProvider';
-import { waitingWorkspacesFrom } from './lib/workspaceStatus';
+import { waitingWorkspacesFrom, followUpWaitScopes } from './lib/workspaceStatus';
 import CommandPalette, { type PaletteMode } from './components/CommandPalette';
 import { useWhatsNew } from './hooks/useWhatsNew';
 import { useKeybinding } from './hooks/useKeybinding';
@@ -3715,6 +3715,9 @@ export default function App() {
     return ids;
   }, [suspendedScopes, activeProjectPath]);
 
+  // ⟳ follow-ups (turn ended, watcher alive) count as waits for status dots.
+  const followUpWaitKeys = useMemo(() => followUpWaitScopes(followUpScopes), [followUpScopes]);
+
   const waitingSessionIds = useMemo(() => {
     if (!activeProjectPath) return new Set<string>();
     const prefix = `${activeProjectPath}:`;
@@ -3724,8 +3727,11 @@ export default function App() {
         ids.add(k.slice(prefix.length));
       }
     }
+    for (const k of followUpWaitKeys) {
+      if (k.startsWith(prefix)) ids.add(k.slice(prefix.length));
+    }
     return ids;
-  }, [waitingScopes, activeProjectPath]);
+  }, [waitingScopes, followUpWaitKeys, activeProjectPath]);
 
   // ALL waiting sessions regardless of wait kind (scheduled + background).
   // Used to suppress the "Reply ready" toast: a wait ends the streaming set
@@ -3743,10 +3749,24 @@ export default function App() {
   // Workspaces whose only activity is a parked wait (scheduled wakeup or
   // background tasks) — no turn is streaming. A waiting turn keeps its busy
   // slot, so without this the titlebar shows it as plain "working" gold.
+  // A ⟳ follow-up (turn ended, watcher still alive) is a wait too: it isn't in
+  // waitingScopes and holds no busy slot, so without this the workspace read as
+  // plain "alive" green while its chat said "will pick back up".
   const waitingWorkspaces = useMemo(
-    () => waitingWorkspacesFrom(waitingScopes.keys(), streamingScopes),
-    [waitingScopes, streamingScopes],
+    () => waitingWorkspacesFrom([...waitingScopes.keys(), ...followUpWaitKeys], streamingScopes),
+    [waitingScopes, followUpWaitKeys, streamingScopes],
   );
+  // TitleBar reads "waiting" as busy ∩ waiting (a parked turn keeps its busy
+  // slot); follow-up waits hold none, so fold them in for the titlebar only.
+  const titleBarBusyWorkspaces = useMemo(() => {
+    let out: Set<string> | null = null;
+    for (const ws of waitingWorkspaces) {
+      if (busyWorkspaces.has(ws)) continue;
+      if (!out) out = new Set(busyWorkspaces);
+      out.add(ws);
+    }
+    return out ?? busyWorkspaces;
+  }, [waitingWorkspaces, busyWorkspaces]);
 
   // Grace timeout: a scheduled wakeup that never fires must not pin the pill
   // forever. Sweep every 5s; drop a scheduled entry past fire time + grace.
@@ -4027,7 +4047,7 @@ export default function App() {
         projectPath={projectPath}
         onProjectChange={handleProjectSwitch}
         completedWorkspaces={completedWorkspacesWithUnread}
-        busyWorkspaces={busyWorkspaces}
+        busyWorkspaces={titleBarBusyWorkspaces}
         waitingWorkspaces={waitingWorkspaces}
         approvalWorkspaces={new Set(approvalSessions.keys())}
         awaitingQuestionWorkspaces={attentionWorkspaces}

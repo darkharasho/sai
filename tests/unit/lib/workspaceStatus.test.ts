@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { workspaceDisplayState, waitingWorkspacesFrom } from '../../../src/lib/workspaceStatus';
+import { workspaceDisplayState, waitingWorkspacesFrom, followUpWaitScopes } from '../../../src/lib/workspaceStatus';
 
 describe('workspaceDisplayState', () => {
   it('returns inactive when no flags and not open', () => {
@@ -53,5 +53,21 @@ describe('waitingWorkspacesFrom', () => {
 
   it('streaming elsewhere does not affect it', () => {
     expect([...waitingWorkspacesFrom(['/a/b:chat'], ['/c/d:sess-9'])]).toEqual(['/a/b']);
+  });
+});
+
+describe('followUpWaitScopes', () => {
+  it('keeps following/resuming follow-ups and drops stalled ones', () => {
+    const fu = new Map([
+      ['/a:s1', { state: 'following' as const }],
+      ['/b:s2', { state: 'resuming' as const }],
+      ['/c:s3', { state: 'stalled' as const }],
+    ]);
+    expect([...followUpWaitScopes(fu)].sort()).toEqual(['/a:s1', '/b:s2']);
+  });
+
+  it('a follow-up wait with no streaming turn marks the workspace waiting', () => {
+    const fu = new Map([['/ws/famchat:s1', { state: 'following' as const }]]);
+    expect([...waitingWorkspacesFrom(followUpWaitScopes(fu), [])]).toEqual(['/ws/famchat']);
   });
 });

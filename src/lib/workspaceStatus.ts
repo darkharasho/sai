@@ -52,3 +52,17 @@ export function waitingWorkspacesFrom(
   }
   return out;
 }
+
+/** Scopes whose AI promised to pick back up and still has a live watcher
+ *  (follow-up ⟳ following / resuming). The turn has ended, so these aren't in
+ *  the wait map, but they're waiting all the same; stalled ones (⚠) are an
+ *  attention state, not a wait. */
+export function followUpWaitScopes(
+  followUps: ReadonlyMap<string, { state: string }>,
+): Set<string> {
+  const out = new Set<string>();
+  for (const [k, v] of followUps) {
+    if (v.state === 'following' || v.state === 'resuming') out.add(k);
+  }
+  return out;
+}
