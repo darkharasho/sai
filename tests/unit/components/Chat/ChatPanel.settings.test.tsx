@@ -11,7 +11,11 @@ import type { ComponentProps } from 'react';
 import { installMockSai } from '../../../helpers/ipc-mock';
 import { installMockChatlog, emitChat, flushChatlog, type MockChatlog } from '../../../helpers/chatlogMock';
 
-vi.mock('../../../../src/lib/chat/migrateToLog', () => ({ ensureChatInLog: vi.fn(async () => {}) }));
+const verified = vi.hoisted(() => new Set<string>());
+vi.mock('../../../../src/lib/chat/migrateToLog', () => ({
+  ensureChatInLog: vi.fn(async () => {}),
+  isChatImported: (id: string) => verified.has(id),
+}));
 
 vi.mock('../../../../src/components/Chat/ChatMessage', () => ({
   default: (props: any) => (
@@ -144,6 +148,19 @@ describe('ChatPanel: per-chat settings live in the log', () => {
     await emitChat(sai, { type: 'done', projectPath: P, scope: 'c1', turnSeq: 1 });
     await act(async () => { await inputProps.onSend('again'); });
     expect(log.commands('settings')).toHaveLength(1);
+  });
+
+  it('send and picker commands claim the chat settled only when its IndexedDB history was verified', async () => {
+    verified.clear();
+    await mount();
+    await act(async () => { await inputProps.onSend('first'); });
+    await act(async () => { inputProps.onModelChange('opus'); });
+    await flushChatlog();
+    expect(log.commands().map((c: any) => [c.kind, c.settled])).toEqual([['settings', false], ['send', false], ['settings', false]]);
+    verified.add('c1');
+    await act(async () => { inputProps.onModelChange('haiku'); });
+    await flushChatlog();
+    expect(log.commands('settings').at(-1).settled).toBe(true);
   });
 
   it('a chat with its own settings keeps them when the workspace defaults differ', async () => {

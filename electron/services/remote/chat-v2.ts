@@ -4,6 +4,7 @@
 import type { ChatCommand, CommandResult } from '../chatlog/commands';
 import type { ChatLogEntry, ChatSettings, ChatSnapshot, ChatState } from '../../../src/lib/chat/types';
 import type { ChatSync } from '../chatlog/holder';
+import { emptyChatState } from '../../../src/lib/chat/reducer';
 import type { SessionBus } from './session-bus';
 
 /** The socket surface ChatV2 needs (a `ws` WebSocket in production). */
@@ -170,8 +171,13 @@ export class ChatV2 {
       const res = chat.store.read(chatId, after);
       snapshot = res.snapshot;
       entries = res.entries;
-      // No log yet: its first entries (seq 1..) arrive live, whatever `after` was.
-      if (!res.meta) sub.last = 0;
+      // No log yet: its first entries (seq 1..) arrive live, whatever `after`
+      // was. A client ahead of that gets an empty snapshot at seq 0 so it
+      // resets its head instead of dropping them as duplicates.
+      if (!res.meta) {
+        sub.last = 0;
+        if (after > 0) snapshot = { chatId, seq: 0, state: emptyChatState({ provider: 'claude' }) };
+      }
       if (res.meta && after > res.headSeq) {
         const state = chat.store.state(chatId);
         snapshot = state ? { chatId, seq: res.headSeq, state } : null;

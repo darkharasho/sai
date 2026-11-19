@@ -12,9 +12,9 @@ import path from 'node:path';
 import { ChatLogStore } from '../../../electron/services/chatlog/store';
 import { ChatLogService } from '../../../electron/services/chatlog/service';
 import { ChatCommands } from '../../../electron/services/chatlog/commands';
-import { clearDb, dbGetMessages } from '../../../src/chatDb';
+import { clearDb, dbGetMessages, dbSaveSession } from '../../../src/chatDb';
 import { queueSaveSession } from '../../../src/lib/sessionSaveQueue';
-import { MIGRATED_FLAG, _resetMigrateStateForTests, ensureChatInLog } from '../../../src/lib/chat/migrateToLog';
+import { MIGRATED_FLAG, _resetMigrateStateForTests, ensureChatInLog, isChatImported } from '../../../src/lib/chat/migrateToLog';
 import type { ChatMessage, ChatSession } from '../../../src/types';
 
 const P = '/project';
@@ -51,7 +51,8 @@ const mirror = () => queueSaveSession(P, row(store.state('c1')!.messages), 0);
 
 async function createChatWithTurn() {
   await ensureChatInLog('c1'); // the panel's open: no IndexedDB row yet
-  const r = await cmds.run({ kind: 'send', chatId: 'c1', clientId: 'u1', text: 'hello', origin: 'desktop', projectPath: P });
+  // As ChatPanel does: settled only if the renderer verified the chat.
+  const r = await cmds.run({ kind: 'send', chatId: 'c1', clientId: 'u1', text: 'hello', origin: 'desktop', projectPath: P, settled: isChatImported('c1') });
   expect(r.ok).toBe(true);
   svc.record({ type: 'streaming_start', projectPath: P, scope: 'c1', turnSeq: 1 });
   svc.record({ type: 'assistant', projectPath: P, scope: 'c1', turnSeq: 1, message: { content: [{ type: 'text', text: 'hi' }] } });
@@ -61,15 +62,52 @@ async function createChatWithTurn() {
 }
 
 describe('a desktop-created chat is settled at creation', () => {
-  it('a desktop send that creates the log marks it imported; a phone send does not', async () => {
-    await cmds.run({ kind: 'send', chatId: 'd1', clientId: 'a', text: 'x', origin: 'desktop', projectPath: P });
-    await cmds.run({ kind: 'send', chatId: 'r1', clientId: 'b', text: 'x', origin: 'remote', projectPath: P });
-    await cmds.run({ kind: 'settings', chatId: 'd2', clientId: 'c', settings: { provider: 'codex' }, projectPath: P });
-    await cmds.run({ kind: 'settings', chatId: 'r2', clientId: 'd', settings: { provider: 'codex' }, origin: 'remote', projectPath: P });
+  it('a create is settled only when the desktop says it verified the chat (fail closed)', async () => {
+    await cmds.run({ kind: 'send', chatId: 'd1', clientId: 'a', text: 'x', origin: 'desktop', projectPath: P, settled: true });
+    await cmds.run({ kind: 'settings', chatId: 'd2', clientId: 'c', settings: { provider: 'codex' }, projectPath: P, settled: true });
+    await cmds.run({ kind: 'send', chatId: 'u1', clientId: 'e', text: 'x', origin: 'desktop', projectPath: P });
+    await cmds.run({ kind: 'send', chatId: 'u2', clientId: 'f', text: 'x', origin: 'desktop', projectPath: P, settled: false });
+    await cmds.run({ kind: 'settings', chatId: 'u3', clientId: 'g', settings: { provider: 'codex' }, projectPath: P });
+    await cmds.run({ kind: 'send', chatId: 'r1', clientId: 'b', text: 'x', origin: 'remote', projectPath: P, settled: true });
+    await cmds.run({ kind: 'settings', chatId: 'r2', clientId: 'd', settings: { provider: 'codex' }, origin: 'remote', projectPath: P, settled: true });
     expect(store.meta('d1')!.imported).toBe(true);
     expect(store.meta('d2')!.imported).toBe(true);
-    expect(store.meta('r1')!.imported).toBeFalsy();
-    expect(store.meta('r2')!.imported).toBeFalsy();
+    for (const id of ['u1', 'u2', 'u3', 'r1', 'r2']) expect(store.meta(id)!.imported).toBeFalsy();
+  });
+
+  it('ensureChatInLog fails, the user sends anyway: a later ensureChatInLog still folds the history in front', async () => {
+    const history: ChatMessage[] = [
+      { id: 'h1', role: 'user', content: 'old q', timestamp: 1 },
+      { id: 'h2', role: 'assistant', content: 'old a', timestamp: 2 },
+    ];
+    await dbSaveSession(P, row(history));
+    const api = (window as any).sai.chatlog;
+    const real = api.importMessages;
+    api.importMessages = async () => { throw new Error('IPC clone failed'); };
+    await expect(ensureChatInLog('c1')).rejects.toThrow();
+    expect(isChatImported('c1')).toBe(false);
+    await cmds.run({ kind: 'send', chatId: 'c1', clientId: 'n1', text: 'new', origin: 'desktop', projectPath: P, settled: isChatImported('c1') });
+    expect(store.meta('c1')!.imported).toBeFalsy();
+    api.importMessages = real;
+    await ensureChatInLog('c1');
+    expect(store.state('c1')!.messages.map(m => m.content)).toEqual(['old q', 'old a', 'new']);
+    expect(store.meta('c1')!.imported).toBe(true);
+  });
+
+  it('a send during a pending import does not settle the chat; the import then folds', async () => {
+    await dbSaveSession(P, row([{ id: 'h1', role: 'user', content: 'old q', timestamp: 1 }]));
+    const api = (window as any).sai.chatlog;
+    const real = api.importMessages;
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    api.importMessages = async (...a: any[]) => { await gate; return real(...a); };
+    const pending = ensureChatInLog('c1');
+    await new Promise((r) => setTimeout(r, 10));
+    await cmds.run({ kind: 'send', chatId: 'c1', clientId: 'n1', text: 'new', origin: 'desktop', projectPath: P, settled: isChatImported('c1') });
+    expect(store.meta('c1')!.imported).toBeFalsy();
+    release();
+    await pending;
+    expect(store.state('c1')!.messages.map(m => m.content)).toEqual(['old q', 'new']);
   });
 
   it('/clear then reopen: the mirror follows the clear and no history comes back', async () => {

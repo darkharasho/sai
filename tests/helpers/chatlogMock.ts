@@ -185,8 +185,8 @@ export function createMockChatlog(sai: Record<string, any> = {}): MockChatlog {
           ...(typeof cmd.taskId === 'string' ? { taskId: cmd.taskId } : {}),
           ...(queue ? { queued: true } : {}),
         }, { projectPath: cmd.projectPath, ...(cmd.provider ? { provider: cmd.provider } : {}) });
-        // Like ChatCommands: a phone-created log is not imported (R15.1); a desktop one is settled.
-        if (created && cmd.origin === 'remote') chats.get(cmd.chatId)!.meta.imported = false;
+        // Like ChatCommands: a created log is settled only on a verified desktop claim.
+        if (created && !(cmd.settled === true && cmd.origin !== 'remote')) chats.get(cmd.chatId)!.meta.imported = false;
         const prompt = typeof cmd.promptOverride === 'string' ? cmd.promptOverride : cmd.text;
         const st = stateOf(cmd.chatId)!;
         if (queue) {
@@ -214,7 +214,7 @@ export function createMockChatlog(sai: Record<string, any> = {}): MockChatlog {
         if (created && (!cmd.projectPath || !cmd.settings?.provider)) throw new Error(`unknown chat ${cmd.chatId}`);
         const entry = append(cmd.chatId, { type: 'settings_changed', settings: cmd.settings }, { projectPath: cmd.projectPath, provider: cmd.settings?.provider });
         if (cmd.settings?.provider) chats.get(cmd.chatId)!.meta.provider = cmd.settings.provider;
-        if (created && cmd.origin === 'remote') chats.get(cmd.chatId)!.meta.imported = false;
+        if (created && !(cmd.settled === true && cmd.origin !== 'remote')) chats.get(cmd.chatId)!.meta.imported = false;
         return { seq: entry.seq };
       }
       case 'interrupt': known(cmd.chatId); dispatchStop(cmd.chatId); return {};

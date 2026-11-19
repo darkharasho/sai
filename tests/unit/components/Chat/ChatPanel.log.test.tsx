@@ -9,7 +9,7 @@ import type { ComponentProps } from 'react';
 import { installMockSai } from '../../../helpers/ipc-mock';
 import { installMockChatlog, emitChat, flushChatlog, type MockChatlog } from '../../../helpers/chatlogMock';
 
-vi.mock('../../../../src/lib/chat/migrateToLog', () => ({ ensureChatInLog: vi.fn(async () => {}) }));
+vi.mock('../../../../src/lib/chat/migrateToLog', () => ({ ensureChatInLog: vi.fn(async () => {}), isChatImported: () => true }));
 
 const messageProps = new Map<string, any>();
 vi.mock('../../../../src/components/Chat/ChatMessage', () => ({

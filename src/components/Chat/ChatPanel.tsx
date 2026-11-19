@@ -15,6 +15,7 @@ import { useChatLog } from '../../hooks/useChatLog';
 import { reduceChat, persistableState } from '../../lib/chat/reducer';
 import type { ChatLogEntry, ChatSettings, ChatState } from '../../lib/chat/types';
 import { effectiveChatSettings, settingsSeed } from '../../lib/chat/composerSettings';
+import { isChatImported } from '../../lib/chat/migrateToLog';
 import { itemKey } from './tasks/declaredCards';
 import { buildPendingQuestionAnswer } from '../../lib/pendingQuestionAnswer';
 import { normalizeSlashCommands, type SlashCommandInfo } from '../../lib/slashCommands';
@@ -1688,8 +1689,9 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode:
     const seed = settingsSeedRef.current();
     void runCommand({
       kind: 'settings', chatId, clientId: newClientId(), settings: { ...(seed ?? {}), ...patch }, origin: 'desktop',
-      // Creates the chat in the log if this is its first entry.
-      projectPath,
+      // Creates the chat in the log if this is its first entry (settled only
+      // once its IndexedDB history is known to be in the log).
+      projectPath, settled: isChatImported(chatId),
     }).catch(() => { /* devlogged */ });
   }, [chatId, projectPath, runCommand]);
   const onPermissionChange = (mode: ChatPanelProps['permissionMode']) => {
@@ -1751,12 +1753,14 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode:
     const seed = settingsSeedRef.current();
     try {
       if (seed) {
-        await runCommand({ kind: 'settings', chatId, clientId: newClientId(), settings: seed, origin: 'desktop', projectPath });
+        await runCommand({ kind: 'settings', chatId, clientId: newClientId(), settings: seed, origin: 'desktop', projectPath, settled: isChatImported(chatId) });
       }
       await runCommand({
         kind: 'send', chatId, clientId: opts.clientId, text, origin: 'desktop',
         // The workspace's own path spelling: main keys backends by it.
         projectPath, provider: aiProvider,
+        // A send that creates the log settles it only if ensureChatInLog verified the chat.
+        settled: isChatImported(chatId),
         ...(opts.images?.length ? { images: opts.images } : {}),
         ...(opts.imagePaths?.length ? { imagePaths: opts.imagePaths } : {}),
         ...(opts.prompt !== undefined && opts.prompt !== text ? { promptOverride: opts.prompt } : {}),

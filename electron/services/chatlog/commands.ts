@@ -20,6 +20,8 @@ export type ChatCommand =
     provider?: Provider;
     /** Short text the queue strip shows while this send waits (text can carry pasted context). */
     label?: string;
+    /** Desktop only: the renderer verified this chat's IndexedDB history is in the log (see settledBy). */
+    settled?: boolean;
   }
   | { kind: 'approve'; chatId: string; clientId: string; toolUseId: string; approved: boolean; modifiedCommand?: string }
   | { kind: 'answer'; chatId: string; clientId: string; toolUseId: string; answers: Record<string, string | string[]> }
@@ -29,6 +31,8 @@ export type ChatCommand =
     kind: 'settings'; chatId: string; clientId: string; settings: Partial<ChatSettings>; origin?: Origin;
     /** With settings.provider, creates the chat if it isn't logged yet. */
     projectPath?: string;
+    /** Desktop only: the renderer verified this chat's IndexedDB history is in the log (see settledBy). */
+    settled?: boolean;
   }
   | { kind: 'queueRemove'; chatId: string; clientId: string; target: string }
   /** Moves a queued item to the front (it drains next). */
@@ -76,13 +80,15 @@ export interface ChatCommandsOpts {
 }
 
 /**
- * A chat a command creates: the desktop panel checked IndexedDB when it opened
- * the chat (ensureChatInLog), so a desktop create is settled (imported) — else
- * a /clear could be undone by a later fold of the IndexedDB mirror. A phone
- * create stays unimported so the desktop can still fold its history in.
+ * Whether a chat a command creates starts settled (imported). Only when the
+ * desktop renderer says it verified the chat's IndexedDB history is in the log
+ * (`settled: true`, from ensureChatInLog's knownInLog) — else a /clear could be
+ * undone by a later fold of the IndexedDB mirror. Fails closed: no flag, a
+ * failed or pending check, or a phone origin leaves it unimported so the
+ * history can still be folded in.
  */
-function settledBy(origin: Origin | undefined): { imported?: true } {
-  return origin === 'remote' ? {} : { imported: true };
+function settledBy(cmd: { origin?: Origin; settled?: boolean }): { imported?: true } {
+  return cmd.settled === true && cmd.origin !== 'remote' ? { imported: true } : {};
 }
 
 const defaultTimers: Timers = {
@@ -252,7 +258,7 @@ export class ChatCommands {
     let init: { projectPath: string; provider: Provider; imported?: boolean } | undefined;
     if (!this.store.meta(cmd.chatId)) {
       if (!cmd.projectPath || !patch.provider) throw new Error(`unknown chat ${cmd.chatId} (needs projectPath and settings.provider to create it)`);
-      init = { projectPath: cmd.projectPath, provider: patch.provider, ...settledBy(cmd.origin) };
+      init = { projectPath: cmd.projectPath, provider: patch.provider, ...settledBy(cmd) };
     }
     if (cmd.origin === 'remote') {
       // Cap only what the phone changes, judged against the chat's resulting settings.
@@ -297,7 +303,7 @@ export class ChatCommands {
       ...(images ? { images } : {}),
       ...(typeof cmd.taskId === 'string' ? { taskId: cmd.taskId } : {}),
       ...(queue ? { queued: true } : {}),
-    }, exists ? undefined : { projectPath: cmd.projectPath, ...(cmd.provider ? { provider: cmd.provider } : {}), ...settledBy(origin) });
+    }, exists ? undefined : { projectPath: cmd.projectPath, ...(cmd.provider ? { provider: cmd.provider } : {}), ...settledBy({ origin, settled: cmd.settled }) });
 
     const { projectPath, provider, state } = this.chat(cmd.chatId);
     const prompt = typeof cmd.promptOverride === 'string' ? cmd.promptOverride : text;

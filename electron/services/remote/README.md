@@ -52,6 +52,9 @@ buffered live entries past what it sent, then goes live with `chat.entry`. A
 client whose `after` is ahead of the log (the log was reset) gets a snapshot of
 the current state. Re-subscribing replaces the previous subscription. Unknown
 chats subscribe fine (empty `chat.entries`); their first entries arrive live.
+If the client sent `after > 0` for a chat with no log (it was deleted), it
+first gets an empty `chat.snapshot` at `seq: 0`, so its head resets and seq 1
+isn't dropped as a duplicate.
 
 **Client rules** (the same as `src/hooks/useChatLog.ts`):
 - A snapshot REPLACES the client's state; its `seq` becomes the client head.
@@ -98,7 +101,8 @@ reuse it only for the same command. Only the fields a phone may set are kept:
 - `queueRemove` acks `ok: false, error: "not queued: <id>"` when the item has
   already left the queue: treat that as "already sent or removed", not as a
   failure to retry.
-- A chat a phone creates is not marked imported, so the desktop still folds
+- `settled` (the desktop's "IndexedDB history verified" claim) is never taken
+  from a phone. A chat a phone creates is not marked imported, so the desktop still folds
   that chat's older IndexedDB history in when it next opens it (a
   `history_imported` entry follows).
 

@@ -222,6 +222,14 @@ describe('ChatV2', () => {
     expect(last).toMatchObject({ role: 'user', content: 'hi' });
   });
 
+  it('a phone cannot claim a chat settled', async () => {
+    const { v2, ws, store } = mk();
+    await v2.handle(ws, { type: 'chat.command', command: { kind: 'send', chatId: 'c1', clientId: 'k1', text: 'x', projectPath: P, settled: true } });
+    await v2.handle(ws, { type: 'chat.command', command: { kind: 'settings', chatId: 'c2', clientId: 'k2', settings: { provider: 'claude' }, projectPath: P, settled: true } });
+    expect(store.meta('c1')!.imported).toBeFalsy();
+    expect(store.meta('c2')!.imported).toBeFalsy();
+  });
+
   it('a phone-supplied projectPath never overrides an existing chat\'s project', async () => {
     const { service, v2, ws, dispatch, store } = mk();
     service.appendClient('c1', um('a'), { projectPath: P });
@@ -276,7 +284,14 @@ describe('ChatV2', () => {
   it('subscribing ahead to a chat that does not exist yet still delivers its first entries', async () => {
     const { service, v2, ws, frames } = mk();
     await v2.handle(ws, { type: 'chat.subscribe', chatId: 'new1', after: 5 });
-    expect(frames.map(f => f.type)).toEqual(['chat.entries']);
+    // An empty snapshot at seq 0 resets a README-conforming client's head.
+    expect(frames.map(f => f.type)).toEqual(['chat.snapshot', 'chat.entries']);
+    expect(frames[0]).toMatchObject({ chatId: 'new1', seq: 0, olderCount: 0, state: { messages: [], lastSeq: 0 } });
+    // after 0 (nothing to reset) gets no snapshot.
+    const ws2 = { send: (d: string) => { frames2.push(JSON.parse(d)); } };
+    const frames2: any[] = [];
+    await v2.handle(ws2, { type: 'chat.subscribe', chatId: 'new2', after: 0 });
+    expect(frames2.map(f => f.type)).toEqual(['chat.entries']);
     service.appendClient('new1', um('a'), { projectPath: P });
     expect(frames.at(-1)).toMatchObject({ type: 'chat.entry', entry: { seq: 1 } });
   });
