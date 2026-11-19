@@ -154,7 +154,14 @@ export class ChatV2 {
     if (msg.type === 'file.read') return this.readFile(ws, msg.reqId, msg.kind, msg.ref);
     if (msg.type === 'slash.list') return this.slashList(ws, msg.reqId, msg.projectPath, msg.chatId);
     const chat = this.opts.chat();
-    if (!chat) return this.error(ws, null, 'unavailable', 'chat log is not available');
+    if (!chat) {
+      // Echo what identifies the failed frame: its reqId, chat id and (for a
+      // command) clientId, so a client can match the error exactly.
+      const raw = msg.command && typeof msg.command === 'object' ? msg.command as Frame : null;
+      const clientId = msg.type === 'chat.command' && raw ? str(raw.clientId) : null;
+      const chatId = chatIdOf(msg.type === 'chat.command' ? raw?.chatId : msg.chatId);
+      return this.error(ws, chatId, 'unavailable', 'chat log is not available', msg.reqId, clientId);
+    }
     switch (msg.type) {
       case 'chat.subscribe': {
         const chatId = chatIdOf(msg.chatId);
@@ -187,7 +194,7 @@ export class ChatV2 {
         const chatId = chatIdOf(msg.chatId);
         if (!chatId) return this.error(ws, null, 'bad_request', 'valid chatId required');
         const state = chat.store.state(chatId);
-        if (!state) return this.error(ws, chatId, 'unknown_chat', `unknown chat ${chatId}`);
+        if (!state) return this.error(ws, chatId, 'unknown_chat', `unknown chat ${chatId}`, msg.reqId);
         const n = state.messages.length;
         const before = typeof msg.beforeIndex === 'number' && Number.isFinite(msg.beforeIndex)
           ? Math.min(n, Math.max(0, Math.floor(msg.beforeIndex))) : n;
@@ -541,8 +548,11 @@ export class ChatV2 {
     this.send(ws, { type: 'chat.ack', result });
   }
 
-  private error(ws: V2Socket, chatId: string | null, code: string, message: string, reqId?: unknown): void {
-    this.send(ws, { type: 'chat.error', ...(reqId !== undefined ? { reqId } : {}), ...(chatId ? { chatId } : {}), code, message });
+  private error(ws: V2Socket, chatId: string | null, code: string, message: string, reqId?: unknown, clientId?: string | null): void {
+    this.send(ws, {
+      type: 'chat.error', ...(reqId !== undefined ? { reqId } : {}), ...(chatId ? { chatId } : {}),
+      ...(clientId ? { clientId } : {}), code, message,
+    });
   }
 
   private send(ws: V2Socket, frame: Record<string, unknown>): void {

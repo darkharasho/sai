@@ -27,6 +27,9 @@ export interface SaiShimOpts {
   settings: () => Record<string, unknown>;
 }
 
+/** A command the desktop refused as `unavailable` (chat log starting) is resent after this long. */
+export const COMMAND_RETRY_MS = 1_000;
+
 /** The sudo stub's toast. */
 export const SUDO_TOAST = 'Answer sudo prompts on the desktop';
 
@@ -75,6 +78,7 @@ type OpenResult = {
 
 interface PendingCommand {
   frame: Record<string, unknown>;
+  retry: ReturnType<typeof setTimeout> | null;
   waiters: Array<{ resolve: (r: CommandResult) => void; reject: (err: Error) => void }>;
 }
 
@@ -176,9 +180,45 @@ export function createSaiShim(client: V2Client, opts: SaiShimOpts): SaiBridge {
 
   client.on('chat.entry', (f: ChatEntryFrame) => { if (f && f.entry) fanOut(f.entry); });
 
-  client.on('chat.error', (f: ChatErrorFrame) => {
+  /**
+   * Resends a pending command soon. Never rejected for `unavailable`: the
+   * desktop may have run it (an older desktop's error doesn't say which frame
+   * failed), and a resend with the same clientId is acked as a duplicate.
+   */
+  const retryCommand = (clientId: string) => {
+    const c = commands.get(clientId);
+    if (!c || c.retry) return;
+    c.retry = setTimeout(() => {
+      c.retry = null;
+      if (commands.get(clientId) === c && client.connected) client.send(c.frame);
+    }, COMMAND_RETRY_MS);
+  };
+
+  const settleCommand = (clientId: string): PendingCommand | null => {
+    const c = commands.get(clientId);
+    if (!c) return null;
+    commands.delete(clientId);
+    if (c.retry) clearTimeout(c.retry);
+    return c;
+  };
+
+  /** Rejects every pending open and command: nothing will be sent again. */
+  const failAll = (err: Error) => {
+    for (const q of expects.values()) for (const o of q) o?.reject(err);
+    expects.clear();
+    snaps.clear();
+    for (const id of [...commands.keys()]) for (const w of settleCommand(id)!.waiters) w.reject(err);
+  };
+
+  client.onStop((reason) => failAll(new Error(reason === 'unpaired' ? 'This desktop is no longer paired' : 'Disconnected from the desktop')));
+
+  client.on('chat.error', (f: ChatErrorFrame & { clientId?: unknown }) => {
     if (f.reqId !== undefined) return; // a request's own error (V2Client rejects it)
-    if (typeof f.chatId === 'string' && f.code === 'read_failed') {
+    if (typeof f.clientId === 'string') {
+      if (f.code === 'unavailable') retryCommand(f.clientId);
+      return;
+    }
+    if (typeof f.chatId === 'string' && (f.code === 'read_failed' || f.code === 'unavailable')) {
       const open = nextExpect(f.chatId);
       snaps.delete(f.chatId);
       if (open) open.reject(new Error(f.message || 'chat read failed'));
@@ -192,18 +232,15 @@ export function createSaiShim(client: V2Client, opts: SaiShimOpts): SaiBridge {
       expects.clear();
       snaps.clear();
       for (const chatId of new Set(replayed)) emit(resyncListeners, chatId, 'resync');
-      for (const c of commands.values()) for (const w of c.waiters) w.reject(err);
-      commands.clear();
+      for (const id of commands.keys()) retryCommand(id);
     }
   });
 
   client.on('chat.ack', (f: { result?: CommandResult }) => {
     const r = f.result;
     if (!r || typeof r.clientId !== 'string') return;
-    const c = commands.get(r.clientId);
-    if (!c) return;
-    commands.delete(r.clientId);
-    for (const w of c.waiters) w.resolve(r);
+    const c = settleCommand(r.clientId);
+    if (c) for (const w of c.waiters) w.resolve(r);
   });
 
   const onList = (f: ChatsListFrame) => {
@@ -241,17 +278,19 @@ export function createSaiShim(client: V2Client, opts: SaiShimOpts): SaiBridge {
 
   const runCommand = (cmd: ChatCommand): Promise<CommandResult> => new Promise((resolve, reject) => {
     if (!cmd || typeof cmd.clientId !== 'string' || !cmd.clientId) { reject(new Error('command needs a clientId')); return; }
+    if (client.halted) { reject(new Error('Not connected to a desktop')); return; }
     const existing = commands.get(cmd.clientId);
     if (existing) { existing.waiters.push({ resolve, reject }); return; }
     if ('projectPath' in cmd && typeof cmd.projectPath === 'string' && cmd.projectPath && !projectOf.has(cmd.chatId)) projectOf.set(cmd.chatId, cmd.projectPath);
     const frame = { type: 'chat.command', command: cmd };
-    commands.set(cmd.clientId, { frame, waiters: [{ resolve, reject }] });
+    commands.set(cmd.clientId, { frame, retry: null, waiters: [{ resolve, reject }] });
     if (isConnected(client.state)) client.send(frame);
   });
 
   const chatlog: SaiChatLogApi = {
     open(chatId: string, after: number): Promise<any> {
       if (typeof chatId !== 'string' || !validChatId(chatId)) return Promise.reject(new Error(`invalid chat id ${String(chatId)}`));
+      if (client.halted) return Promise.reject(new Error('Not connected to a desktop'));
       const from = typeof after === 'number' && Number.isInteger(after) && after > 0 ? after : 0;
       return new Promise<OpenResult>((resolve, reject) => {
         let q = expects.get(chatId);
@@ -264,6 +303,17 @@ export function createSaiShim(client: V2Client, opts: SaiShimOpts): SaiBridge {
     page(chatId: string, beforeIndex: number, limit: number) {
       return client.request<{ messages?: ChatMessage[]; olderCount?: number }>({ type: 'chat.page', chatId, beforeIndex, limit })
         .then((r) => ({ messages: Array.isArray(r.messages) ? r.messages : [], olderCount: typeof r.olderCount === 'number' ? r.olderCount : 0 }));
+    },
+
+    close(chatId: string) {
+      if (typeof chatId !== 'string') return;
+      // Settle this chat's opens and the client's record together, online or
+      // offline, so a later open can't be paired with a stale answer.
+      const q = expects.get(chatId);
+      expects.delete(chatId);
+      snaps.delete(chatId);
+      if (q) for (const o of q) o?.reject(new Error(`chat ${chatId} closed`));
+      client.send({ type: 'chat.unsubscribe', chatId });
     },
 
     onEvent(cb) {

@@ -246,6 +246,103 @@ describe('saiShim chatlog', () => {
   });
 });
 
+describe('saiShim fix round 1', () => {
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('a chatlog-unavailable error never rejects a pending command: its later ack resolves it, sent once', async () => {
+    const sai = setup();
+    const p = sai.chatlog!.command({ kind: 'send', chatId: 'c1', clientId: 'k1', text: 'hi', origin: 'remote', projectPath: '/p' } as any);
+    let rejected = false;
+    p.catch(() => { rejected = true; });
+    // An older desktop's error names no frame (the replayed subscribe failed; the send ran).
+    last().recv({ type: 'chat.error', code: 'unavailable', message: 'chat log is not available' });
+    await tick();
+    expect(rejected).toBe(false);
+    ack('k1');
+    await expect(p).resolves.toMatchObject({ clientId: 'k1', ok: true });
+    expect(sentOf('chat.command')).toHaveLength(1);
+  });
+
+  it('a command refused as unavailable is resent with the same clientId', async () => {
+    vi.useFakeTimers();
+    const sai = setup();
+    const p = sai.chatlog!.command({ kind: 'interrupt', chatId: 'c1', clientId: 'k9' } as any);
+    last().recv({ type: 'chat.error', chatId: 'c1', clientId: 'k9', code: 'unavailable', message: 'chat log is not available' });
+    expect(sentOf('chat.command')).toHaveLength(1);
+    vi.advanceTimersByTime(1000);
+    expect(sentOf('chat.command').map((f) => f.command.clientId)).toEqual(['k9', 'k9']);
+    ack('k9');
+    await expect(p).resolves.toMatchObject({ ok: true });
+    vi.advanceTimersByTime(5000);
+    expect(sentOf('chat.command')).toHaveLength(2);
+  });
+
+  it('an unavailable subscribe (chatId echoed) rejects only that chat\'s open', async () => {
+    const sai = setup();
+    const a = sai.chatlog!.open('A', 0);
+    const b = sai.chatlog!.open('B', 0);
+    last().recv({ type: 'chat.error', chatId: 'A', code: 'unavailable', message: 'chat log is not available' });
+    await expect(a).rejects.toThrow();
+    last().recv({ type: 'chat.entries', chatId: 'B', entries: [] });
+    await expect(b).resolves.toMatchObject({ entries: [] });
+  });
+
+  it('close(A) offline settles its pending open; a new open(A) resolves after reconnect', async () => {
+    const sai = setup();
+    const p1 = sai.chatlog!.open('A', 0);
+    last().serverClose(1006);
+    sai.chatlog!.close!('A');
+    await expect(p1).rejects.toThrow();
+    const p2 = sai.chatlog!.open('A', 0);
+    client.resume();
+    last().open(); last().authOk();
+    expect(sentOf('chat.subscribe')).toEqual([{ type: 'chat.subscribe', chatId: 'A', after: 0 }]);
+    last().recv({ type: 'chat.entries', chatId: 'A', entries: [{ chatId: 'A', seq: 1, ts: 1, ev: { type: 'done' } }] });
+    await expect(p2).resolves.toMatchObject({ entries: [{ seq: 1 }] });
+    expect(client.state).toBe('open');
+  });
+
+  it('close(A) online drops the answers still owed to the closed subscription', async () => {
+    const sai = setup();
+    const evs: any[] = [];
+    sai.claudeOnMessage((m: any) => evs.push(m));
+    const p1 = sai.chatlog!.open('A', 5);
+    sai.chatlog!.close!('A');
+    await expect(p1).rejects.toThrow();
+    expect(sentOf('chat.unsubscribe')).toEqual([{ type: 'chat.unsubscribe', chatId: 'A' }]);
+    const p2 = sai.chatlog!.open('A', 0);
+    // The server answers the closed subscribe first, then the new one.
+    last().recv({ type: 'chat.entries', chatId: 'A', entries: [{ chatId: 'A', seq: 6, ts: 6, ev: { type: 'stale' } }] });
+    last().recv({ type: 'chat.snapshot', chatId: 'A', seq: 6, state: { messages: [], lastSeq: 6, turn: {}, queue: [], settings: { provider: 'claude' } }, olderCount: 0 });
+    last().recv({ type: 'chat.entries', chatId: 'A', entries: [] });
+    const r = await p2;
+    expect(r.snapshot?.seq).toBe(6);
+    expect(evs).toEqual([]);
+    expect(client.state).toBe('open');
+  });
+
+  it('unpaired rejects pending opens and commands, and later ones at once', async () => {
+    const sai = setup();
+    const o = sai.chatlog!.open('A', 0);
+    const c = sai.chatlog!.command({ kind: 'interrupt', chatId: 'A', clientId: 'k3' } as any);
+    last().serverClose(4001);
+    await expect(o).rejects.toThrow();
+    await expect(c).rejects.toThrow();
+    await expect(sai.chatlog!.command({ kind: 'interrupt', chatId: 'A', clientId: 'k4' } as any)).rejects.toThrow();
+    await expect(sai.chatlog!.open('A', 0)).rejects.toThrow();
+  });
+
+  it('close() rejects pending opens and commands, even when already offline', async () => {
+    const sai = setup();
+    last().serverClose(1006);
+    const o = sai.chatlog!.open('A', 0);
+    const c = sai.chatlog!.command({ kind: 'interrupt', chatId: 'A', clientId: 'k5' } as any);
+    client.close();
+    await expect(o).rejects.toThrow();
+    await expect(c).rejects.toThrow();
+  });
+});
+
 describe('saiShim mappings', () => {
   it('provider starts resolve at once with no slash commands', async () => {
     const sai = setup();

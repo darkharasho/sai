@@ -445,6 +445,11 @@ export interface SaiChatLogApi {
    * lastSeq. Desktop main never fires it.
    */
   onResync?(cb: (chatId: string) => void): () => void;
+  /**
+   * Phone shim only: stop following a chat (the panel unmounted). Its pending
+   * opens reject; the subscription is dropped online or offline.
+   */
+  close?(chatId: string): void;
   /** Client event types only (CLIENT_EVENT_TYPES); `init` creates a chat that isn't logged yet. */
   appendClient(
     chatId: string,

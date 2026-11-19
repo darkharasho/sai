@@ -110,6 +110,9 @@ describe('ChatV2', () => {
     await v2.handle(ws, { type: 'chat.page', reqId: 'r2', chatId: 'c1', beforeIndex: 50, limit: 20 });
     expect(frames.at(-1)).toMatchObject({ reqId: 'r2', olderCount: 30 });
     expect(frames.at(-1).messages.map((m: any) => m.id)[0]).toBe('h30');
+    // An unknown chat's page error carries the request's reqId.
+    await v2.handle(ws, { type: 'chat.page', reqId: 'r3', chatId: 'nope', beforeIndex: 5, limit: 5 });
+    expect(frames.at(-1)).toMatchObject({ type: 'chat.error', code: 'unknown_chat', reqId: 'r3', chatId: 'nope' });
   });
 
   it('a trimmed snapshot shifts turn.startIndex with the cut', async () => {
@@ -334,6 +337,20 @@ describe('ChatV2', () => {
     const v2 = new ChatV2({ bus: new SessionBus(), chat: () => null });
     await v2.handle(ws, { type: 'chat.subscribe', chatId: 'c1', after: 0 });
     expect(JSON.parse(ws.send.mock.calls[0][0])).toMatchObject({ v: 2, type: 'chat.error', code: 'unavailable' });
+  });
+
+  it('the unavailable error identifies the failed frame: chatId, reqId, a command\'s clientId', async () => {
+    const ws = { send: vi.fn() };
+    const v2 = new ChatV2({ bus: new SessionBus(), chat: () => null });
+    await v2.handle(ws, { type: 'chat.subscribe', chatId: 'c1', after: 0 });
+    await v2.handle(ws, { type: 'chat.command', command: { kind: 'send', chatId: 'c2', clientId: 'k1', text: 'x' } });
+    await v2.handle(ws, { type: 'chats.subscribe', reqId: 'r7', projectPath: '/p' });
+    await v2.handle(ws, { type: 'chat.page', reqId: 'r8', chatId: 'c3', beforeIndex: 5, limit: 2 });
+    const frames = ws.send.mock.calls.map((c) => JSON.parse(c[0]));
+    expect(frames[0]).toMatchObject({ code: 'unavailable', chatId: 'c1' });
+    expect(frames[1]).toMatchObject({ code: 'unavailable', chatId: 'c2', clientId: 'k1' });
+    expect(frames[2]).toMatchObject({ code: 'unavailable', reqId: 'r7' });
+    expect(frames[3]).toMatchObject({ code: 'unavailable', reqId: 'r8', chatId: 'c3' });
   });
 });
 

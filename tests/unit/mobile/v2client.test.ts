@@ -174,6 +174,49 @@ describe('V2Client', () => {
     expect(c.state).toBe('connecting');
   });
 
+  it('a socket that never opens is replaced after 10s', () => {
+    const c = make();
+    c.connect();
+    const s1 = last();
+    advance(9_999);
+    expect(s1.readyState).toBe(0);
+    advance(1);
+    expect(s1.closedWith).not.toBeNull();
+    expect(c.state).toBe('offline');
+    advance(1000);
+    expect(FakeSocket.all).toHaveLength(2);
+  });
+
+  it('an open socket without auth_ok in 10s is replaced', () => {
+    const c = make();
+    c.connect();
+    last().open();
+    advance(10_000);
+    expect(FakeSocket.all[0].readyState).toBe(3);
+    advance(1000);
+    expect(FakeSocket.all).toHaveLength(2);
+    last().open(); last().authOk();
+    advance(20_000); // the deadline is gone once authed
+    expect(last().readyState).toBe(1);
+  });
+
+  it('resume replaces a socket stuck CONNECTING for more than 5s', () => {
+    const c = make();
+    c.connect();
+    advance(3000);
+    c.resume();
+    expect(FakeSocket.all).toHaveLength(1);
+    advance(2001);
+    c.resume();
+    expect(FakeSocket.all[0].readyState).toBe(3);
+    expect(FakeSocket.all).toHaveLength(2);
+    expect(c.state).toBe('connecting');
+    // The replaced socket's deadline doesn't touch the new one.
+    advance(5000);
+    expect(FakeSocket.all).toHaveLength(2);
+    expect(last().readyState).toBe(0);
+  });
+
   it('request rejects on timeout', async () => {
     const c = make();
     c.connect(); last().open(); last().authOk();
@@ -246,8 +289,10 @@ describe('V2Client', () => {
     c.connect();
     last().open();
     c.resume();
-    advance(30_000);
+    advance(9_000);
     expect(last().types()).toEqual(['auth']);
+    advance(21_000); // (the auth deadline replaces the socket meanwhile)
+    for (const s of FakeSocket.all) expect(s.types()).not.toContain('ping');
   });
 
   it('close() stops everything and rejects in-flight requests', async () => {

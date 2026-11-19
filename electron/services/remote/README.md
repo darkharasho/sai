@@ -62,7 +62,7 @@ Desktop → client:
 | `chat.background` | `chatId`, `tasks`: the chat's background tasks (the `claude:backgroundTasks` payload's `tasks`) |
 | `chat.page.result` | `reqId`, `chatId`, `messages` (indices `[olderCount, beforeIndex)`), `olderCount` |
 | `chat.ack` | `result: CommandResult` (`clientId`, `ok`, `duplicate`, `seq?`, `error?`) |
-| `chat.error` | `reqId?` (when the failed frame was a `models.list` or `slash.list` request), `chatId?`, `code` (`bad_request`, `unknown_chat`, `unavailable`, `read_failed`, `unknown_type`, `internal`), `message` |
+| `chat.error` | `reqId?` (the failed frame's `reqId`, when it had one), `chatId?`, `clientId?` (a command refused as `unavailable`), `code` (`bad_request`, `unknown_chat`, `unavailable`, `read_failed`, `unknown_type`, `internal`), `message` |
 
 **Subscribe.** The desktop attaches its live listener first (buffering), then
 reads the log after `after`. It sends `chat.snapshot` when the read returns one

@@ -22,6 +22,10 @@ export const PROBE_TIMEOUT_MS = 5_000;
 export const BACKOFF_BASE_MS = 1_000;
 export const BACKOFF_MAX_MS = 30_000;
 export const REQUEST_TIMEOUT_MS = 10_000;
+/** A socket without auth_ok this long after it was created is replaced (iOS can hang CONNECTING for minutes). */
+export const AUTH_DEADLINE_MS = 10_000;
+/** resume() replaces a socket still unauthenticated after this long. */
+export const RESUME_STALE_CONNECT_MS = 5_000;
 
 const CONNECTING = 0;
 const OPEN = 1;
@@ -76,7 +80,18 @@ export class V2Client {
   private pingTimer: ReturnType<typeof setInterval> | null = null;
   private pongDeadline: ReturnType<typeof setTimeout> | null = null;
   private probeDeadline: ReturnType<typeof setTimeout> | null = null;
+  private authDeadline: ReturnType<typeof setTimeout> | null = null;
+  private socketCreatedAt = 0;
   private lastActivity = 0;
+  /** close() was called (cleared by connect()); with `unpaired`, nothing will be sent again. */
+  private closedByUser = false;
+  private readonly stopListeners = new Set<(reason: 'closed' | 'unpaired') => void>();
+  /**
+   * chatId → answers (chat.entries or a subscribe error) still owed on this
+   * socket to subscribes made before a chat.unsubscribe. Their frames are
+   * dropped so they can't be taken for a later subscribe's answer.
+   */
+  private readonly discards = new Map<string, number>();
 
   private queue: Frame[] = [];
   private pending = new Map<string, Pending>();
@@ -105,6 +120,7 @@ export class V2Client {
 
   connect(): void {
     this.stopped = false;
+    this.closedByUser = false;
     if (this.ws) return;
     if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
     this.retryAttempt = 0;
@@ -113,6 +129,7 @@ export class V2Client {
 
   close(): void {
     this.stopped = true;
+    this.closedByUser = true;
     if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
     this.clearTimers();
     const s = this.ws;
@@ -120,7 +137,24 @@ export class V2Client {
     this.authed = false;
     if (s) { try { s.close(1000, 'client closed'); } catch { /* already closed */ } }
     this.rejectAll(() => true, 'closed', 'connection closed');
+    this.discards.clear();
     this.setState('offline');
+    this.emitStop('closed');
+  }
+
+  /** True after close() or an unpaired close: nothing sent now will ever go out. */
+  get halted(): boolean {
+    return this.closedByUser || this.state === 'unpaired';
+  }
+
+  /** Called on close() (even when already offline) and on an unpaired close. */
+  onStop(cb: (reason: 'closed' | 'unpaired') => void): () => void {
+    this.stopListeners.add(cb);
+    return () => { this.stopListeners.delete(cb); };
+  }
+
+  private emitStop(reason: 'closed' | 'unpaired'): void {
+    for (const cb of [...this.stopListeners]) { try { cb(reason); } catch (err) { console.error('[v2] stop listener failed', err); } }
   }
 
   onState(cb: (s: ConnState) => void): () => void {
@@ -197,7 +231,16 @@ export class V2Client {
       this.open();
       return;
     }
-    if (s.readyState === CONNECTING || !this.authed) return; // let the open/auth finish
+    if (s.readyState === CONNECTING || !this.authed) {
+      // Let a fresh open/auth finish; one stuck past 5s is replaced now.
+      if (this.now() - this.socketCreatedAt <= RESUME_STALE_CONNECT_MS) return;
+      this.ws = null; // its late onclose is ignored
+      try { s.close(); } catch { /* ignore */ }
+      this.drop(s, false);
+      this.retryAttempt = 0;
+      this.open();
+      return;
+    }
     if (this.probeDeadline) return;
     try { s.send(JSON.stringify({ type: 'ping' })); } catch { this.kill(); return; }
     // Any frame clears the deadline; firing means nothing arrived since the ping.
@@ -223,6 +266,12 @@ export class V2Client {
       return;
     }
     this.ws = sock;
+    this.socketCreatedAt = this.now();
+    // No auth_ok in time (stuck CONNECTING, or auth never answered): replace it.
+    this.authDeadline = setTimeout(() => {
+      this.authDeadline = null;
+      if (this.ws === sock && !this.authed) this.kill();
+    }, AUTH_DEADLINE_MS);
     sock.onopen = () => {
       if (this.ws !== sock) return;
       try { sock.send(JSON.stringify({ type: 'auth', token: this.token })); } catch { /* onclose follows */ }
@@ -250,7 +299,9 @@ export class V2Client {
         this.clearTimers();
         if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
         this.rejectAll(() => true, 'unpaired', code === 4001 ? 'auth_failed' : 'revoked');
+        this.discards.clear();
         this.setState('unpaired');
+        this.emitStop('unpaired');
         return;
       }
       this.drop(sock, true);
@@ -263,6 +314,7 @@ export class V2Client {
     if (this.ws === sock) this.ws = null;
     this.authed = false;
     this.clearTimers();
+    this.discards.clear(); // answers owed on that socket are lost with it
     this.rejectAll((p) => p.socket === sock, 'closed', 'connection lost');
     this.setState('offline');
     if (reconnect) this.scheduleReconnect();
@@ -292,11 +344,14 @@ export class V2Client {
     if (this.pingTimer) { clearInterval(this.pingTimer); this.pingTimer = null; }
     if (this.pongDeadline) { clearTimeout(this.pongDeadline); this.pongDeadline = null; }
     if (this.probeDeadline) { clearTimeout(this.probeDeadline); this.probeDeadline = null; }
+    if (this.authDeadline) { clearTimeout(this.authDeadline); this.authDeadline = null; }
   }
 
   private onAuthOk(sock: SocketLike): void {
     this.authed = true;
     this.retryAttempt = 0;
+    if (this.authDeadline) { clearTimeout(this.authDeadline); this.authDeadline = null; }
+    this.discards.clear();
     // Replay what the server forgot with the old socket.
     for (const [chatId, sub] of this.chatSubs) {
       sub.snapSeq = null;
@@ -351,7 +406,12 @@ export class V2Client {
         return;
       }
       case 'chat.unsubscribe':
-        if (chatId) this.chatSubs.delete(chatId);
+        if (chatId) {
+          const sub = this.chatSubs.get(chatId);
+          // On a live socket the server still answers the subscribes it got before this.
+          if (sub && this.authed && sub.awaiting.length) this.discards.set(chatId, (this.discards.get(chatId) ?? 0) + sub.awaiting.length);
+          this.chatSubs.delete(chatId);
+        }
         if (this.authed) this.setState(this.catchingUp() ? 'catching_up' : 'open');
         return;
       case 'chats.subscribe':
@@ -385,6 +445,17 @@ export class V2Client {
       msg = { ...msg, projectPath: this.reqProject.get(reqId) };
     }
 
+    // Frames still owed to a subscription closed on this socket: dropped.
+    if (chatId && this.discards.has(chatId) && typeof msg.clientId !== 'string' && !reqId
+      && (type === 'chat.snapshot' || type === 'chat.entries' || type === 'chat.entry' || type === 'chat.background'
+        || (type === 'chat.error' && (msg.code === 'read_failed' || msg.code === 'unavailable')))) {
+      if (type === 'chat.entries' || type === 'chat.error') {
+        const left = this.discards.get(chatId)! - 1;
+        if (left > 0) this.discards.set(chatId, left); else this.discards.delete(chatId);
+      }
+      return;
+    }
+
     let catchUpChanged = false;
     if (chatId && (type === 'chat.snapshot' || type === 'chat.entries' || type === 'chat.entry')) {
       const sub = this.chatSubs.get(chatId);
@@ -406,15 +477,16 @@ export class V2Client {
     }
 
     if (type === 'chat.error' && !reqId) {
-      if (chatId && msg.code === 'read_failed') {
-        // That chat's subscribe failed.
+      if (chatId && typeof msg.clientId !== 'string' && (msg.code === 'read_failed' || msg.code === 'unavailable')) {
+        // That chat's subscribe failed (a command's unavailable error carries its clientId).
         const sub = this.chatSubs.get(chatId);
         if (sub?.awaiting.length) { sub.awaiting.shift(); sub.snapSeq = null; catchUpChanged = true; }
       } else if (chatId && msg.code === 'unknown_chat') {
-        // chat.page's error carries no reqId.
+        // An older desktop's chat.page error carries no reqId.
         this.rejectAll((p) => p.type === 'chat.page' && p.chatId === chatId, 'unknown_chat', String(msg.message ?? 'unknown chat'));
-      } else if (!chatId && msg.message === CHAT_LOG_UNAVAILABLE_MESSAGE) {
-        // Main's chat log isn't built yet: every chat frame on this socket failed.
+      } else if (!chatId && typeof msg.clientId !== 'string' && msg.message === CHAT_LOG_UNAVAILABLE_MESSAGE) {
+        // An older desktop names no frame: treat every chat frame in flight as failed.
+        this.discards.clear();
         for (const sub of this.chatSubs.values()) {
           if (sub.awaiting.length) { sub.awaiting = []; sub.snapSeq = null; catchUpChanged = true; }
         }
@@ -430,7 +502,8 @@ export class V2Client {
         if (type === 'chat.error') p.reject(new V2Error(String(msg.message ?? 'request failed'), String(msg.code ?? 'error')));
         else p.resolve(msg);
       }
-      if (type === 'chat.error' && this.reqProject.has(reqId)) this.untrackChats(this.reqProject.get(reqId)!);
+      // A refused chats.subscribe isn't replayed; one that merely met a not-yet-built chat log is.
+      if (type === 'chat.error' && msg.code !== 'unavailable' && this.reqProject.has(reqId)) this.untrackChats(this.reqProject.get(reqId)!);
     }
 
     const set = this.listeners.get(type);

@@ -69,7 +69,7 @@ async function settle(fn: () => boolean, ms = 10_000) {
   await waitFor(() => { if (!fn()) throw new Error('not yet'); }, { timeout: ms, interval: 5 });
 }
 
-async function desktop(compactAfter?: number) {
+async function desktop(compactAfter?: number, gate = { available: true }) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'shim-bridge-'));
   const store = new ChatLogStore({ dir, ...(compactAfter ? { compactAfter } : {}) });
   cleanup.push(() => fs.rmSync(dir, { recursive: true, force: true }), () => store.close());
@@ -87,7 +87,7 @@ async function desktop(compactAfter?: number) {
   const pairing = new PairingStore(':memory:');
   const server = new BridgeServer({
     tailnetIp: '127.0.0.1', pairing, bus, pwaDir: null, screenshotSecret: 'e2e', loadScreenshot: async () => null,
-    port: 0, chatSync: () => ({ store, commands }),
+    port: 0, chatSync: () => (gate.available ? { store, commands } : null),
   });
   const { port } = await server.start();
   cleanup.push(() => server.stop());
@@ -172,6 +172,21 @@ describe('phone shim over a real bridge', () => {
     expect(mine(store.state('c2'))).toHaveLength(1);
     expect(mine(result.current.state)).toHaveLength(1);
     expect(result.current.state).toEqual(store.state('c2'));
+  });
+
+  it('a send refused while the chat log is starting is resent, not dropped, and lands once', async () => {
+    const gate = { available: true };
+    const { store, service, sai } = await desktop(undefined, gate);
+    service.appendClient('c6', { type: 'local_note', content: 'hello' } as any, { projectPath: P });
+    gate.available = false; // desktop main's chat log is not up
+    const sent = sai.chatlog!.command({ kind: 'send', chatId: 'c6', clientId: 'phone-6', text: 'early', origin: 'remote', projectPath: P });
+    let rejected: unknown = null;
+    sent.catch((e) => { rejected = e; });
+    await new Promise((r) => setTimeout(r, 150));
+    expect(rejected).toBeNull();
+    gate.available = true;
+    await expect(sent).resolves.toMatchObject({ clientId: 'phone-6', ok: true, duplicate: false });
+    expect(store.state('c6')!.messages.filter((m) => m.content === 'early')).toHaveLength(1);
   });
 
   it('/help appends twice and both land', async () => {
