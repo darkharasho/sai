@@ -32,6 +32,8 @@ import { Toasts, showRepairToast, showToast, useConnectionToasts } from './Toast
 
 const ACTIVE_MACHINE_KEY = 'sai.activeMachine.v1';
 const SELECTION_KEY = 'sai.selection.v1';
+/** machineId → projectPath → the chat last open in that workspace. */
+const LAST_CHATS_KEY = 'sai.lastChats.v1';
 
 interface Selection { projectPath: string | null; chatId: string | null }
 
@@ -51,6 +53,30 @@ function saveSelection(machineId: string, sel: Selection): void {
     all[machineId] = sel;
     localStorage.setItem(SELECTION_KEY, JSON.stringify(all));
   } catch { /* storage unavailable: selection is per-session */ }
+}
+
+function readLastChats(): Record<string, Record<string, string>> {
+  try {
+    const all = JSON.parse(localStorage.getItem(LAST_CHATS_KEY) ?? '{}');
+    return all && typeof all === 'object' ? all : {};
+  } catch { return {}; }
+}
+
+/** The chat last open in this workspace (switching workspaces back returns to it). */
+function lastChatFor(machineId: string, projectPath: string): string | null {
+  const id = readLastChats()[machineId]?.[projectPath];
+  return typeof id === 'string' ? id : null;
+}
+
+function rememberChat(machineId: string, sel: Selection): void {
+  if (!sel.projectPath || !sel.chatId) return;
+  try {
+    const all = readLastChats();
+    const forMachine = all[machineId] && typeof all[machineId] === 'object' ? all[machineId] : {};
+    if (forMachine[sel.projectPath] === sel.chatId) return;
+    all[machineId] = { ...forMachine, [sel.projectPath]: sel.chatId };
+    localStorage.setItem(LAST_CHATS_KEY, JSON.stringify(all));
+  } catch { /* storage unavailable */ }
 }
 
 /** The shim's native surface: Capacitor plugins plus the shell's toasts. */
@@ -85,7 +111,7 @@ export function PhoneApp() {
   const [settings, setSettings] = useState(getAppSettings());
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [workspaces, setWorkspaces] = useState<RemoteWorkspace[]>([]);
-  const [chats, setChats] = useState<ChatMeta[]>([]);
+  const [chats, setChats] = useState<ChatMeta[] | null>(null);
   const [sel, setSel] = useState<Selection>({ projectPath: null, chatId: null });
 
   useEffect(() => onActive(setConn), []);
@@ -137,7 +163,7 @@ export function PhoneApp() {
     localStorage.setItem(ACTIVE_MACHINE_KEY, m.id);
     setSel(loadSelection(m.id));
     setWorkspaces([]);
-    setChats([]);
+    setChats(null);
     setDrawerOpen(false);
     setView('chat');
   }, []);
@@ -217,13 +243,13 @@ export function PhoneApp() {
   useEffect(() => {
     if (!workspaces.length || (sel.projectPath && workspaces.some((w) => w.projectPath === sel.projectPath))) return;
     const pick = workspaces.find((w) => w.state === 'active') ?? workspaces[0];
-    setSel({ projectPath: pick.projectPath, chatId: null });
-  }, [workspaces, sel.projectPath]);
+    setSel({ projectPath: pick.projectPath, chatId: conn ? lastChatFor(conn.machineId, pick.projectPath) : null });
+  }, [workspaces, sel.projectPath, conn]);
 
   // The workspace's chat list (chats.subscribe, newest first in the drawer).
   const projectPath = sel.projectPath;
   useEffect(() => {
-    setChats([]);
+    setChats(null);
     if (!conn || !projectPath) return;
     const set = (f: { projectPath?: unknown; chats?: unknown }) => {
       if (f.projectPath === projectPath && Array.isArray(f.chats)) setChats(f.chats as ChatMeta[]);
@@ -237,10 +263,14 @@ export function PhoneApp() {
     };
   }, [conn, projectPath]);
 
-  useEffect(() => { if (conn) saveSelection(conn.machineId, sel); }, [conn, sel]);
+  useEffect(() => {
+    if (!conn) return;
+    saveSelection(conn.machineId, sel);
+    rememberChat(conn.machineId, sel);
+  }, [conn, sel]);
 
   const chatState = useMirroredState(conn?.mirror ?? NO_MIRROR, sel.chatId);
-  const meta = chats.find((c) => c.chatId === sel.chatId) ?? null;
+  const meta = chats?.find((c) => c.chatId === sel.chatId) ?? null;
   const workspace = workspaces.find((w) => w.projectPath === sel.projectPath) ?? null;
   const status = sel.chatId ? chatStatus(chatState, meta) : null;
   const firstUser = chatState?.messages.find((m) => m.role === 'user')?.content;
@@ -341,7 +371,8 @@ export function PhoneApp() {
         onManageMachines={() => { setDrawerOpen(false); machinesApi.refresh(); setView('machines'); }}
         workspaces={workspaces}
         activeProjectPath={sel.projectPath}
-        onPickWorkspace={(p) => setSel((s) => (s.projectPath === p ? s : { projectPath: p, chatId: null }))}
+        // Each workspace keeps the chat it last had open; its chat list shows in the drawer.
+        onPickWorkspace={(p) => setSel((s) => (s.projectPath === p ? s : { projectPath: p, chatId: lastChatFor(conn.machineId, p) }))}
         chats={chats}
         activeChatId={sel.chatId}
         activeStatus={status}
