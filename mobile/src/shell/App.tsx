@@ -1,10 +1,9 @@
-// The phone app shell: pairing and machines, then a header + drawer around the
-// desktop's real ChatPanel (ChatHost) for the chosen workspace and chat.
+// The phone app shell: pairing and machines, then home (every workspace and its
+// chats) and the desktop's real ChatPanel (ChatHost) for the chosen chat.
 //
 // Imported only after main.tsx has installed window.sai (the chat graph reads
 // settings at import time).
 import { ChevronLeft } from 'lucide-react';
-import SaiLogo from '../../../src/components/SaiLogo';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactDOM from 'react-dom/client';
 import { ErrorBoundary } from '../../../src/ErrorBoundary';
@@ -27,9 +26,11 @@ import {
   connectTo, disconnect, getActive, getAppSettings, onActive, onAppSettings, type ActiveConnection,
 } from './connection';
 import { ChatHost, useMirroredState } from './ChatHost';
-import { Drawer, chatTitleOf } from './Drawer';
+import { chatTitleOf, type OpenChat } from './chatRows';
 import { useDrawerSwipe } from './drawerSwipe';
 import { Header, chatStatus } from './Header';
+import { Home, type DesktopNow } from './Home';
+import { Switcher } from './Switcher';
 import { startLifecycle, syncStatusBar, trackViewport, useConnState } from './lifecycle';
 import { Toasts, showRepairToast, showToast, useConnectionToasts } from './Toasts';
 
@@ -129,11 +130,15 @@ export function PhoneApp() {
   const [view, setView] = useState<View>('boot');
   const [conn, setConn] = useState<ActiveConnection | null>(getActive());
   const [settings, setSettings] = useState(getAppSettings());
-  const [drawerOpen, setDrawerOpen] = useState(false);
+  // Home (every workspace and its chats) vs. the open chat.
+  const [home, setHome] = useState(true);
+  const [switcherOpen, setSwitcherOpen] = useState(false);
   const [shellEl, setShellEl] = useState<HTMLDivElement | null>(null);
-  const drawerSwipe = useDrawerSwipe(shellEl, drawerOpen, setDrawerOpen);
+  // Back to home: drag the chat right from the left edge (home sits underneath).
+  const backSwipe = useDrawerSwipe(shellEl, home, setHome, { enabled: !home, width: () => window.innerWidth, layer: '.sai-phone-home' });
   const [workspaces, setWorkspaces] = useState<RemoteWorkspace[]>([]);
-  const [chats, setChats] = useState<ChatMeta[] | null>(null);
+  /** projectPath → its chats (chats.subscribe for every open workspace). */
+  const [chatsByWs, setChatsByWs] = useState<Record<string, ChatMeta[] | null>>({});
   const [sel, setSel] = useState<Selection>({ projectPath: null, chatId: null });
 
   useEffect(() => onActive(setConn), []);
@@ -170,7 +175,7 @@ export function PhoneApp() {
     const seq = ++openSeq.current;
     // Already connected: keep its connection, subscriptions and selection.
     if (getActive()?.machineId === m.id) {
-      setDrawerOpen(false);
+      setSwitcherOpen(false);
       setView('chat');
       return;
     }
@@ -185,8 +190,9 @@ export function PhoneApp() {
     localStorage.setItem(ACTIVE_MACHINE_KEY, m.id);
     setSel(loadSelection(m.id));
     setWorkspaces([]);
-    setChats(null);
-    setDrawerOpen(false);
+    setChatsByWs({});
+    setSwitcherOpen(false);
+    setHome(true);
     setView('chat');
   }, []);
 
@@ -218,14 +224,15 @@ export function PhoneApp() {
 
   // Presence: the chat on screen, re-sent on every auth_ok.
   useEffect(() => getPresence().attach(conn?.client ?? null), [conn]);
-  useEffect(() => { getPresence().setChat(view === 'chat' ? sel.chatId : null); }, [view, sel.chatId]);
+  const showHome = home || !sel.chatId || !sel.projectPath;
+  useEffect(() => { getPresence().setChat(view === 'chat' && !showHome ? sel.chatId : null); }, [view, showHome, sel.chatId]);
 
   // Notification taps: machine → workspace → chat; an unknown machine opens the list.
   const onTap = useRef<(data: Record<string, unknown>) => void>(() => {});
   onTap.current = (data) => {
     const route = routeTap(parseTap(data), listMachines());
     if (route.kind === 'machines') {
-      setDrawerOpen(false);
+      setSwitcherOpen(false);
       machinesApi.refresh();
       setView(listMachines().length ? 'machines' : 'pair');
       return;
@@ -239,7 +246,8 @@ export function PhoneApp() {
     if (getActive()?.machineId === route.machine.id) {
       openSeq.current++; // a slower open of another machine must not win
       setSel(next);
-      setDrawerOpen(false);
+      setSwitcherOpen(false);
+      setHome(!next.chatId);
       setView('chat');
     } else {
       void openMachine(route.machine);
@@ -270,36 +278,39 @@ export function PhoneApp() {
   useEffect(() => {
     if (!conn || !focus || !focusKey || followedFocus(conn.machineId) === focusKey) return;
     rememberFollowed(conn.machineId, focusKey);
-    setSel({ projectPath: focus.projectPath, chatId: focus.chatId ?? lastChatFor(conn.machineId, focus.projectPath) });
+    const chatId = focus.chatId ?? lastChatFor(conn.machineId, focus.projectPath);
+    setSel({ projectPath: focus.projectPath, chatId });
+    if (chatId) setHome(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conn, focusKey]);
 
-  // Default workspace: the selected one if still open, else the desktop's active one.
+  // The open chat's workspace closed on the desktop: back to home.
   useEffect(() => {
-    if (!workspaces.length || (sel.projectPath && workspaces.some((w) => w.projectPath === sel.projectPath))) return;
-    const pick = workspaces.find((w) => w.state === 'active') ?? workspaces[0];
-    // Functional: following the desktop's focus (above) may have just picked one.
-    setSel((s) => (s.projectPath && workspaces.some((w) => w.projectPath === s.projectPath)
-      ? s
-      : { projectPath: pick.projectPath, chatId: conn ? lastChatFor(conn.machineId, pick.projectPath) : null }));
-  }, [workspaces, sel.projectPath, conn]);
+    if (!workspaces.length || !sel.projectPath || workspaces.some((w) => w.projectPath === sel.projectPath)) return;
+    setSel({ projectPath: null, chatId: null });
+    setHome(true);
+  }, [workspaces, sel.projectPath]);
 
-  // The workspace's chat list (chats.subscribe, newest first in the drawer).
-  const projectPath = sel.projectPath;
+  // Every open workspace's chat list (chats.subscribe; pushed on any row change).
+  const wsKey = workspaces.map((w) => w.projectPath).join('\n');
   useEffect(() => {
-    setChats(null);
-    if (!conn || !projectPath) return;
+    if (!conn || !wsKey) return;
+    const paths = wsKey.split('\n');
     const set = (f: { projectPath?: unknown; chats?: unknown }) => {
-      if (f.projectPath === projectPath && Array.isArray(f.chats)) setChats(f.chats as ChatMeta[]);
+      const pp = f.projectPath;
+      if (typeof pp === 'string' && paths.includes(pp) && Array.isArray(f.chats)) {
+        const chats = f.chats as ChatMeta[];
+        setChatsByWs((m) => ({ ...m, [pp]: chats }));
+      }
     };
     const offA = conn.client.on('chats.list.result', set);
     const offB = conn.client.on('chats.changed', set);
-    conn.client.send({ type: 'chats.subscribe', projectPath, reqId: `chats-${newClientId()}` });
+    for (const projectPath of paths) conn.client.send({ type: 'chats.subscribe', projectPath, reqId: `chats-${newClientId()}` });
     return () => {
       offA(); offB();
-      conn.client.send({ type: 'chats.unsubscribe', projectPath });
+      for (const projectPath of paths) conn.client.send({ type: 'chats.unsubscribe', projectPath });
     };
-  }, [conn, projectPath]);
+  }, [conn, wsKey]);
 
   useEffect(() => {
     if (!conn) return;
@@ -308,19 +319,34 @@ export function PhoneApp() {
   }, [conn, sel]);
 
   const chatState = useMirroredState(conn?.mirror ?? NO_MIRROR, sel.chatId);
-  const meta = chats?.find((c) => c.chatId === sel.chatId) ?? null;
+  const meta = (sel.projectPath ? chatsByWs[sel.projectPath] : null)?.find((c) => c.chatId === sel.chatId) ?? null;
   const workspace = workspaces.find((w) => w.projectPath === sel.projectPath) ?? null;
   const status = sel.chatId ? chatStatus(chatState, meta) : null;
   const firstUser = chatState?.messages.find((m) => m.role === 'user')?.content;
   const chatTitle = !sel.chatId ? null
     : meta?.title?.trim() || (typeof firstUser === 'string' && firstUser.trim() ? firstUser.trim().slice(0, 40) : (meta ? chatTitleOf(meta) : 'New chat'));
 
-  const newChat = useCallback(() => {
-    if (!sel.projectPath) { setDrawerOpen(true); return; }
-    // The desktop's chat ids are crypto.randomUUID(); the first send creates the log.
-    setSel((s) => ({ ...s, chatId: newClientId() }));
-    setDrawerOpen(false);
-  }, [sel.projectPath]);
+  const openChat = useCallback((projectPath: string, chatId: string) => {
+    setSel({ projectPath, chatId });
+    setSwitcherOpen(false);
+    setHome(false);
+  }, []);
+  // The desktop's chat ids are crypto.randomUUID(); the first send creates the log.
+  const newChat = useCallback((projectPath: string) => openChat(projectPath, newClientId()), [openChat]);
+
+  const openChatInfo: OpenChat = { chatId: showHome ? null : sel.chatId, status, title: chatTitle };
+  let desktopNow: DesktopNow | null = null;
+  if (focus?.chatId) {
+    const m = chatsByWs[focus.projectPath]?.find((c) => c.chatId === focus.chatId) ?? null;
+    const isOpen = !showHome && focus.chatId === sel.chatId;
+    desktopNow = {
+      projectPath: focus.projectPath,
+      chatId: focus.chatId,
+      workspaceName: workspaces.find((w) => w.projectPath === focus.projectPath)?.name ?? null,
+      title: isOpen && chatTitle ? chatTitle : m ? chatTitleOf(m) : 'New chat',
+      status: isOpen && status ? status : chatStatus(null, m),
+    };
+  }
 
   const onPaired = useCallback((m: Machine) => {
     // A re-paired machine must drop its connection with the refused token.
@@ -372,59 +398,61 @@ export function PhoneApp() {
     );
   }
 
+  const sw = backSwipe.swipe;
+  const toMachines = () => { machinesApi.refresh(); setView('machines'); };
   return (
     <div className="sai-phone-app" ref={setShellEl}>
-      <Header
-        workspaceName={workspace?.name ?? null}
-        chatTitle={chatTitle}
-        status={status}
-        onMenu={() => setDrawerOpen(true)}
-        onNewChat={sel.projectPath ? newChat : undefined}
-        onMachines={() => { machinesApi.refresh(); setView('machines'); }}
-      />
-      {connState === 'catching_up' && <div className="sai-phone-pill" role="status">Catching up…</div>}
-      <main className="sai-phone-main">
-        {sel.chatId && sel.projectPath ? (
-          <ChatHost
-            key={`${conn.machineId}:${sel.chatId}`}
-            chatId={sel.chatId}
-            projectPath={meta?.projectPath ?? sel.projectPath}
-            conn={conn}
-            appSettings={settings}
+      {(showHome || sw) && (
+        <Home
+          machineLabel={machine?.label ?? 'Desktop'}
+          workspaces={workspaces}
+          chatsByWs={chatsByWs}
+          desktop={desktopNow}
+          open={openChatInfo}
+          onOpenChat={openChat}
+          onNewChat={newChat}
+          onMachines={toMachines}
+          underneath={!showHome}
+        />
+      )}
+      {!showHome && sel.chatId && sel.projectPath && (
+        <div
+          className={`sai-phone-chatview${sw ? (sw.settling ? ' is-settling' : ' is-dragging') : ''}`}
+          style={sw ? { transform: `translateX(${sw.x + sw.width}px)` } : undefined}
+          onTransitionEnd={(e) => { if (e.target === e.currentTarget && sw?.settling) backSwipe.settled(); }}
+        >
+          <Header
+            workspaceName={workspace?.name ?? null}
+            chatTitle={chatTitle}
+            status={status}
+            onBack={() => { setSwitcherOpen(false); setHome(true); }}
+            onSwitch={() => setSwitcherOpen(true)}
+            onNewChat={() => newChat(sel.projectPath!)}
+            onMachines={toMachines}
           />
-        ) : (
-          <div className="sai-phone-placeholder">
-            <SaiLogo mode="static" size={44} className="sai-phone-placeholder-logo" />
-            <p>{sel.projectPath ? 'Pick a chat or start a new one.' : 'Pick a workspace.'}</p>
-            <button type="button" className="sai-phone-primary" onClick={() => setDrawerOpen(true)}>Open chats</button>
-            {sel.projectPath && <button type="button" className="sai-phone-secondary" onClick={newChat}>New chat</button>}
-          </div>
-        )}
-      </main>
-      <Drawer
-        open={drawerOpen}
-        onClose={() => setDrawerOpen(false)}
-        machines={machinesApi.machines}
-        activeMachineId={conn.machineId}
-        onPickMachine={(m) => { if (m.id !== conn.machineId) void openMachine(m); else setDrawerOpen(false); }}
-        onManageMachines={() => { setDrawerOpen(false); machinesApi.refresh(); setView('machines'); }}
-        workspaces={workspaces}
-        activeProjectPath={sel.projectPath}
-        // Each workspace keeps the chat it last had open; its chat list shows in the drawer.
-        onPickWorkspace={(p) => setSel((s) => (s.projectPath === p ? s : { projectPath: p, chatId: lastChatFor(conn.machineId, p) }))}
-        chats={chats}
-        activeChatId={sel.chatId}
-        activeStatus={status}
-        activeTitle={chatTitle}
-        onPickChat={(chatId) => { setSel((s) => ({ ...s, chatId })); setDrawerOpen(false); }}
-        desktopFocus={focus && focus.chatId && !(focus.projectPath === sel.projectPath && focus.chatId === sel.chatId)
-          ? { workspaceName: workspaces.find((w) => w.projectPath === focus.projectPath)?.name ?? null }
-          : null}
-        onOpenDesktopFocus={() => { if (focus) setSel({ projectPath: focus.projectPath, chatId: focus.chatId }); setDrawerOpen(false); }}
-        onNewChat={newChat}
-        swipe={drawerSwipe.swipe}
-        onSwipeSettled={drawerSwipe.settled}
-      />
+          {connState === 'catching_up' && <div className="sai-phone-pill" role="status">Catching up…</div>}
+          <main className="sai-phone-main">
+            <ChatHost
+              key={`${conn.machineId}:${sel.chatId}`}
+              chatId={sel.chatId}
+              projectPath={meta?.projectPath ?? sel.projectPath}
+              conn={conn}
+              appSettings={settings}
+            />
+          </main>
+        </div>
+      )}
+      {switcherOpen && !showHome && (
+        <Switcher
+          workspaces={workspaces}
+          chatsByWs={chatsByWs}
+          activeProjectPath={sel.projectPath}
+          open={openChatInfo}
+          onPick={openChat}
+          onNewChat={newChat}
+          onClose={() => setSwitcherOpen(false)}
+        />
+      )}
       <Toasts />
     </div>
   );

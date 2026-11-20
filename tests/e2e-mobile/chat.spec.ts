@@ -17,17 +17,15 @@ async function pair(page: Page): Promise<void> {
   await page.goto('/');
   await page.getByLabel('Pairing link').fill(url);
   await page.getByRole('button', { name: 'Pair', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Open menu' })).toBeVisible();
+  await expect(page.getByRole('navigation', { name: 'Workspaces and chats' })).toBeVisible();
 }
 
-/** Opens the drawer, picks the demo workspace and starts a new chat; returns its id. */
+/** From home, starts a new chat in the demo workspace; returns its id. */
 async function newChat(page: Page): Promise<string> {
-  await page.getByRole('button', { name: 'Open menu' }).click();
-  const drawer = page.getByRole('navigation', { name: 'Chats and workspaces' });
-  await expect(drawer).toBeVisible();
-  await drawer.getByTestId('workspace-row').filter({ hasText: 'demo' }).click();
-  await drawer.getByRole('button', { name: 'New chat', exact: true }).click();
-  await expect(drawer).toBeHidden();
+  const home = page.getByRole('navigation', { name: 'Workspaces and chats' });
+  await expect(home).toBeVisible();
+  await home.getByRole('button', { name: 'New chat in demo' }).click();
+  await expect(home).toHaveCount(0);
   const host = page.getByTestId('chat-host');
   await expect(host).toBeVisible();
   return (await host.getAttribute('data-chat-id'))!;
@@ -61,9 +59,9 @@ test('pair, open workspace, send, stream, stop', async ({ page }) => {
   await page.waitForTimeout(600);
   await expect(page.getByText('All done.')).toHaveCount(0);
 
-  await page.getByRole('button', { name: 'Open menu' }).click();
-  await expect(page.getByRole('navigation', { name: 'Chats and workspaces' })).toBeVisible();
-  await page.screenshot({ path: path.join(SHOTS, 'task-9-drawer.png'), animations: 'disabled' });
+  await page.getByRole('button', { name: 'Back to chats' }).click();
+  await expect(page.getByRole('navigation', { name: 'Workspaces and chats' })).toBeVisible();
+  await page.screenshot({ path: path.join(SHOTS, 'task-9-home.png'), animations: 'disabled' });
 });
 
 test('phone-created chat appears in the list', async ({ page }) => {
@@ -75,10 +73,15 @@ test('phone-created chat appears in the list', async ({ page }) => {
   // The desktop's log has it under the workspace...
   await expect.poll(async () => (await control<{ chats: Array<{ chatId: string }> }>('/chats')).chats.map((c) => c.chatId))
     .toContain(chatId);
-  // ...and the drawer lists it from chats.subscribe.
-  await page.getByRole('button', { name: 'Open menu' }).click();
-  const drawer = page.getByRole('navigation', { name: 'Chats and workspaces' });
-  await expect(drawer.locator(`[data-testid="chat-row"][data-chat-id="${chatId}"]`)).toBeVisible();
+  // ...the quick switcher lists it from chats.subscribe...
+  await page.getByTestId('header-title').click();
+  const sheet = page.getByRole('dialog', { name: 'Switch chat' });
+  await expect(sheet.locator(`[data-testid="chat-row"][data-chat-id="${chatId}"]`)).toBeVisible();
+  // ...and so does home.
+  await sheet.page().mouse.click(200, 60); // the backdrop closes the sheet
+  await expect(sheet).toHaveCount(0);
+  await page.getByRole('button', { name: 'Back to chats' }).click();
+  await expect(page.getByRole('navigation', { name: 'Workspaces and chats' }).locator(`[data-testid="chat-row"][data-chat-id="${chatId}"]`)).toBeVisible();
 });
 
 test('composer stays above the keyboard', async ({ page }) => {
@@ -100,7 +103,7 @@ test('composer stays above the keyboard', async ({ page }) => {
     const b = await box.boundingBox();
     return b ? b.y + b.height : Infinity;
   }).toBeLessThanOrEqual(keyboardTop);
-  await expect(page.getByRole('button', { name: 'Open menu' })).toBeInViewport();
+  await expect(page.getByRole('button', { name: 'Back to chats' })).toBeInViewport();
 });
 
 test('follows the reply to the bottom through tool cards', async ({ page }) => {
@@ -148,7 +151,7 @@ test('composer text is 16px (iOS zooms smaller focused inputs)', async ({ page }
   await expect(page.getByTitle('Send')).toHaveCSS('height', '44px');
 });
 
-test('swiping from the left edge opens the drawer; swiping it left closes it', async ({ page }) => {
+test('swiping right from the left edge goes back home; a short swipe snaps back', async ({ page }) => {
   await pair(page);
   await newChat(page);
   const swipe = (xs: number[]) => page.evaluate((xs) => {
@@ -164,13 +167,15 @@ test('swiping from the left edge opens the drawer; swiping it left closes it', a
     for (const x of xs.slice(1)) at('touchmove', x);
     at('touchend', xs[xs.length - 1]);
   }, xs);
-  const drawer = page.getByRole('navigation', { name: 'Chats and workspaces' });
-  await expect(drawer).toHaveCount(0);
-  await swipe([4, 60, 140, 220, 260]);
-  await expect(drawer).toBeVisible();
-  await expect.poll(async () => (await drawer.boundingBox())?.x).toBe(0);
-  await swipe([250, 180, 100, 40]);
-  await expect(drawer).toHaveCount(0);
+  const home = page.getByRole('navigation', { name: 'Workspaces and chats' });
+  const host = page.getByTestId('chat-host');
+  await expect(home).toHaveCount(0);
+  await swipe([4, 30, 60]); // short and slow: stays in the chat
+  await expect.poll(async () => (await page.locator('.sai-phone-chatview').boundingBox())?.x).toBe(0);
+  await expect(home).toHaveCount(0);
+  await swipe([4, 60, 140, 220, 300]);
+  await expect(home).toBeVisible();
+  await expect(host).toHaveCount(0);
 });
 
 test('queued messages get Send now and Cancel; Send and Stop stay on screen', async ({ page }) => {

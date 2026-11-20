@@ -53,17 +53,16 @@ describe('PhoneApp', () => {
       });
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Open menu' }));
-    expect(await screen.findByText('Kept chat')).toBeTruthy();
+    // Home lists the workspace and its chats.
+    const home = () => screen.getByRole('navigation', { name: 'Workspaces and chats' });
+    await waitFor(() => expect(within(home()).getByText('Kept chat')).toBeTruthy());
 
     // Machines → pick the machine that is already connected.
-    fireEvent.click(screen.getByRole('button', { name: 'Manage machines…' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Machines' }));
     fireEvent.click(await screen.findByTestId(`machine-${m.id}`));
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Open menu' }));
-    const drawer = await screen.findByRole('navigation', { name: 'Chats and workspaces' });
-    expect(within(drawer).getByText('Kept chat')).toBeTruthy();
-    expect(within(drawer).getByText('proj')).toBeTruthy();
+    await waitFor(() => expect(within(home()).getByText('Kept chat')).toBeTruthy());
+    expect(within(home()).getByText('proj')).toBeTruthy();
     expect(FakeSocket.all).toHaveLength(1); // same connection, no reconnect
   });
   it("opens the desktop's focused workspace and chat, and follows it only when it moves", async () => {
@@ -87,8 +86,9 @@ describe('PhoneApp', () => {
     act(() => { last().recv(list('/b', 'desk-chat')); });
     expect(screen.getByTestId('chat-host').getAttribute('data-chat-id')).toBe(phoneChat);
 
-    // The drawer offers the desktop's chat back.
-    fireEvent.click(screen.getByRole('button', { name: 'Open menu' }));
+    // Home offers the desktop's chat back, pinned on top.
+    fireEvent.click(screen.getByRole('button', { name: 'Back to chats' }));
+    expect(screen.queryByTestId('chat-host')).toBeNull();
     fireEvent.click(await screen.findByTestId('desktop-focus'));
     expect(screen.getByTestId('chat-host').getAttribute('data-chat-id')).toBe('desk-chat');
 
@@ -97,46 +97,57 @@ describe('PhoneApp', () => {
     await waitFor(() => expect(screen.getByTestId('chat-host').getAttribute('data-chat-id')).toBe('other-chat'));
   });
 
-  it('lists the workspace chats first and keeps each workspace on its last chat', async () => {
+  it('home lists every workspace with its chats; the title switcher jumps between them', async () => {
     const m = await addMachine({ label: 'desk', baseUrl: 'http://desk:17830', deviceId: 'd1', token: 'tok' }, getNative());
     localStorage.setItem('sai.activeMachine.v1', m.id);
     render(<PhoneApp />);
     await waitFor(() => expect(FakeSocket.all.length).toBe(1));
     act(() => { last().open(); last().authOk(); });
     await waitFor(() => expect(sentOf('workspaces.subscribe').length).toBeGreaterThan(0));
-    act(() => {
-      last().recv({ type: 'workspaces.list.result', workspaces: [
-        { projectPath: '/a', name: 'alpha', kind: 'project', state: 'active' },
-        { projectPath: '/b', name: 'beta', kind: 'project', state: 'open' },
-      ] });
-    });
-    const chat = (chatId: string, projectPath: string, title: string) =>
-      ({ chatId, projectPath, title, createdAt: 1, updatedAt: 2, headSeq: 3, snapshotSeq: 0, provider: 'claude', openTurn: false });
+    const wsList = (paths: string[]) => ({ type: 'workspaces.changed', workspaces: [
+      { projectPath: '/a', name: 'alpha', kind: 'project', state: 'open' },
+      { projectPath: '/b', name: 'beta', kind: 'project', state: 'active' },
+    ].filter((w) => paths.includes(w.projectPath)) });
+    act(() => { last().recv(wsList(['/a', '/b'])); });
+    const chat = (chatId: string, projectPath: string, title: string, updatedAt = 2) =>
+      ({ chatId, projectPath, title, createdAt: 1, updatedAt, headSeq: 3, snapshotSeq: 0, provider: 'claude', openTurn: false });
     const answer = async (projectPath: string, chats: unknown[]) => {
       await waitFor(() => expect(sentOf('chats.subscribe').some((f) => f.projectPath === projectPath)).toBe(true));
       const sub = sentOf('chats.subscribe').filter((f) => f.projectPath === projectPath).at(-1)!;
       act(() => { last().recv({ type: 'chats.list.result', reqId: sub.reqId, chats }); });
     };
-    await answer('/a', [chat('a1', '/a', 'Alpha chat')]);
-
-    fireEvent.click(screen.getByRole('button', { name: 'Open menu' }));
-    const drawer = await screen.findByRole('navigation', { name: 'Chats and workspaces' });
-    // The chat list leads the drawer, above the workspace picker.
-    const sections = within(drawer).getAllByRole('heading').map((h) => h.textContent);
-    expect(sections[0]).toBe('Chats · alpha');
-    fireEvent.click(within(drawer).getByText('Alpha chat'));
-    await waitFor(() => expect(screen.getByTestId('header-title').textContent).toBe('alpha · Alpha chat'));
-
-    // Switch to beta: the drawer stays open on beta's chats.
-    fireEvent.click(screen.getByRole('button', { name: 'Open menu' }));
-    fireEvent.click(within(await screen.findByRole('navigation', { name: 'Chats and workspaces' })).getByText('beta'));
+    // Both workspaces subscribe at once.
+    await answer('/a', [chat('a1', '/a', 'Alpha chat'), ...[1, 2, 3, 4, 5].map((i) => chat(`a-old${i}`, '/a', `Old ${i}`, 1))]);
     await answer('/b', [chat('b1', '/b', 'Beta chat')]);
-    expect(await screen.findByText('Beta chat')).toBeTruthy();
-    expect(screen.getByTestId('header-title').textContent).toBe('beta');
 
-    // Back to alpha: its chat is open again.
-    fireEvent.click(within(screen.getByRole('navigation', { name: 'Chats and workspaces' })).getByText('alpha'));
-    await answer('/a', [chat('a1', '/a', 'Alpha chat')]);
+    // The desktop's workspace leads home; long lists fold after four rows.
+    const home = screen.getByRole('navigation', { name: 'Workspaces and chats' });
+    const sections = within(home).getAllByTestId('home-workspace');
+    expect(sections.map((x) => x.getAttribute('data-project'))).toEqual(['/b', '/a']);
+    expect(within(sections[1]).getAllByTestId('chat-row')).toHaveLength(4);
+    fireEvent.click(within(sections[1]).getByRole('button', { name: 'Show 2 more' }));
+    expect(within(sections[1]).getAllByTestId('chat-row')).toHaveLength(6);
+
+    fireEvent.click(within(home).getByText('Alpha chat'));
     await waitFor(() => expect(screen.getByTestId('header-title').textContent).toBe('alpha · Alpha chat'));
+
+    // Tap the title: the switcher starts on alpha; pick beta's chat.
+    fireEvent.click(screen.getByTestId('header-title'));
+    const sheet = screen.getByRole('dialog', { name: 'Switch chat' });
+    expect(within(sheet).getByRole('button', { name: 'alpha' }).getAttribute('aria-pressed')).toBe('true');
+    fireEvent.click(within(sheet).getByRole('button', { name: 'beta' }));
+    fireEvent.click(within(sheet).getByText('Beta chat'));
+    expect(screen.queryByRole('dialog', { name: 'Switch chat' })).toBeNull();
+    expect(screen.getByTestId('chat-host').getAttribute('data-chat-id')).toBe('b1');
+
+    // New chat from the switcher opens a fresh chat in the picked workspace.
+    fireEvent.click(screen.getByTestId('header-title'));
+    fireEvent.click(within(screen.getByRole('dialog', { name: 'Switch chat' })).getByRole('button', { name: 'New chat' }));
+    expect(screen.getByTestId('header-title').textContent).toBe('beta · New chat');
+
+    // Beta closes on the desktop while it's open: back to home.
+    act(() => { last().recv(wsList(['/a'])); });
+    await waitFor(() => expect(screen.queryByTestId('chat-host')).toBeNull());
+    expect(screen.getByRole('navigation', { name: 'Workspaces and chats' })).toBeTruthy();
   });
 });
