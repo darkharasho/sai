@@ -23,6 +23,8 @@ export interface RemoteWorkspace {
   status?: RemoteWorkspaceStatus;
   /** State for sorting / dimming in the picker. */
   state?: 'active' | 'open' | 'suspended' | 'recent';
+  /** The chat open in this workspace on the desktop. */
+  activeChatId?: string;
 }
 interface Pending {
   resolve: (v: unknown) => void;

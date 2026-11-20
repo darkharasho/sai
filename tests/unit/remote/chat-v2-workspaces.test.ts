@@ -74,6 +74,13 @@ describe('ChatV2 workspaces', () => {
     expect(frames.at(-1).workspaces).toEqual([W1]);
   });
 
+  it("keeps each row's desktop chat (activeChatId) and drops a malformed one", () => {
+    const reg = new WorkspaceRegistry();
+    reg.set([{ ...W1, activeChatId: 'c-7' }, { ...W2, activeChatId: 42 }]);
+    expect(reg.get()![0].activeChatId).toBe('c-7');
+    expect(reg.get()![1]).not.toHaveProperty('activeChatId');
+  });
+
   it('falls back once to the proxied list until the renderer has reported', async () => {
     const { v2, ws, frames, workspaces, listWorkspacesFallback } = mk({ fallback: async () => [W2] });
     await v2.handle(ws, { type: 'workspaces.subscribe', reqId: 1 });

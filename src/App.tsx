@@ -510,8 +510,14 @@ export default function App() {
       members?: { projectPath: string; name: string }[];
       status?: { busy?: boolean; streaming?: boolean; completed?: boolean; approval?: boolean; awaitingQuestion?: boolean };
       state?: 'active' | 'open' | 'suspended' | 'recent';
+      /** The chat open in this workspace on the desktop (the phone follows the active workspace's). */
+      activeChatId?: string;
     };
     const sai = (window as any).sai;
+    const chatOf = (projectPath: string) => {
+      const id = workspacesRef.current.get(projectPath)?.activeSession?.id;
+      return id ? { activeChatId: id } : {};
+    };
     const metaByPath = new Map<string, MetaWorkspaceListItem>();
     for (const m of metaWorkspaces) {
       if (m.syntheticRoot) metaByPath.set(m.syntheticRoot, m);
@@ -552,10 +558,11 @@ export default function App() {
           members: meta.projects.map((p) => ({ projectPath: p.path, name: p.linkName })),
           status: statusFor(w.projectPath),
           state,
+          ...chatOf(w.projectPath),
         });
       } else {
         const base = w.projectPath.split('/').filter(Boolean).pop() ?? w.projectPath;
-        out.push({ projectPath: w.projectPath, name: base, kind: 'project', status: statusFor(w.projectPath), state });
+        out.push({ projectPath: w.projectPath, name: base, kind: 'project', status: statusFor(w.projectPath), state, ...chatOf(w.projectPath) });
       }
     }
 

@@ -3,6 +3,8 @@
 //
 // Imported only after main.tsx has installed window.sai (the chat graph reads
 // settings at import time).
+import { ChevronLeft } from 'lucide-react';
+import SaiLogo from '../../../src/components/SaiLogo';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactDOM from 'react-dom/client';
 import { ErrorBoundary } from '../../../src/ErrorBoundary';
@@ -63,6 +65,23 @@ function readLastChats(): Record<string, Record<string, string>> {
 }
 
 /** The chat last open in this workspace (switching workspaces back returns to it). */
+/** machineId → the desktop focus (projectPath + chat) the phone last followed. */
+const FOLLOWED_KEY = 'sai.followedFocus.v1';
+function followedFocus(machineId: string): string | null {
+  try { const v = JSON.parse(localStorage.getItem(FOLLOWED_KEY) ?? '{}')?.[machineId]; return typeof v === 'string' ? v : null; } catch { return null; }
+}
+function rememberFollowed(machineId: string, key: string): void {
+  try {
+    const all = JSON.parse(localStorage.getItem(FOLLOWED_KEY) ?? '{}');
+    localStorage.setItem(FOLLOWED_KEY, JSON.stringify({ ...(all && typeof all === 'object' ? all : {}), [machineId]: key }));
+  } catch { /* storage full: follow again next time */ }
+}
+/** The workspace and chat focused on the desktop, if it reported one. */
+export function desktopFocus(workspaces: RemoteWorkspace[]): { projectPath: string; chatId: string | null } | null {
+  const w = workspaces.find((x) => x.state === 'active');
+  return w ? { projectPath: w.projectPath, chatId: w.activeChatId ?? null } : null;
+}
+
 function lastChatFor(machineId: string, projectPath: string): string | null {
   const id = readLastChats()[machineId]?.[projectPath];
   return typeof id === 'string' ? id : null;
@@ -239,11 +258,27 @@ export function PhoneApp() {
     return () => { offA(); offB(); };
   }, [conn]);
 
+  // Taking the desktop's conversation on the go: when the desktop's focus (its
+  // active workspace and the chat open there) differs from the one last
+  // followed, the phone opens it. Navigating on the phone sticks until the
+  // desktop's focus moves again.
+  const focus = desktopFocus(workspaces);
+  const focusKey = focus ? `${focus.projectPath}\n${focus.chatId ?? ''}` : null;
+  useEffect(() => {
+    if (!conn || !focus || !focusKey || followedFocus(conn.machineId) === focusKey) return;
+    rememberFollowed(conn.machineId, focusKey);
+    setSel({ projectPath: focus.projectPath, chatId: focus.chatId ?? lastChatFor(conn.machineId, focus.projectPath) });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conn, focusKey]);
+
   // Default workspace: the selected one if still open, else the desktop's active one.
   useEffect(() => {
     if (!workspaces.length || (sel.projectPath && workspaces.some((w) => w.projectPath === sel.projectPath))) return;
     const pick = workspaces.find((w) => w.state === 'active') ?? workspaces[0];
-    setSel({ projectPath: pick.projectPath, chatId: conn ? lastChatFor(conn.machineId, pick.projectPath) : null });
+    // Functional: following the desktop's focus (above) may have just picked one.
+    setSel((s) => (s.projectPath && workspaces.some((w) => w.projectPath === s.projectPath)
+      ? s
+      : { projectPath: pick.projectPath, chatId: conn ? lastChatFor(conn.machineId, pick.projectPath) : null }));
   }, [workspaces, sel.projectPath, conn]);
 
   // The workspace's chat list (chats.subscribe, newest first in the drawer).
@@ -319,7 +354,7 @@ export function PhoneApp() {
   if (view === 'machines' || !conn) {
     return (
       <div className="sai-phone-app sai-phone-scroll">
-        {conn && <button type="button" className="sai-phone-back" onClick={() => setView('chat')}>‹ Back</button>}
+        {conn && <button type="button" className="sai-phone-back" onClick={() => setView('chat')}><ChevronLeft size={20} aria-hidden="true" />Back</button>}
         <MachineList
           machines={machinesApi.machines}
           reach={machinesApi.reach}
@@ -341,7 +376,7 @@ export function PhoneApp() {
         chatTitle={chatTitle}
         status={status}
         onMenu={() => setDrawerOpen(true)}
-        onNewChat={newChat}
+        onNewChat={sel.projectPath ? newChat : undefined}
         onMachines={() => { machinesApi.refresh(); setView('machines'); }}
       />
       {connState === 'catching_up' && <div className="sai-phone-pill" role="status">Catching up…</div>}
@@ -356,6 +391,7 @@ export function PhoneApp() {
           />
         ) : (
           <div className="sai-phone-placeholder">
+            <SaiLogo mode="static" size={44} className="sai-phone-placeholder-logo" />
             <p>{sel.projectPath ? 'Pick a chat or start a new one.' : 'Pick a workspace.'}</p>
             <button type="button" className="sai-phone-primary" onClick={() => setDrawerOpen(true)}>Open chats</button>
             {sel.projectPath && <button type="button" className="sai-phone-secondary" onClick={newChat}>New chat</button>}
@@ -378,6 +414,10 @@ export function PhoneApp() {
         activeStatus={status}
         activeTitle={chatTitle}
         onPickChat={(chatId) => { setSel((s) => ({ ...s, chatId })); setDrawerOpen(false); }}
+        desktopFocus={focus && focus.chatId && !(focus.projectPath === sel.projectPath && focus.chatId === sel.chatId)
+          ? { workspaceName: workspaces.find((w) => w.projectPath === focus.projectPath)?.name ?? null }
+          : null}
+        onOpenDesktopFocus={() => { if (focus) setSel({ projectPath: focus.projectPath, chatId: focus.chatId }); setDrawerOpen(false); }}
         onNewChat={newChat}
       />
       <Toasts />

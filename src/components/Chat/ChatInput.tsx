@@ -4,6 +4,7 @@ import { resizeImageToJpegDataUrl } from '../../lib/imageResize';
 import type { PendingApproval, PendingSudoPrompt, TerminalTab, ChatMessage as ChatMessageType, QueuedMessage, MetaWorkspaceRuntime, EffortLevel, CodexEffort, CodexModelOption, ModelChoice, AIProvider } from '../../types';
 import TodoProgress, { type Todo } from './TodoProgress';
 import MessageQueue from './MessageQueue';
+import { providerIconUrl } from '../../lib/providerIcons';
 import LoadGuardPill from './LoadGuardPill';
 import type { LoadGuardPublicState } from '../../../electron/services/loadGuard';
 import { basename } from '../../utils/pathUtils';
@@ -1105,12 +1106,12 @@ export default function ChatInput({ projectPath, onSend, overlayControl, onBefor
           <div className="chat-placeholder" onClick={() => textareaRef.current?.focus()}>
             {!isStreaming && (
               <span className="chat-placeholder-icon" style={{
-                maskImage: `url('${aiProvider === 'codex' ? 'svg/codex.svg' : aiProvider === 'gemini' ? 'svg/antigravity.svg' : aiProvider === 'kimi' ? 'svg/kimi.svg' : 'svg/claude.svg'}')`,
-                WebkitMaskImage: `url('${aiProvider === 'codex' ? 'svg/codex.svg' : aiProvider === 'gemini' ? 'svg/antigravity.svg' : aiProvider === 'kimi' ? 'svg/kimi.svg' : 'svg/claude.svg'}')`,
+                maskImage: `url("${providerIconUrl(aiProvider)}")`,
+                WebkitMaskImage: `url("${providerIconUrl(aiProvider)}")`,
                 backgroundColor: 'var(--text-muted)',
               }} />
             )}
-            <span>{awaitingQuestion && aiProvider === 'claude' ? 'Type to answer, or use the buttons above…' : isStreaming ? 'Queue another message...' : sendsQueued ? 'Message… (queued until resume)' : `Message ${aiProvider === 'codex' ? 'Codex' : aiProvider === 'gemini' ? 'Antigravity' : aiProvider === 'kimi' ? 'Kimi' : 'Claude'}...`}</span>
+            <span>{awaitingQuestion && aiProvider === 'claude' ? 'Type to answer, or use the buttons above…' : isStreaming ? (aiProvider === 'claude' ? (isPhone() ? 'Message Claude mid-turn…' : 'Message Claude mid-turn… (Ctrl+Enter queues)') : 'Queue another message...') : sendsQueued ? 'Message… (queued until resume)' : `Message ${aiProvider === 'codex' ? 'Codex' : aiProvider === 'gemini' ? 'Antigravity' : aiProvider === 'kimi' ? 'Kimi' : 'Claude'}...`}</span>
           </div>
         )}
         <textarea

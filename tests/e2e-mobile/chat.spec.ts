@@ -26,7 +26,7 @@ async function newChat(page: Page): Promise<string> {
   const drawer = page.getByRole('navigation', { name: 'Chats and workspaces' });
   await expect(drawer).toBeVisible();
   await drawer.getByTestId('workspace-row').filter({ hasText: 'demo' }).click();
-  await drawer.getByRole('button', { name: '+ New chat' }).click();
+  await drawer.getByRole('button', { name: 'New chat', exact: true }).click();
   await expect(drawer).toBeHidden();
   const host = page.getByTestId('chat-host');
   await expect(host).toBeVisible();

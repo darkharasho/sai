@@ -1,4 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { ScanLine } from 'lucide-react';
+import SaiLogo from '../../../src/components/SaiLogo';
 import jsQR from 'jsqr';
 import { pair as defaultPair, parsePairUrl, PairError } from './pairing';
 import type { Machine } from './store';
@@ -115,35 +117,31 @@ export function PairScreen({ onPaired, onCancel, pairFn = defaultPair }: PairScr
     return () => { mounted.current = false; stopCamera(); };
   }, [stopCamera]);
 
-  const field: React.CSSProperties = { width: '100%', boxSizing: 'border-box', background: 'var(--surface-2)', color: 'var(--text)', border: '1px solid var(--surface-4)', borderRadius: 8, padding: 10, fontSize: 16 };
-
   return (
-    <div style={{ background: 'var(--surface-1)', color: 'var(--text)', minHeight: '100%', padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
-      <h1 style={{ fontSize: 'var(--text-xl)', margin: 0 }}>Pair a desktop</h1>
-      <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: 'var(--text-md)' }}>
+    <div className="sai-phone-page">
+      <div className="sai-phone-page-head">
+        <SaiLogo mode="static" size={26} />
+        <h1>Pair a desktop</h1>
+      </div>
+      <p className="sai-phone-page-lede">
         In SAI on your desktop open Settings, Remote, then scan the QR code. Tailscale must be on.
       </p>
       <video ref={videoRef} playsInline muted style={{ width: '100%', borderRadius: 10, background: 'var(--surface-0)', display: scanning ? 'block' : 'none' }} />
-      {!scanning && <button type="button" onClick={startCamera} disabled={busy}>Scan QR code</button>}
-      {scanning && <button type="button" onClick={stopCamera}>Stop camera</button>}
-      <label style={{ fontSize: 'var(--text-sm)', color: 'var(--text-secondary)' }}>
+      {!scanning && <button type="button" className="sai-phone-secondary" onClick={startCamera} disabled={busy}><ScanLine size={18} aria-hidden="true" />Scan QR code</button>}
+      {scanning && <button type="button" className="sai-phone-secondary" onClick={stopCamera}>Stop camera</button>}
+      <label className="sai-phone-field">
         Pairing link
-        <textarea aria-label="Pairing link" rows={2} value={text} onChange={(e) => setText(e.target.value)} placeholder="http://host:port/?code=..." style={field} />
+        <textarea aria-label="Pairing link" rows={2} value={text} onChange={(e) => setText(e.target.value)} placeholder="http://host:port/?code=..." />
       </label>
-      <label style={{ fontSize: 'var(--text-sm)', color: 'var(--text-secondary)' }}>
+      <label className="sai-phone-field">
         This device's name
-        <input aria-label="Device name" value={label} onChange={(e) => setLabel(e.target.value)} style={field} />
+        <input aria-label="Device name" value={label} onChange={(e) => setLabel(e.target.value)} />
       </label>
-      {error && <div role="alert" style={{ color: '#e5534b', fontSize: 'var(--text-md)' }}>{error}</div>}
-      <button
-        type="button"
-        disabled={busy || !text.trim()}
-        onClick={() => void submit(text)}
-        style={{ padding: 14, border: 0, borderRadius: 10, background: 'var(--accent)', color: 'var(--surface-0)', fontSize: 'var(--text-lg)' }}
-      >
+      {error && <div role="alert" className="sai-phone-danger" style={{ fontSize: 'var(--text-md)' }}>{error}</div>}
+      <button type="button" className="sai-phone-primary" disabled={busy || !text.trim()} onClick={() => void submit(text)}>
         {busy ? 'Pairing…' : 'Pair'}
       </button>
-      {onCancel && <button type="button" onClick={onCancel}>Cancel</button>}
+      {onCancel && <button type="button" className="sai-phone-secondary" onClick={onCancel}>Cancel</button>}
     </div>
   );
 }
