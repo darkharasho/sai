@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Menu, MonitorSmartphone, MoreHorizontal, SquarePen } from 'lucide-react';
+import { ChevronDown, ChevronLeft, MonitorSmartphone, MoreHorizontal, SquarePen } from 'lucide-react';
 import type { ChatMeta, ChatState } from '../../../src/lib/chat/types';
 
 export type ChatStatus = 'streaming' | 'waiting' | 'approval' | 'done';
@@ -23,13 +23,16 @@ export interface HeaderProps {
   workspaceName: string | null;
   chatTitle: string | null;
   status: ChatStatus | null;
-  onMenu(): void;
+  /** Back to home (the workspace and chat list). */
+  onBack(): void;
+  /** Tap the title: the quick switcher. */
+  onSwitch(): void;
   /** Absent until a workspace is picked. */
   onNewChat?: () => void;
   onMachines(): void;
 }
 
-export function Header({ workspaceName, chatTitle, status, onMenu, onNewChat, onMachines }: HeaderProps) {
+export function Header({ workspaceName, chatTitle, status, onBack, onSwitch, onNewChat, onMachines }: HeaderProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -41,16 +44,19 @@ export function Header({ workspaceName, chatTitle, status, onMenu, onNewChat, on
 
   return (
     <header className="sai-phone-header">
-      <button type="button" className="sai-phone-icon-btn" aria-label="Open menu" onClick={onMenu}><Menu size={22} /></button>
-      <div className="sai-phone-title" data-testid="header-title">
-        {workspaceName && chatTitle ? (
-          <>
-            <span className="sai-phone-title-ws">{workspaceName}</span>
-            <span className="sai-phone-title-sep"> · </span>
-            <span>{chatTitle}</span>
-          </>
-        ) : (workspaceName || chatTitle || 'SAI')}
-      </div>
+      <button type="button" className="sai-phone-icon-btn" aria-label="Back to chats" onClick={onBack}><ChevronLeft size={24} /></button>
+      <button type="button" className="sai-phone-title sai-phone-title-btn" data-testid="header-title" aria-haspopup="dialog" onClick={onSwitch}>
+        <span className="sai-phone-title-text">
+          {workspaceName && chatTitle ? (
+            <>
+              <span className="sai-phone-title-ws">{workspaceName}</span>
+              <span className="sai-phone-title-sep"> · </span>
+              <span>{chatTitle}</span>
+            </>
+          ) : (workspaceName || chatTitle || 'SAI')}
+        </span>
+        <ChevronDown size={16} className="sai-phone-title-caret" aria-hidden="true" />
+      </button>
       {status && (
         <span
           className={`sai-phone-dot sai-phone-dot-${status}`}

@@ -1,6 +1,6 @@
-// Swipe gestures for the phone drawer: drag from the left edge to pull it
-// open, drag it back left to close. The drawer follows the finger; on release
-// it settles open or closed by distance or flick speed.
+// Edge swipe: drag from the left edge to pull a panel in from the left (the
+// phone's back-to-home gesture), drag it back left to close. The panel follows
+// the finger; on release it settles open or closed by distance or flick speed.
 import { useEffect, useRef, useState } from 'react';
 
 /** Touches starting this close to the left edge can pull the drawer open. */
@@ -33,8 +33,11 @@ export function useDrawerSwipe(
   root: HTMLElement | null,
   open: boolean,
   setOpen: (open: boolean) => void,
-  enabled = true,
+  opts: { enabled?: boolean; width?: () => number; layer?: string } = {},
 ): { swipe: DrawerSwipe | null; settled(): void } {
+  const { enabled = true, layer = '.sai-phone-drawer-layer' } = opts;
+  const widthRef = useRef(opts.width ?? drawerWidth);
+  widthRef.current = opts.width ?? drawerWidth;
   const [swipe, setSwipe] = useState<DrawerSwipe | null>(null);
   const openRef = useRef(open);
   openRef.current = open;
@@ -65,8 +68,8 @@ export function useDrawerSwipe(
       const p = e.touches[0];
       const fromOpen = pending ?? openRef.current;
       if (!fromOpen && p.clientX > EDGE_PX) { t = null; return; }
-      if (fromOpen && !(e.target instanceof Element && e.target.closest('.sai-phone-drawer-layer'))) { t = null; return; }
-      t = { startX: p.clientX, startY: p.clientY, fromOpen, locked: false, lastX: p.clientX, lastT: e.timeStamp, v: 0, width: drawerWidth() };
+      if (fromOpen && !(e.target instanceof Element && e.target.closest(layer))) { t = null; return; }
+      t = { startX: p.clientX, startY: p.clientY, fromOpen, locked: false, lastX: p.clientX, lastT: e.timeStamp, v: 0, width: widthRef.current() };
     };
 
     const onMove = (e: TouchEvent) => {
@@ -113,7 +116,7 @@ export function useDrawerSwipe(
       root.removeEventListener('touchend', onEnd);
       root.removeEventListener('touchcancel', onEnd);
     };
-  }, [root, enabled]);
+  }, [root, enabled, layer]);
 
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
 
