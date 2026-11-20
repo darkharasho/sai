@@ -1,10 +1,11 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import { Folder, Monitor, MonitorUp, Plus, Settings2 } from 'lucide-react';
 import SaiLogo from '../../../src/components/SaiLogo';
 import type { ChatMeta } from '../../../src/lib/chat/types';
 import type { RemoteWorkspace } from '../../../electron/services/remote/renderer-proxy';
 import type { Machine } from '../machines/store';
 import { chatStatus, type ChatStatus } from './Header';
+import type { DrawerSwipe } from './drawerSwipe';
 
 export interface DrawerProps {
   open: boolean;
@@ -27,6 +28,10 @@ export interface DrawerProps {
   /** Set when the desktop has a chat open that the phone isn't showing. */
   desktopFocus?: { workspaceName: string | null } | null;
   onOpenDesktopFocus?(): void;
+  /** Live position while a swipe drags or settles the drawer. */
+  swipe?: DrawerSwipe | null;
+  /** The settle transition finished. */
+  onSwipeSettled?(): void;
 }
 
 export function chatTitleOf(meta: Pick<ChatMeta, 'title'> | null | undefined): string {
@@ -42,13 +47,28 @@ function relTime(ms: number): string {
 }
 
 export function Drawer(p: DrawerProps) {
-  if (!p.open) return null;
+  // Once a swipe has placed the drawer, the slide-in animation must not replay
+  // (dropping the swipe class would restart it from off-screen).
+  const swiped = useRef(false);
+  const sw = p.swipe ?? null;
+  if (!p.open && !sw) { swiped.current = false; return null; }
+  if (sw) swiped.current = true;
   const chats = p.chats ? [...p.chats].sort((a, b) => b.updatedAt - a.updatedAt) : null;
   const workspaceName = p.workspaces.find((w) => w.projectPath === p.activeProjectPath)?.name ?? null;
   return (
-    <div className="sai-phone-drawer-layer">
-      <div className="sai-phone-backdrop" onClick={p.onClose} aria-hidden="true" />
-      <nav className="sai-phone-drawer" aria-label="Chats and workspaces">
+    <div className={`sai-phone-drawer-layer${sw ? (sw.settling ? ' is-settling' : ' is-dragging') : ''}${swiped.current ? ' is-swiped' : ''}`}>
+      <div
+        className="sai-phone-backdrop"
+        onClick={p.onClose}
+        aria-hidden="true"
+        style={sw ? { opacity: (sw.x + sw.width) / sw.width } : undefined}
+      />
+      <nav
+        className="sai-phone-drawer"
+        aria-label="Chats and workspaces"
+        style={sw ? { transform: `translateX(${sw.x}px)` } : undefined}
+        onTransitionEnd={(e) => { if (e.target === e.currentTarget && sw?.settling) p.onSwipeSettled?.(); }}
+      >
         <div className="sai-phone-brand" aria-hidden="true">
           <SaiLogo mode="static" size={20} />
           <span>SAI</span>
