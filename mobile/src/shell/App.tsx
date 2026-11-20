@@ -28,6 +28,7 @@ import {
 } from './connection';
 import { ChatHost, useMirroredState } from './ChatHost';
 import { Drawer, chatTitleOf } from './Drawer';
+import { useDrawerSwipe } from './drawerSwipe';
 import { Header, chatStatus } from './Header';
 import { startLifecycle, syncStatusBar, trackViewport, useConnState } from './lifecycle';
 import { Toasts, showRepairToast, showToast, useConnectionToasts } from './Toasts';
@@ -129,6 +130,8 @@ export function PhoneApp() {
   const [conn, setConn] = useState<ActiveConnection | null>(getActive());
   const [settings, setSettings] = useState(getAppSettings());
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [shellEl, setShellEl] = useState<HTMLDivElement | null>(null);
+  const drawerSwipe = useDrawerSwipe(shellEl, drawerOpen, setDrawerOpen);
   const [workspaces, setWorkspaces] = useState<RemoteWorkspace[]>([]);
   const [chats, setChats] = useState<ChatMeta[] | null>(null);
   const [sel, setSel] = useState<Selection>({ projectPath: null, chatId: null });
@@ -370,7 +373,7 @@ export function PhoneApp() {
   }
 
   return (
-    <div className="sai-phone-app">
+    <div className="sai-phone-app" ref={setShellEl}>
       <Header
         workspaceName={workspace?.name ?? null}
         chatTitle={chatTitle}
@@ -419,6 +422,8 @@ export function PhoneApp() {
           : null}
         onOpenDesktopFocus={() => { if (focus) setSel({ projectPath: focus.projectPath, chatId: focus.chatId }); setDrawerOpen(false); }}
         onNewChat={newChat}
+        swipe={drawerSwipe.swipe}
+        onSwipeSettled={drawerSwipe.settled}
       />
       <Toasts />
     </div>

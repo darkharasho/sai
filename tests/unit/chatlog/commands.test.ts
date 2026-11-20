@@ -152,24 +152,34 @@ describe('ChatCommands', () => {
     expect(st.messages.map((m) => m.id)).toContain('u2'); // the bubble shows now
   });
 
-  it('a plain busy send still queues behind waiting items, while its own dispatch lands, and for other providers', async () => {
-    // Behind waiting items: keeps their order.
+  it('a plain send joins the turn even with explicitly queued items waiting', async () => {
     const a = mk();
     await a.cmds.run(send('u1', 'first'));
     startTurn(a.log);
     a.d.setBusy(true);
     await a.cmds.run(send('u2', 'queued'));
     await a.cmds.run(send('u3', 'plain', { queue: false }));
-    expect(a.d.send).toHaveBeenCalledTimes(1);
-    expect(a.store.state('c1')!.queue.map((q) => q.clientId)).toEqual(['u2', 'u3']);
+    expect(a.d.send).toHaveBeenCalledTimes(2);
+    expect((a.d.send as any).mock.calls[1][1].prompt).toBe('plain');
+    expect(a.store.state('c1')!.queue.map((q) => q.clientId)).toEqual(['u2']);
+  });
 
-    // Dispatched but no streaming_start yet: a second dispatch would race the first.
+  it('a plain send while the previous dispatch is landing waits, then joins the turn once it starts', async () => {
     const b = mk();
     await b.cmds.run(send('u1', 'first'));
     b.d.setBusy(true);
     await b.cmds.run(send('u2', 'plain', { queue: false }));
+    await b.cmds.run(send('u3', 'explicit'));
     expect(b.d.send).toHaveBeenCalledTimes(1);
-    expect(b.store.state('c1')!.queue.map((q) => q.clientId)).toEqual(['u2']);
+    expect(b.store.state('c1')!.queue.map((q) => q.clientId)).toEqual(['u2', 'u3']);
+    startTurn(b.log); // streaming_start → onTurnStarted
+    expect(b.d.send).toHaveBeenCalledTimes(2);
+    expect((b.d.send as any).mock.calls[1][1].prompt).toBe('plain');
+    expect(b.store.state('c1')!.queue.map((q) => q.clientId)).toEqual(['u3']); // explicit stays queued
+    expect(b.store.state('c1')!.messages.map((m) => m.id)).toContain('u2');
+  });
+
+  it('a plain busy send still queues for other providers', async () => {
 
     // Codex has no mid-turn input.
     const c = mk();

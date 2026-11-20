@@ -191,6 +191,16 @@ html[data-sai-phone] body {
 }
 @keyframes sai-phone-slide { from { transform: translateX(-100%); } }
 @media (prefers-reduced-motion: reduce) { .sai-phone-drawer { animation: none; } }
+/* Swipe: the drawer follows the finger, then settles with a short transition. */
+.sai-phone-drawer-layer.is-swiped .sai-phone-drawer { animation: none; }
+.sai-phone-drawer-layer.is-dragging .sai-phone-drawer,
+.sai-phone-drawer-layer.is-dragging .sai-phone-backdrop { transition: none; }
+.sai-phone-drawer-layer.is-settling .sai-phone-drawer { transition: transform 0.16s ease-out; }
+.sai-phone-drawer-layer.is-settling .sai-phone-backdrop { transition: opacity 0.16s ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  .sai-phone-drawer-layer.is-settling .sai-phone-drawer,
+  .sai-phone-drawer-layer.is-settling .sai-phone-backdrop { transition: none; }
+}
 .sai-phone-drawer section + section { margin-top: 18px; }
 .sai-phone-brand {
   display: flex;

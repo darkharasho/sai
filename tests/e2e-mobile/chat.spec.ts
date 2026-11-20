@@ -147,3 +147,53 @@ test('composer text is 16px (iOS zooms smaller focused inputs)', async ({ page }
   expect(fs).toBe('16px');
   await expect(page.getByTitle('Send')).toHaveCSS('height', '44px');
 });
+
+test('swiping from the left edge opens the drawer; swiping it left closes it', async ({ page }) => {
+  await pair(page);
+  await newChat(page);
+  const swipe = (xs: number[]) => page.evaluate((xs) => {
+    let target: Element = document.elementFromPoint(xs[0], 400)!;
+    const at = (type: string, x: number) => {
+      const t = new Touch({ identifier: 1, target, clientX: x, clientY: 400 });
+      target.dispatchEvent(new TouchEvent(type, {
+        bubbles: true, cancelable: true,
+        touches: type === 'touchend' ? [] : [t], changedTouches: [t],
+      }));
+    };
+    at('touchstart', xs[0]);
+    for (const x of xs.slice(1)) at('touchmove', x);
+    at('touchend', xs[xs.length - 1]);
+  }, xs);
+  const drawer = page.getByRole('navigation', { name: 'Chats and workspaces' });
+  await expect(drawer).toHaveCount(0);
+  await swipe([4, 60, 140, 220, 260]);
+  await expect(drawer).toBeVisible();
+  await expect.poll(async () => (await drawer.boundingBox())?.x).toBe(0);
+  await swipe([250, 180, 100, 40]);
+  await expect(drawer).toHaveCount(0);
+});
+
+test('queued messages get Send now and Cancel; Send and Stop stay on screen', async ({ page }) => {
+  await pair(page);
+  const chatId = await newChat(page);
+  await send(page, 'run some tools please');
+  await expect(page.locator('.stop-btn')).toBeVisible();
+  // The phone has no queue key; queue as the desktop's Ctrl+Enter would.
+  await page.evaluate(async (chatId) => {
+    const sai = (window as any).sai;
+    for (const text of ['first queued follow-up message that is fairly long', 'second queued one']) {
+      await sai.chatlog.command({ kind: 'send', chatId, clientId: `q-${text.length}`, text, origin: 'remote', projectPath: '', queue: true });
+    }
+  }, chatId);
+  const strip = page.getByTestId('queue-strip');
+  await expect(strip.getByTestId('queue-item')).toHaveCount(2);
+  await page.getByRole('textbox').fill('typing meanwhile');
+  for (const el of [page.locator('.stop-btn'), page.locator('.send-btn:not(.stop-btn)'), strip.getByRole('button', { name: 'Send now' }).first(), strip.getByRole('button', { name: 'Cancel queued message' }).first()]) {
+    await expect(el).toBeInViewport({ ratio: 1 });
+  }
+  await strip.getByRole('button', { name: 'Cancel queued message' }).nth(1).click();
+  await expect(strip.getByTestId('queue-item')).toHaveCount(1);
+  await strip.getByRole('button', { name: 'Send now' }).click();
+  await expect(page.getByTestId('queue-strip')).toHaveCount(0);
+  await expect(page.getByText('Echo: first queued follow-up message that is fairly long')).toBeVisible({ timeout: 15000 });
+});
