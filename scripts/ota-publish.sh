@@ -54,7 +54,11 @@ if [ "$(git show "$tag:package.json" | plugins)" != "$(plugins < package.json)" 
   diff <(git show "$tag:package.json" | plugins | python3 -m json.tool) <(plugins < package.json | python3 -m json.tool) >&2 || true
   exit 1
 fi
-git fetch -q --shallow-since="$(git log -1 --format=%cI "$tag")" origin 2>/dev/null || true
+# A shallow CI checkout needs the history back to the tag to diff against it; never deepen or
+# shallow-ify a full clone.
+if [ "$(git rev-parse --is-shallow-repository)" = true ]; then
+  git fetch -q --shallow-since="$(git log -1 --format=%cI "$tag")" origin 2>/dev/null || true
+fi
 # shellcheck disable=SC2086
 if ! git diff --quiet "$tag" HEAD -- $paths; then
   echo "::error::Native files changed since $tag ($paths); ship a native release instead." >&2
