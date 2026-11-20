@@ -210,7 +210,8 @@ URL.
   distribution signing via an App Store Connect API key, upload to TestFlight. PRs touching the
   app only compile for the simulator.
 - Tag scheme separate from desktop releases (`mobile-v<version>`, as otto does) so the two never
-  trigger each other.
+  trigger each other. *Superseded: desktop and iOS now share `v*` tags and one version (README,
+  "Releasing").*
 - Live web-bundle updates via `@capgo/capacitor-updater` in manual mode, as duel-binder does.
   Where the bundles are hosted is the builder's call (GitHub Releases is fine).
 - Bundle id: reuse `com.project96.sai` from the Expo app.

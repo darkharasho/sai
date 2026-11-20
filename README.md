@@ -148,6 +148,18 @@ npm run build            # make sure it compiles
 
 ---
 
+## Releasing
+
+One version, one tag, desktop and iOS together.
+
+- **Full release:** push `v<x.y.z>` (the `/release` skill: bumps `package.json`, writes the notes into a draft release, pushes the tag). `release.yml` builds Linux, Windows and macOS and publishes the release, which installed desktops update to. `ios.yml` builds the iOS app at the same version, uploads it to TestFlight, tags it `native/ios/<version>+<build>` and submits it for App Store review, pulling an older version still waiting. If the submission fails it's a warning; `submit.yml` shows the status and submits by hand.
+- **Phones between releases:** web-only changes go out over the air with `gh workflow run ota.yml`. It updates the newest build in TestFlight and the version the App Store has live, and refuses if Capacitor plugins, `mobile/ios` or `capacitor.config.ts` changed since that build; those need a full release.
+- **Desktop between releases:** `gh workflow run release.yml -f desktop_release=<next x.y.z>` builds only the desktop apps at that version and publishes them as the latest release, so desktops catch up with what phones got over the air. No iOS build. For hand-written notes, make the draft release `v<x.y.z>` first. The next full release takes a later version.
+
+Versions drift between full releases (phones keep their store version while desktop moves ahead); the next full release brings them back together. Details: the header comments of each workflow, and [mobile/README.md](mobile/README.md#release).
+
+---
+
 ## License
 
 See [LICENSE](LICENSE) for details.

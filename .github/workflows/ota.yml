@@ -1,0 +1,94 @@
+name: OTA update
+
+# Over-the-air updates for the iOS app: web-only changes (the phone build, mobile/vite.config.ts)
+# reach installed apps without a store build or review. The app checks on launch and resume,
+# downloads in the background and switches on its next trip to the background
+# (mobile/src/update/liveUpdate.ts, @capgo/capacitor-updater, no Capgo cloud).
+#
+#   gh workflow run ota.yml                                     # newest shipped + App Store live
+#   gh workflow run ota.yml -f release_version=1.41.0+29900000  # one native release
+#
+# Targets (scripts/native-release-targets.sh): the newest native/ios/<NAME+NUMBER> tag (builds
+# ios.yml uploaded to App Store Connect) and, when older, the newest build of the version the App
+# Store has live, so App Store installs get the update while a newer version waits for review.
+# For each, this commit's phone build is published by scripts/ota-publish.sh to the prerelease
+# ota-ios-<NUMBER> (never "latest", so desktops' electron-updater ignores it). It refuses when
+# Capacitor plugins (package.json), mobile/ios or capacitor.config.ts changed since that native
+# release: those need a store release (push a v* tag) instead.
+#
+# Only builds that include @capgo/capacitor-updater can take updates. Rolling back = running this
+# on an older commit. Needs only GITHUB_TOKEN; the repo must stay public (the app downloads the
+# release assets anonymously).
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_version:
+        description: "Native release to update (NAME+NUMBER, e.g. 1.41.0+29900000), or latest"
+        default: "latest"
+
+concurrency:
+  group: ota
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  BUNDLE_ID: com.project96.sai
+
+jobs:
+  targets:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      releases: ${{ steps.t.outputs.releases }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: t
+        env:
+          RELEASE_VERSION: ${{ inputs.release_version }}
+        run: |
+          if [ "$RELEASE_VERSION" = latest ] || [ -z "$RELEASE_VERSION" ]; then
+            out="$(scripts/native-release-targets.sh ios "$BUNDLE_ID")"
+            mapfile -t releases <<<"$out"
+          else
+            releases=("$RELEASE_VERSION")
+          fi
+          json="$(printf '%s\n' "${releases[@]}" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read().split()))')"
+          echo "releases=$json" >> "$GITHUB_OUTPUT"
+          echo "iOS native releases to update: ${releases[*]}" >> "$GITHUB_STEP_SUMMARY"
+
+  ios:
+    needs: targets
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        release: ${{ fromJSON(needs.targets.outputs.releases) }}
+    name: ios ${{ matrix.release }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # As in ios.yml: the phone build needs no Electron or native Node modules.
+      - run: npm ci --ignore-scripts
+
+      - name: Build the phone web bundle
+        run: npm run build:mobile
+
+      - name: Publish the update
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE: ${{ matrix.release }}
+        run: |
+          scripts/ota-publish.sh ios "$RELEASE" dist/mobile --native-paths "mobile/ios capacitor.config.ts" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+          exit "${PIPESTATUS[0]}"

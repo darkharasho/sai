@@ -1,14 +1,67 @@
 name: Build Release Artifacts
 
+# Desktop builds (electron-builder, published to the GitHub release electron-updater reads).
+# A `v*` tag builds the desktop apps here and the iOS app in ios.yml, at the same version.
+#
+# Desktop-only release (gh workflow run release.yml -f desktop_release=1.41.1): builds Linux,
+# Windows and macOS at that version and publishes them as the latest release v1.41.1, so installed
+# desktops catch up with a change phones already got over the air (ota.yml), without a new iOS
+# build to review. package.json's version is set in CI only; a v<version> tag that already exists
+# is refused. Notes: a draft release v<version> made beforehand (the /release skill's way) keeps its
+# notes, else GitHub's generated notes. The tag is made when the release is published, with
+# GITHUB_TOKEN, which starts no workflows, so ios.yml doesn't run. The next full release takes a
+# later version.
+
 on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      desktop_release:
+        description: "Desktop-only release: publish Linux/Windows/macOS as latest release v<this version> (e.g. 1.41.1); no iOS build"
+        required: true
 
 permissions:
   contents: write
 
 jobs:
+  # The version and release tag. A desktop-only release gets its draft release here, on this
+  # commit, before the builds upload to it (three builds racing to create it would make duplicates).
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      name: ${{ steps.v.outputs.name }}
+      tag: ${{ steps.v.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DESKTOP_RELEASE: ${{ inputs.desktop_release }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            name="${DESKTOP_RELEASE#v}"
+            [[ "$name" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::desktop_release '$DESKTOP_RELEASE' isn't x.y.z"; exit 1; }
+            tag="v$name"
+            if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null; then
+              echo "::error::$tag already exists; pick a later version."; exit 1
+            fi
+            if [ "$(gh release view "$tag" --json isDraft --jq .isDraft 2>/dev/null)" = true ]; then
+              # A draft with notes written beforehand: build this commit into it.
+              gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/$(gh release view "$tag" --json databaseId --jq .databaseId)" \
+                -f target_commitish="$GITHUB_SHA" --silent
+            else
+              gh release create "$tag" --draft --target "$GITHUB_SHA" --title "$tag" --notes ""
+            fi
+            echo "Desktop-only release $tag from $GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
+          else
+            tag="$GITHUB_REF_NAME"
+            name="${tag#v}"
+          fi
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
   test:
     runs-on: ubuntu-latest
     steps:
@@ -29,7 +82,7 @@ jobs:
         run: npm run test:integration
 
   build:
-    needs: [test]
+    needs: [version, test]
     strategy:
       matrix:
         include:
@@ -58,6 +111,15 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      # Desktop-only release: the artifacts, latest*.yml and the app's own version (What's New)
+      # all come from package.json, so set it before building. Not committed.
+      - name: Set the desktop-only version
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        env:
+          VERSION: ${{ needs.version.outputs.name }}
+        run: npm version "$VERSION" --no-git-tag-version --allow-same-version
 
       - name: Rebuild native modules for Electron
         run: npx electron-rebuild
@@ -148,16 +210,19 @@ jobs:
         run: npx electron-builder ${{ matrix.args }} --publish always
 
   publish:
-    needs: [test, build]
+    needs: [version, test, build]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
+      # Publishing makes the release latest (electron-updater only reads /releases/latest). For a
+      # desktop-only release it also creates the tag, at the draft's target commit, with
+      # GITHUB_TOKEN: that starts no workflows, so iOS doesn't build.
       - name: Publish release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          tag: ${{ needs.version.outputs.tag }}
         run: |
-          tag="${GITHUB_REF#refs/tags/}"
           # electron-builder creates the release itself when the /release skill's
           # draft isn't there yet, and that release has an empty body. An empty
           # body makes the in-app What's New modal say "No release notes
@@ -165,8 +230,9 @@ jobs:
           body="$(gh release view "$tag" --json body --jq '.body')"
           if [ -z "$(printf '%s' "$body" | tr -d '[:space:]')" ]; then
             echo "::warning::Release $tag has no notes; falling back to generated notes."
+            # target_commitish matters only when the tag doesn't exist yet (desktop-only release).
             gh api "repos/$GITHUB_REPOSITORY/releases/generate-notes" \
-              -f tag_name="$tag" --jq '.body' > generated-notes.md
+              -f tag_name="$tag" -f target_commitish="$GITHUB_SHA" --jq '.body' > generated-notes.md
             gh release edit "$tag" --notes-file generated-notes.md
           fi
-          gh release edit "$tag" --draft=false
+          gh release edit "$tag" --draft=false --latest
