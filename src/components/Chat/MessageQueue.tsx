@@ -287,3 +287,51 @@ export default function MessageQueue({ queue, onRemove, onPromote, onSendNow }: 
     </AnimatePresence>
   );
 }
+
+/**
+ * Phone: queued messages as a full-width strip above the composer, each with
+ * Send now and Cancel at touch size. (The desktop badge + popover overflowed
+ * the phone toolbar and pushed Send off-screen.)
+ */
+export function QueueStrip({ queue, onRemove, onSendNow }: Omit<MessageQueueProps, 'onPromote'>) {
+  if (queue.length === 0) return null;
+  return (
+    <div className="queue-strip" data-testid="queue-strip" role="list" aria-label="Queued messages">
+      {queue.map((msg) => (
+        <div key={msg.id} className="queue-strip-item" data-testid="queue-item" role="listitem">
+          <ListOrdered size={14} className="queue-strip-icon" aria-hidden="true" />
+          <span className="queue-strip-text">{msg.text}</span>
+          {onSendNow && (
+            <button type="button" data-testid="queue-send-now" className="queue-strip-btn queue-strip-btn--send" onClick={() => onSendNow(msg.id)} aria-label="Send now">
+              <ArrowUp size={15} aria-hidden="true" /><span>Send now</span>
+            </button>
+          )}
+          <button type="button" data-testid="queue-remove" className="queue-strip-btn queue-strip-btn--cancel" onClick={() => onRemove(msg.id)} aria-label="Cancel queued message">
+            <X size={16} aria-hidden="true" />
+          </button>
+        </div>
+      ))}
+      <style>{`
+        .queue-strip { display: flex; flex-direction: column; gap: 4px; margin: 0 0 6px; }
+        .queue-strip-item {
+          display: flex; align-items: center; gap: 8px;
+          padding: 2px 2px 2px 10px;
+          border: 1px solid var(--border-subtle);
+          border-radius: 10px;
+          background: var(--surface-2, var(--surface-1));
+          font-size: 14px;
+        }
+        .queue-strip-icon { color: var(--accent); flex-shrink: 0; }
+        .queue-strip-text { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--text); }
+        .queue-strip-btn {
+          display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+          min-height: 40px; min-width: 40px; padding: 0 10px;
+          border: 0; border-radius: 8px; background: none;
+          font: inherit; font-size: 13px; font-weight: 600; flex-shrink: 0;
+        }
+        .queue-strip-btn--send { color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+        .queue-strip-btn--cancel { color: var(--text-muted); }
+      `}</style>
+    </div>
+  );
+}

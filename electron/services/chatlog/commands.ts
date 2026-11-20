@@ -77,7 +77,11 @@ export interface ProviderDispatch {
 }
 
 /** A queued send keeps what the drain needs to dispatch it like the original send. */
-export interface QueuedSend extends QueuedItem { prompt?: string; imagePaths?: string[]; origin?: Origin }
+export interface QueuedSend extends QueuedItem {
+  prompt?: string; imagePaths?: string[]; origin?: Origin;
+  /** A plain Claude send that only waited because the previous dispatch hadn't started: joins the turn once it does. */
+  joinTurn?: boolean;
+}
 
 export interface Timers {
   set(fn: () => void, ms: number): unknown;
@@ -314,6 +318,31 @@ export class ChatCommands {
   onTurnStarted(chatId: string): void {
     this.clearInFlight(chatId);
     this.suppressDrain.delete(chatId);
+    this.joinWaitingSend(chatId);
+  }
+
+  /**
+   * The turn a dispatch was landing for has started: the first send that only
+   * waited for it (joinTurn) goes into the running turn now. Its own
+   * streaming_start brings the next one.
+   */
+  private joinWaitingSend(chatId: string): void {
+    try {
+      const state = this.store.state(chatId);
+      const item = state?.queue.find((q) => (q as QueuedSend).joinTurn === true) as QueuedSend | undefined;
+      if (!state || !item || this.dispatch.isLoadPaused()) return;
+      const { projectPath, provider } = this.chat(chatId);
+      if (provider !== 'claude' || !this.dispatch.isBusy(projectPath, chatId)) return; // the turn end drains it in order
+      this.dispatchSend(chatId, {
+        prompt: typeof item.prompt === 'string' ? item.prompt : item.text,
+        imagePaths: Array.isArray(item.imagePaths) && item.imagePaths.length > 0 ? item.imagePaths : undefined,
+        origin: item.origin === 'remote' ? 'remote' : 'desktop',
+      });
+      this.log.appendClient(chatId, { type: 'queue_removed', clientId: item.clientId, sent: true });
+      if (this.store.state(chatId)?.queue.length === 0) this.queuedChats.delete(chatId);
+    } catch (err) {
+      this.devlog('chatcmd.joinTurnError', { chatId, error: err instanceof Error ? err.message : String(err) });
+    }
   }
 
   /**
@@ -486,11 +515,13 @@ export class ChatCommands {
     const busy = this.isBusy(pre.projectPath, cmd.chatId);
     const waiting = (pre.state?.queue.length ?? 0) > 0;
     // Mid-turn: a plain send to a busy Claude chat goes straight to the backend,
-    // which folds it into the running turn (as Enter did before the log). Not
-    // while our own dispatch is still landing (no streaming_start yet), and not
-    // past items already waiting: those keep their order.
-    const midTurn = busy && !cmd.now && cmd.queue !== true && pre.provider === 'claude'
-      && !this.inFlight.has(cmd.chatId) && !waiting;
+    // which folds it into the running turn (as Enter did before the log), even
+    // past items the user explicitly queued. While our own dispatch is still
+    // landing (no streaming_start yet) a second dispatch would race it: that send
+    // waits as a joinTurn item and joins the turn when it starts (onTurnStarted).
+    const plainClaude = busy && !cmd.now && cmd.queue !== true && pre.provider === 'claude';
+    const midTurn = plainClaude && !this.inFlight.has(cmd.chatId);
+    const joinTurn = plainClaude && !midTurn;
     // Paused holds every send (send-now too, like the desktop composer). A busy
     // chat, or one with items already waiting, queues unless this is send-now or mid-turn.
     const queue = paused || !ready || (!cmd.now && !midTurn && (busy || waiting));
@@ -514,6 +545,7 @@ export class ChatCommands {
         ...(typeof cmd.label === 'string' && cmd.label && cmd.label !== text ? { label: cmd.label } : {}),
         ...(prompt !== text ? { prompt } : {}),
         ...(imagePaths ? { imagePaths } : {}),
+        ...(joinTurn && !paused && ready ? { joinTurn: true } : {}),
       };
       this.log.appendClient(cmd.chatId, { type: 'queue_added', item });
       this.queuedChats.add(cmd.chatId);

@@ -3,7 +3,7 @@ import { isPhone } from '../../lib/platform';
 import { resizeImageToJpegDataUrl } from '../../lib/imageResize';
 import type { PendingApproval, PendingSudoPrompt, TerminalTab, ChatMessage as ChatMessageType, QueuedMessage, MetaWorkspaceRuntime, EffortLevel, CodexEffort, CodexModelOption, ModelChoice, AIProvider } from '../../types';
 import TodoProgress, { type Todo } from './TodoProgress';
-import MessageQueue from './MessageQueue';
+import MessageQueue, { QueueStrip } from './MessageQueue';
 import { providerIconUrl } from '../../lib/providerIcons';
 import LoadGuardPill from './LoadGuardPill';
 import type { LoadGuardPublicState } from '../../../electron/services/loadGuard';
@@ -1101,6 +1101,9 @@ export default function ChatInput({ projectPath, onSend, overlayControl, onBefor
       )}
 
       {/* Main input area */}
+      {isPhone() && (
+        <QueueStrip queue={messageQueue} onRemove={onQueueRemove ?? (() => {})} onSendNow={onQueueSendNow} />
+      )}
       <div className={`input-box ${tickerDir ? `ticker-${tickerDir}` : ''}`} style={{ opacity: inputBlocked ? 0.4 : 1, pointerEvents: inputBlocked ? 'none' as const : 'auto' as const }}>
         {!value && (
           <div className="chat-placeholder" onClick={() => textareaRef.current?.focus()}>
@@ -1159,12 +1162,14 @@ export default function ChatInput({ projectPath, onSend, overlayControl, onBefor
             />
           )}
           <TodoProgress messages={messages} isStreaming={!!isStreaming} todos={todos} />
-          <MessageQueue
-            queue={messageQueue}
-            onRemove={onQueueRemove ?? (() => {})}
-            onPromote={onQueuePromote ?? (() => {})}
-            onSendNow={onQueueSendNow}
-          />
+          {!isPhone() && (
+            <MessageQueue
+              queue={messageQueue}
+              onRemove={onQueueRemove ?? (() => {})}
+              onPromote={onQueuePromote ?? (() => {})}
+              onSendNow={onQueueSendNow}
+            />
+          )}
           {loadGuard && <LoadGuardPill state={loadGuard} />}
           {activeFilePath && (
             <span
