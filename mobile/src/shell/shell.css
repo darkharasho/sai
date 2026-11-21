@@ -273,6 +273,9 @@ html[data-sai-phone] body {
 .sai-phone-chips { display: flex; gap: 6px; overflow-x: auto; padding: 0 2px 10px; flex-shrink: 0; }
 .sai-phone-ws-chip {
   flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
   min-height: 36px;
   padding: 0 14px;
   border: 1px solid var(--border-hairline);

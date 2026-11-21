@@ -4,7 +4,7 @@ import React, { useState } from 'react';
 import { Plus } from 'lucide-react';
 import type { ChatMeta } from '../../../src/lib/chat/types';
 import type { RemoteWorkspace } from '../../../electron/services/remote/renderer-proxy';
-import { ChatRow, newestFirst, type OpenChat } from './chatRows';
+import { ChatRow, newestFirst, workspaceStatus, type OpenChat } from './chatRows';
 import { homeOrder } from './Home';
 
 export interface SwitcherProps {
@@ -30,17 +30,21 @@ export function Switcher(p: SwitcherProps) {
       <div className="sai-phone-sheet" role="dialog" aria-label="Switch chat">
         <div className="sai-phone-sheet-grip" aria-hidden="true" />
         <div className="sai-phone-chips" role="group" aria-label="Workspaces">
-          {ordered.map((w) => (
-            <button
-              key={w.projectPath}
-              type="button"
-              className="sai-phone-ws-chip"
-              aria-pressed={w.projectPath === ws?.projectPath}
-              onClick={() => setPicked(w.projectPath)}
-            >
-              {w.name}
-            </button>
-          ))}
+          {ordered.map((w) => {
+            const status = workspaceStatus(p.chatsByWs[w.projectPath] ?? null, p.open);
+            return (
+              <button
+                key={w.projectPath}
+                type="button"
+                className="sai-phone-ws-chip"
+                aria-pressed={w.projectPath === ws?.projectPath}
+                onClick={() => setPicked(w.projectPath)}
+              >
+                {status && <span className={`sai-phone-dot sai-phone-dot-${status}`} data-status={status} aria-hidden="true" />}
+                {w.name}
+              </button>
+            );
+          })}
         </div>
         <div className="sai-phone-sheet-list">
           {ws && (
