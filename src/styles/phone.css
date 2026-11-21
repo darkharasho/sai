@@ -129,9 +129,37 @@ html[data-sai-phone] .input-toolbar {
   padding-left: 0;
   padding-right: 0;
 }
+/* Send/Stop must never leave the screen: the model button is the one item
+   that gives way (it ellipsizes); everything else keeps its size. No overflow
+   clipping here — the todo popover opens upward out of the left group. */
+html[data-sai-phone] .toolbar-center {
+  display: none; /* the same chips show in the context row above the input */
+}
+html[data-sai-phone] .toolbar-left > *,
+html[data-sai-phone] .toolbar-right > * {
+  flex-shrink: 0;
+}
 html[data-sai-phone] .toolbar-right {
+  flex: 1 1 auto;
   min-width: 0;
+  justify-content: flex-end;
+}
+html[data-sai-phone] .toolbar-right > .model-selector {
   flex-shrink: 1;
+  min-width: 0;
+}
+html[data-sai-phone] .model-selector > .model-btn {
+  max-width: 100%;
+}
+html[data-sai-phone] .model-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* The usage pill's details are a hover tooltip (unreachable by touch), and the
+   ring's fill already shows how full the context is. */
+html[data-sai-phone] .usage-wrapper,
+html[data-sai-phone] .context-ring-label {
+  display: none;
 }
 html[data-sai-phone] .model-btn {
   min-width: 0;
@@ -161,4 +189,10 @@ html[data-sai-phone] .chat-msg-content {
 html[data-sai-phone] .chat-msg-user {
   margin-right: 2px;
   max-width: 86%;
+}
+/* The chat pins its own scroll to the reply; the engine's scroll anchoring
+   moved scrollTop up under it (in a short, keyboard-sized chat), which read as
+   the user scrolling up and stopped the follow. */
+html[data-sai-phone] .chat-messages {
+  overflow-anchor: none;
 }

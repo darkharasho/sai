@@ -23,6 +23,11 @@ const config: CapacitorConfig = {
     // already skips the chat the phone has in the foreground, so what still
     // arrives is about other chats and should show.
     PushNotifications: { presentationOptions: ['banner', 'list', 'sound'] },
+    // Over-the-air web bundles, self-hosted on GitHub releases (mobile/src/update/liveUpdate.ts):
+    // no Capgo cloud, so no update checks or stats to Capgo's servers. A new bundle that doesn't
+    // call notifyAppReady within appReadyTimeout is rolled back. A new native build starts from its
+    // own built-in bundle (resetWhenUpdate, the default).
+    CapacitorUpdater: { autoUpdate: false, appReadyTimeout: 10000, statsUrl: '' },
   },
 };
 

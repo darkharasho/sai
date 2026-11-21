@@ -53,13 +53,31 @@ with `SAI_E2E_BROWSER=webkit`. `test.yml` runs all of these on Linux.
 CI is `.github/workflows/ios.yml` (macOS runner, Xcode).
 
 - Pull requests touching the phone app compile it for the simulator, unsigned.
-- To ship: set `mobileVersion` in the root `package.json`, then push the tag
-  `mobile-v<x.y.z>`. The workflow archives the app, signs it at export (Xcode
+- To ship: push the tag `v<x.y.z>`, the same tag as the desktop release (the
+  `/release` skill). iOS and desktop share the version (`package.json`
+  `version`). The workflow archives the app, signs it at export (Xcode
   cloud-managed distribution signing) and uploads it to App Store Connect; it
   reaches TestFlight once processing finishes. The version is the tag's; the
-  build number is minutes since the Unix epoch. Desktop releases use `v*` tags
-  and never trigger this workflow.
+  build number (CFBundleVersion) is minutes since the Unix epoch.
+- An uploaded build is tagged `native/ios/<version>+<build>`, and on tag pushes
+  it's submitted for App Store review (`app-store-review`, pulling an older
+  version still waiting). `submit.yml` shows the status or submits by hand.
 - Manual run: Actions > iOS > Run workflow; untick `upload` to only compile.
+
+### Over-the-air updates
+
+Web-only changes reach installed apps without a store build:
+`gh workflow run ota.yml`. `src/update/liveUpdate.ts` (with
+`@capgo/capacitor-updater`, no Capgo cloud) reads
+`releases/download/ota-ios-<build>/manifest.json` from this repo on launch and
+resume, downloads the bundle in the background and switches to it the next
+time the app goes to the background. A bundle that doesn't reach
+`markAppReady()` (the shell mounted) within 10 s is rolled back.
+
+`ota.yml` publishes to the newest `native/ios/*` build and, when older, the
+App Store's live version. It refuses when Capacitor plugins in `package.json`,
+`ios/` or `capacitor.config.ts` changed since that build: native changes need
+a release tag. Only builds that include the updater plugin get updates.
 
 Without all four secrets the workflow only compiles for the simulator and
 warns.

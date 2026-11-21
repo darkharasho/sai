@@ -60,6 +60,8 @@ const dispatch: ProviderDispatch = {
         : null;
       const text = wide ?? (i === 1 ? `Echo: ${prompt}. ` : `word${i} `);
       service.record({ type: 'assistant', projectPath, scope, turnSeq: t, message: { content: [{ type: 'text', text, delta: true }] } });
+      // Mid-reply the runtime reports context usage: the composer grows its context ring and usage pill.
+      if (i === 2) service.record({ type: 'context_usage', projectPath, scope, totalTokens: 84_000, maxTokens: 200_000 });
       // A prompt mentioning "tools" interleaves Bash tool calls (call, then its output a few words later).
       if (/tools/.test(String(prompt)) && i % 6 === 3) {
         const id = `tu-${t}-${i}`;

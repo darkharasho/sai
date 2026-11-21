@@ -22,9 +22,22 @@ export function newestFirst(chats: ChatMeta[]): ChatMeta[] {
 /** The phone's open chat: its live status and title override its list row. */
 export interface OpenChat { chatId: string | null; status: ChatStatus | null; title: string | null }
 
+/** A chat row's dot: the open chat's live status, else its list metadata. */
+export function rowStatus(chat: ChatMeta, open: OpenChat): ChatStatus {
+  return chat.chatId === open.chatId && open.status ? open.status : chatStatus(null, chat);
+}
+
+const URGENCY: Record<ChatStatus, number> = { approval: 3, streaming: 2, waiting: 1, done: 0 };
+
+/** A workspace's dot: its most urgent chat; null while loading or with no chats. */
+export function workspaceStatus(chats: ChatMeta[] | null, open: OpenChat): ChatStatus | null {
+  if (!chats?.length) return null;
+  return chats.map((c) => rowStatus(c, open)).reduce((a, b) => (URGENCY[b] > URGENCY[a] ? b : a));
+}
+
 export function ChatRow({ chat, open, onPick }: { chat: ChatMeta; open: OpenChat; onPick(chatId: string): void }) {
   const isOpen = chat.chatId === open.chatId;
-  const status = isOpen && open.status ? open.status : chatStatus(null, chat);
+  const status = rowStatus(chat, open);
   return (
     <button
       type="button"

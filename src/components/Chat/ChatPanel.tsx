@@ -35,6 +35,9 @@ const consumedBrainstormSeeds = new Set<string>();
 /** Run a scrollTop write the user didn't make. The browser delivers its scroll event no later than the next
  *  frame's rendering step, which runs before that frame's rAF callbacks, so the flag clears one frame later. */
 const writeSeq = new WeakMap<object, number>();
+/** Phone: how long after a finger lifts its momentum may still scroll the chat up. */
+const TOUCH_MOMENTUM_MS = 1500;
+
 function programmaticWrite(flag: { current: boolean } | undefined, write: () => void) {
   if (!flag) { write(); return; }
   // Only the latest write may clear the flag: an older write's reset running
@@ -827,6 +830,9 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode:
   // True while a scrollTop write came from us (tween / ResizeObserver pin), so handleScroll doesn't read it as the user.
   const programmaticScroll = useRef(false);
   const tweenCancelRef = useRef<(() => boolean) | null>(null);
+  // Phone: when a finger last touched the chat (Infinity while one is down).
+  // Only a scroll near a touch is the user's; anything else is layout.
+  const lastTouchRef = useRef(0);
   const lastScrollTopRef = useRef(0);
   const lastScrollMaxRef = useRef(0);
   // Set by "Load earlier": the layout effect below keeps the viewport on the same message after the prepend.
@@ -1348,6 +1354,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode:
     // streams the tween is nearly always running.
     let touchY: number | null = null;
     const onTouchStart = (e: TouchEvent) => {
+      lastTouchRef.current = Infinity;
       jumpingRef.current = false;
       touchY = e.touches[0]?.clientY ?? null;
     };
@@ -1361,10 +1368,17 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode:
       isAtBottomRef.current = false;
       setFollowOn(false);
     };
+    const onTouchEnd = (e: TouchEvent) => {
+      if (e.touches.length === 0) lastTouchRef.current = performance.now();
+    };
     el.addEventListener('wheel', onWheel, { passive: true });
     el.addEventListener('touchstart', onTouchStart, { passive: true });
     el.addEventListener('touchmove', onTouchMove, { passive: true });
+    el.addEventListener('touchend', onTouchEnd, { passive: true });
+    el.addEventListener('touchcancel', onTouchEnd, { passive: true });
     return () => {
+      el.removeEventListener('touchend', onTouchEnd);
+      el.removeEventListener('touchcancel', onTouchEnd);
       el.removeEventListener('wheel', onWheel);
       el.removeEventListener('touchstart', onTouchStart);
       el.removeEventListener('touchmove', onTouchMove);
@@ -1569,8 +1583,12 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode:
     lastScrollTopRef.current = top;
     lastScrollMaxRef.current = max;
     let released = false;
+    // On the phone the user scrolls only by touch (a finger down, or its momentum
+    // just after). An upward move with no touch near it is the layout's: the
+    // keyboard resizing the chat, or the engine shifting scrollTop on its own.
+    const userCouldScroll = !isPhone() || performance.now() - lastTouchRef.current < TOUCH_MOMENTUM_MS;
     // A jump's own smooth scroll moves up too; leave its guard alone (wheel/touchstart release it).
-    if (dropped > 4 && !programmaticScroll.current && !clamped && !jumpingRef.current) {
+    if (dropped > 4 && userCouldScroll && !programmaticScroll.current && !clamped && !jumpingRef.current) {
       isAtBottomRef.current = false;
       setFollowOn(false);
       released = true;

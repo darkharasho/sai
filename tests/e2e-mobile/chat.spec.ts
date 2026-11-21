@@ -128,9 +128,14 @@ test('mid-reply: Send sits beside Stop and sends the message into the running tu
   await newChat(page);
   await send(page, 'hello there');
   await expect(page.getByTitle('Stop')).toBeVisible();
+  // The context ring lands mid-reply and widens the toolbar (the hover-only usage pill stays off on the phone).
+  await expect(page.locator('.context-ring')).toBeVisible();
   await page.getByRole('textbox').fill('and a follow-up');
   const midTurn = page.locator('.send-btn:not(.stop-btn)');
   await expect(midTurn).toHaveAttribute('title', 'Send');
+  await expect(midTurn).toBeInViewport({ ratio: 1 });
+  await expect(page.locator('.stop-btn')).toBeInViewport({ ratio: 1 });
+  await page.screenshot({ path: path.join(SHOTS, 'mid-reply-toolbar.png'), animations: 'disabled' });
   await midTurn.click();
   // Claude takes it mid-turn: the bubble shows at once and the reply answers it; nothing queues.
   await expect(page.getByText('Echo: and a follow-up')).toBeVisible();
@@ -201,4 +206,25 @@ test('queued messages get Send now and Cancel; Send and Stop stay on screen', as
   await strip.getByRole('button', { name: 'Send now' }).click();
   await expect(page.getByTestId('queue-strip')).toHaveCount(0);
   await expect(page.getByText('Echo: first queued follow-up message that is fairly long')).toBeVisible({ timeout: 15000 });
+});
+
+test('opening the keyboard mid-reply keeps the reply followed', async ({ page }) => {
+  await pair(page);
+  await newChat(page);
+  await send(page, 'run some tools please');
+  await expect(page.locator('.tool-call-card').first()).toBeVisible();
+  const gap = () => page.locator('.chat-messages').evaluate((el) => el.scrollHeight - el.clientHeight - el.scrollTop);
+  await expect.poll(gap, { timeout: 1000 }).toBeLessThan(4);
+  // The keyboard: focus the composer and shrink the app over ~250ms, as the iOS keyboard animates in.
+  await page.getByRole('textbox').focus();
+  const full = page.viewportSize()!.height;
+  for (let i = 1; i <= 10; i++) {
+    await page.evaluate((h) => document.documentElement.style.setProperty('--sai-app-height', `${h}px`), full - i * 30);
+    await page.waitForTimeout(25);
+  }
+  // The reply keeps streaming and the view keeps following it.
+  for (let i = 0; i < 6; i++) {
+    await page.waitForTimeout(400);
+    await expect.poll(gap, { timeout: 500, intervals: [16, 32, 50] }).toBeLessThan(4);
+  }
 });

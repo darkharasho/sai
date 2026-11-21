@@ -61,14 +61,17 @@ If E2E tests fail, STOP and show the output. Do NOT proceed with the release.
 ### Step 4: Bump version
 
 1. Read `package.json`.
-2. Parse the current `version` field (semver: `MAJOR.MINOR.PATCH`).
+2. Parse the current `version` field (semver: `MAJOR.MINOR.PATCH`). If the newest
+   release tag (`git tag -l 'v[0-9]*' --sort=-v:refname | head -1`) is higher, start
+   from that tag instead: a desktop-only release (`release.yml` `desktop_release`)
+   publishes a version without committing it to `package.json`.
 3. Increment the segment specified by the bump argument, resetting lower segments to 0.
 4. Write the updated version back to `package.json` (change only the version field, preserve everything else).
 5. Tell the user the old and new version.
 
 ### Step 5: Generate release notes
 
-1. Run `git describe --tags --abbrev=0` to find the previous tag. If no tags exist, use the root commit.
+1. Run `git describe --tags --abbrev=0 --match 'v[0-9]*'` to find the previous release tag (other tags, `native/ios/*` and `ota-ios-*`, aren't releases). If no tags exist, use the root commit.
 2. Run `git log <prev-tag>..HEAD --pretty=format:"%h %s"` to get commits since the last release.
 3. Group commits into sections by conventional commit prefix:
    - `feat:` or `feat(...):`  -> **What's New**
@@ -183,7 +186,11 @@ Only now push the tag to trigger CI:
 git push --tags
 ```
 
-Tell the user: "Draft release created. GitHub Actions is now building artifacts for Linux, Windows, and macOS."
+Tell the user: "Draft release created. GitHub Actions is now building artifacts for Linux, Windows, and macOS, and the iOS app (ios.yml) at the same version."
+
+The tag also runs `ios.yml`: it uploads the iOS build to TestFlight, tags it
+`native/ios/<version>+<build>` and submits it for App Store review. See the
+README's "Releasing" section.
 
 Explain that the CI workflow will automatically:
 - Build artifacts for all platforms (`.dmg`, `.exe`, `.AppImage`, auto-update manifests)
