@@ -1,6 +1,11 @@
 name: Submit
 
 # Submit an iOS build that's already in TestFlight for App Store review (scripts/asc-submit.py).
+# Every hour it reconciles (asc-submit.py reconcile): the newest build goes to review unless the App
+# Store is already on it (live, approved, in review) or it was rejected, and a version in flight that
+# Apple is reviewing or that has to be reviewed (scripts/review-required.sh) is never pulled. So
+# releases ship at once (updates, desktop) and the App Store catches up eventually.
+#   gh workflow run submit.yml -f reconcile=true                # what the hourly run does, now
 # Tag releases already do this (ios.yml app-store-review); this is for status, or to submit later.
 # Web-only changes go out as over-the-air updates (ota.yml) instead of a store release.
 #
@@ -13,8 +18,14 @@ name: Submit
 # Secrets: APP_STORE_CONNECT_KEY_ID, APP_STORE_CONNECT_ISSUER_ID, APP_STORE_CONNECT_KEY.
 
 on:
+  schedule:
+    - cron: "23 * * * *"
   workflow_dispatch:
     inputs:
+      reconcile:
+        description: "Reconcile: submit the newest build unless the App Store is already on it (ignores the rest)"
+        type: boolean
+        default: false
       release:
         description: "Build to submit (NAME+NUMBER, e.g. 1.41.0+29900000) or latest"
         default: "latest"
@@ -43,6 +54,7 @@ jobs:
       ASC_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
     steps:
       - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
       - name: Write the App Store Connect key
         env:
           ASC_KEY: ${{ secrets.APP_STORE_CONNECT_KEY }}
@@ -51,11 +63,20 @@ jobs:
             || { echo "::error::App Store Connect secrets aren't set."; exit 1; }
           echo "ASC_KEY_PATH=$RUNNER_TEMP/AuthKey_$ASC_KEY_ID.p8" >> "$GITHUB_ENV"
           (umask 077; printf '%s' "$ASC_KEY" > "$RUNNER_TEMP/AuthKey_$ASC_KEY_ID.p8")
+      - name: Reconcile
+        if: ${{ github.event_name == 'schedule' || inputs.reconcile }}
+        run: |
+          RELEASE="$(git ls-remote --tags origin 'refs/tags/native/ios/*' \
+            | sed -nE 's#^.*refs/tags/native/ios/([0-9]+\.[0-9]+\.[0-9]+\+[0-9]+)$#\1#p' | sort -t+ -k2,2n | tail -1)"
+          [ -n "$RELEASE" ] || { echo "::error::No native/ios/* tag yet."; exit 1; }
+          echo "Newest iOS build: $RELEASE" >> "$GITHUB_STEP_SUMMARY"
+          python3 scripts/asc-submit.py reconcile "$BUNDLE_ID" "$RELEASE" | tee -a "$GITHUB_STEP_SUMMARY"
+          exit "${PIPESTATUS[0]}"
       - name: Status
-        if: ${{ !inputs.submit }}
+        if: ${{ github.event_name != 'schedule' && !inputs.reconcile && !inputs.submit }}
         run: python3 scripts/asc-submit.py status "$BUNDLE_ID" | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Submit for review
-        if: ${{ inputs.submit }}
+        if: ${{ github.event_name != 'schedule' && !inputs.reconcile && inputs.submit }}
         env:
           RELEASE: ${{ inputs.release }}
           WHATS_NEW: ${{ inputs.whats_new }}

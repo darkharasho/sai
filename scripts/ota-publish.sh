@@ -4,6 +4,7 @@
 #
 # Usage: ota-publish.sh <ios|android> <NAME+NUMBER> <web-dir> [--native-paths "ios android ..."]
 #                       [--tag-prefix native] [--dry-run]
+#        ota-publish.sh <ios|android> <NAME+NUMBER> --check-only [--native-paths ...] [--tag-prefix ...]
 #
 #   <NAME+NUMBER>   The native release (its tag <prefix>/<platform>/<NAME+NUMBER> must exist). NUMBER
 #                   is the build number the installed app reports (App.getInfo().build).
@@ -12,7 +13,9 @@
 #
 # Native check: the Capacitor plugins in package.json (@capacitor/*, @capgo/*, capacitor-*,
 # cordova-*; names and versions) and --native-paths must match the native release's tag, else it
-# stops: that change needs a store release (an update can't add native code).
+# stops: that change needs a store release (an update can't add native code). --check-only stops
+# after this check (exit 0: an update from HEAD can reach that release), with no web dir or token;
+# review-required.sh uses it as NATIVE_CHECK.
 #
 # Hosting: prerelease ota-<platform>-<NUMBER> (never "latest", so desktop updaters ignore it), with
 # assets bundle-<version>.zip and manifest.json {version, url, checksum (sha256), native, build,
@@ -21,12 +24,13 @@
 #
 # Env: GH_TOKEN (contents: write), GITHUB_REPOSITORY (owner/repo; default: gh's current repo).
 set -euo pipefail
-platform="" release="" dir="" paths="" prefix=native dry=false
+platform="" release="" dir="" paths="" prefix=native dry=false check=false
 while [ $# -gt 0 ]; do
   case "$1" in
     --native-paths) paths="$2"; shift 2 ;;
     --tag-prefix) prefix="$2"; shift 2 ;;
     --dry-run) dry=true; shift ;;
+    --check-only) check=true; shift ;;
     -*) echo "Unknown option: $1" >&2; exit 2 ;;
     *) if [ -z "$platform" ]; then platform="$1"; elif [ -z "$release" ]; then release="$1"; else dir="$1"; fi; shift ;;
   esac
@@ -34,9 +38,9 @@ done
 [[ "$platform" =~ ^(ios|android)$ ]] || { echo "platform must be ios or android" >&2; exit 2; }
 [[ "$release" =~ ^([0-9]+\.[0-9]+\.[0-9]+)\+([0-9]+)$ ]] || { echo "release must be NAME+NUMBER" >&2; exit 2; }
 name="${BASH_REMATCH[1]}" number="${BASH_REMATCH[2]}"
-[ -f "$dir/index.html" ] || { echo "$dir/index.html not found" >&2; exit 2; }
+$check || [ -f "$dir/index.html" ] || { echo "$dir/index.html not found" >&2; exit 2; }
 paths="${paths:-$platform capacitor.config.ts}"
-repo="${GITHUB_REPOSITORY:-$(gh repo view --json nameWithOwner -q .nameWithOwner)}"
+$check || repo="${GITHUB_REPOSITORY:-$(gh repo view --json nameWithOwner -q .nameWithOwner)}"
 tag="$prefix/$platform/$release"
 
 git fetch -q --depth=1 origin "refs/tags/$tag:refs/tags/$tag" 2>/dev/null || git rev-parse -q --verify "refs/tags/$tag" >/dev/null \
@@ -64,6 +68,7 @@ if ! git diff --quiet "$tag" HEAD -- $paths; then
   echo "::error::Native files changed since $tag ($paths); ship a native release instead." >&2
   git diff --stat "$tag" HEAD -- $paths >&2; exit 1
 fi
+if $check; then echo "Nothing native changed since $tag."; exit 0; fi
 
 commit="$(git rev-parse --short=7 HEAD)"
 version="$name-ota.$(( $(date +%s) / 60 )).$commit"
