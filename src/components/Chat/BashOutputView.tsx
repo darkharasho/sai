@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { getShikiHighlighter, getActiveHighlightTheme } from '../../themes';
-import { prepareBashOutput, classifyLine } from './bashOutput';
+import { prepareBashOutput, classifyLine, segmentOutput } from './bashOutput';
 import { shikiInnerHtml } from './BashCommandView';
 
 const HEAD = 4;
@@ -55,17 +55,14 @@ export function BashOutputView({ command, output, live, showAll, onToggleShowAll
 }
 
 function Chunk({ lines, lang, diff }: { lines: string[]; lang: string | null; diff: boolean }) {
-  const text = lines.join('\n');
-  const html = useShiki(text, lang);
+  const segments = useMemo(() => (lang ? [] : segmentOutput(lines, diff)), [lines, lang, diff]);
   if (!lines.length) return null;
-  if (lang) {
-    return html
-      ? <code className="bash-out-code" dangerouslySetInnerHTML={{ __html: html }} />
-      : <code className="bash-out-code">{text}</code>;
-  }
+  if (lang) return <Highlighted text={lines.join('\n')} lang={lang} />;
   return (
     <>
-      {lines.map((line, i) => {
+      {segments.map((seg, i) => {
+        if (seg.kind === 'json') return <Highlighted key={i} text={seg.text} lang="json" />;
+        const { line } = seg;
         const { kind, prefix } = classifyLine(line, diff);
         return (
           <div key={i} className={`bash-out-line${kind === 'plain' ? '' : ` bash-out-${kind}`}`}>
@@ -76,6 +73,13 @@ function Chunk({ lines, lang, diff }: { lines: string[]; lang: string | null; di
       })}
     </>
   );
+}
+
+function Highlighted({ text, lang }: { text: string; lang: string }) {
+  const html = useShiki(text, lang);
+  return html
+    ? <code className="bash-out-code" dangerouslySetInnerHTML={{ __html: html }} />
+    : <code className="bash-out-code">{text}</code>;
 }
 
 function useShiki(text: string, lang: string | null): string | null {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { prepareBashOutput, classifyLine, readLang } from '../../../../src/components/Chat/bashOutput';
+import { prepareBashOutput, classifyLine, readLang, segmentOutput } from '../../../../src/components/Chat/bashOutput';
 
 const kind = (line: string, diff = false) => classifyLine(line, diff).kind;
 
@@ -92,5 +92,31 @@ describe('classifyLine', () => {
     expect(kind('@@ -1 +1 @@', true)).toBe('hunk');
     expect(kind('+++ b/x', true)).toBe('diffmeta');
     expect(kind('-removed', false)).toBe('plain');
+  });
+});
+
+describe('segmentOutput', () => {
+  it('finds one-line and pretty-printed JSON inside mixed output', () => {
+    const lines = ['{"ok":true,"warnings":[]}', 'exit 0: 0', '{', '  "a": [1, 2]', '}', 'done'];
+    expect(segmentOutput(lines, false)).toEqual([
+      { kind: 'json', text: '{"ok":true,"warnings":[]}' },
+      { kind: 'line', line: 'exit 0: 0' },
+      { kind: 'json', text: '{\n  "a": [1, 2]\n}' },
+      { kind: 'line', line: 'done' },
+    ]);
+  });
+
+  it('joins consecutive JSON lines (JSONL) into one block', () => {
+    expect(segmentOutput(['{"a":1}', '{"b":2}', 'x'], false)).toEqual([
+      { kind: 'json', text: '{"a":1}\n{"b":2}' },
+      { kind: 'line', line: 'x' },
+    ]);
+  });
+
+  it('leaves bracketed text, code blocks and diffs as lines', () => {
+    for (const lines of [['[1/3] Building'], ['[ok] done]'], ['{', '  foo();', '}']]) {
+      expect(segmentOutput(lines, false).every(s => s.kind === 'line'), lines.join('|')).toBe(true);
+    }
+    expect(segmentOutput(['{"a":1}'], true)).toEqual([{ kind: 'line', line: '{"a":1}' }]);
   });
 });

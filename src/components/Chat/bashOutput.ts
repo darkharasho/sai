@@ -112,3 +112,48 @@ export function classifyLine(line: string, diff: boolean): { kind: LineKind; pre
   if (OK.some(r => r.test(line))) return { kind: 'ok', prefix: 0 };
   return { kind: 'plain', prefix: 0 };
 }
+
+export type OutputSegment = { kind: 'json'; text: string } | { kind: 'line'; line: string };
+
+/** Longest JSON block (in lines) looked for inside mixed output. */
+const MAX_JSON_LINES = 400;
+
+/**
+ * Splits line-mode output into JSON runs (a one-line object/array, or a
+ * pretty-printed block opening at `{`/`[`) and ordinary lines.
+ */
+export function segmentOutput(lines: string[], diff: boolean): OutputSegment[] {
+  const out: OutputSegment[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const end = diff ? -1 : jsonEnd(lines, i);
+    if (end < 0) { out.push({ kind: 'line', line: lines[i] }); continue; }
+    const text = lines.slice(i, end + 1).join('\n');
+    const prev = out[out.length - 1];
+    // Consecutive values (JSONL) share one block: one highlight call per run.
+    if (prev?.kind === 'json') prev.text += '\n' + text;
+    else out.push({ kind: 'json', text });
+    i = end;
+  }
+  return out;
+}
+
+/** Index of the last line of a JSON value starting at line `i`, or -1. */
+function jsonEnd(lines: string[], i: number): number {
+  const first = lines[i].trim();
+  if (!/^[[{]/.test(first)) return -1;
+  const close = first[0] === '{' ? '}' : ']';
+  const limit = Math.min(lines.length, i + MAX_JSON_LINES);
+  let text = '';
+  for (let j = i; j < limit; j++) {
+    text += (j > i ? '\n' : '') + lines[j];
+    // Only try to parse where the value could end.
+    if (!lines[j].trimEnd().endsWith(close)) continue;
+    try {
+      const v = JSON.parse(text);
+      return v !== null && typeof v === 'object' ? j : -1;
+    } catch { /* keep reading */ }
+    // A one-line candidate that doesn't parse isn't the start of a block.
+    if (j === i) return -1;
+  }
+  return -1;
+}
