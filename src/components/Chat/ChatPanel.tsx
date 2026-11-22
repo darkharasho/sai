@@ -37,6 +37,10 @@ const consumedBrainstormSeeds = new Set<string>();
 const writeSeq = new WeakMap<object, number>();
 /** Phone: how long after a finger lifts its momentum may still scroll the chat up. */
 const TOUCH_MOMENTUM_MS = 1500;
+/** Desktop: how long after a wheel tick or scroll key its (smooth / kinetic) scroll may still move the chat. */
+const SCROLL_INPUT_MS = 1000;
+/** Keys that scroll the focused chat. */
+const SCROLL_KEYS = new Set(['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' ']);
 
 function programmaticWrite(flag: { current: boolean } | undefined, write: () => void) {
   if (!flag) { write(); return; }
@@ -833,6 +837,10 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode:
   // Phone: when a finger last touched the chat (Infinity while one is down).
   // Only a scroll near a touch is the user's; anything else is layout.
   const lastTouchRef = useRef(0);
+  // Desktop: when a wheel tick or scroll key last reached the chat (Infinity while
+  // a pointer is held on it, e.g. dragging the scrollbar). Cards re-laying out and
+  // the browser's scroll anchoring move scrollTop up with no input at all.
+  const lastScrollInputRef = useRef(0);
   const lastScrollTopRef = useRef(0);
   const lastScrollMaxRef = useRef(0);
   // Set by "Load earlier": the layout effect below keeps the viewport on the same message after the prepend.
@@ -1341,6 +1349,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode:
     const el = chatContainerRef.current;
     if (!el) return;
     const onWheel = (e: WheelEvent) => {
+      lastScrollInputRef.current = performance.now();
       if (e.deltaY < 0) {
         // The user took over scrolling — release any in-flight jump guard.
         jumpingRef.current = false;
@@ -1371,7 +1380,18 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode:
     const onTouchEnd = (e: TouchEvent) => {
       if (e.touches.length === 0) lastTouchRef.current = performance.now();
     };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (SCROLL_KEYS.has(e.key)) lastScrollInputRef.current = performance.now();
+    };
+    const onPointerDown = () => { lastScrollInputRef.current = Infinity; };
+    const onPointerUp = () => {
+      if (lastScrollInputRef.current === Infinity) lastScrollInputRef.current = performance.now() - SCROLL_INPUT_MS + 150;
+    };
     el.addEventListener('wheel', onWheel, { passive: true });
+    el.addEventListener('keydown', onKeyDown);
+    el.addEventListener('pointerdown', onPointerDown);
+    window.addEventListener('pointerup', onPointerUp);
+    window.addEventListener('pointercancel', onPointerUp);
     el.addEventListener('touchstart', onTouchStart, { passive: true });
     el.addEventListener('touchmove', onTouchMove, { passive: true });
     el.addEventListener('touchend', onTouchEnd, { passive: true });
@@ -1380,6 +1400,10 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode:
       el.removeEventListener('touchend', onTouchEnd);
       el.removeEventListener('touchcancel', onTouchEnd);
       el.removeEventListener('wheel', onWheel);
+      el.removeEventListener('keydown', onKeyDown);
+      el.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('pointerup', onPointerUp);
+      window.removeEventListener('pointercancel', onPointerUp);
       el.removeEventListener('touchstart', onTouchStart);
       el.removeEventListener('touchmove', onTouchMove);
     };
@@ -1583,10 +1607,13 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode:
     lastScrollTopRef.current = top;
     lastScrollMaxRef.current = max;
     let released = false;
-    // On the phone the user scrolls only by touch (a finger down, or its momentum
-    // just after). An upward move with no touch near it is the layout's: the
-    // keyboard resizing the chat, or the engine shifting scrollTop on its own.
-    const userCouldScroll = !isPhone() || performance.now() - lastTouchRef.current < TOUCH_MOMENTUM_MS;
+    // The user scrolls by touch (a finger down, or its momentum just after) and,
+    // off the phone, by wheel, scroll keys or a held pointer (scrollbar drag). An
+    // upward move with none of those near it is the layout's: a card re-laying
+    // out, scroll anchoring, the keyboard resizing the chat.
+    const t = performance.now();
+    const touched = t - lastTouchRef.current < TOUCH_MOMENTUM_MS;
+    const userCouldScroll = touched || (!isPhone() && t - lastScrollInputRef.current < SCROLL_INPUT_MS);
     // A jump's own smooth scroll moves up too; leave its guard alone (wheel/touchstart release it).
     if (dropped > 4 && userCouldScroll && !programmaticScroll.current && !clamped && !jumpingRef.current) {
       isAtBottomRef.current = false;
@@ -2092,7 +2119,9 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode:
     // untouched and resumes draining after this turn ends.
     const now = opts?.now ?? (!opts?.queue && turnLive && messageQueue.length > 0);
 
-    isAtBottomRef.current = true;
+    // Sending takes you to the latest, even from scrolled up: re-pin follow now
+    // (the button goes away) and head down before the bubble lands.
+    scrollToBottom();
     // A send that will wait in the queue has no bubble to fly into yet.
     const joinsTurn = turnLive && !opts?.queue && aiProvider === 'claude';
     if (!now && ((turnLive && !joinsTurn) || loadPausedRef.current || messageQueue.length > 0)) pendingComposerRectRef.current = null;

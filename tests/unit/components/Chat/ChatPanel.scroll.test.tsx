@@ -3,7 +3,7 @@
  * programmatic writes never release it. Plus the "Load N earlier messages" row.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { act, render, screen, fireEvent } from '@testing-library/react';
+import { act, render, screen, fireEvent, waitFor } from '@testing-library/react';
 import type { ComponentProps } from 'react';
 import { installMockSai } from '../../../helpers/ipc-mock';
 import { installMockChatlog, flushChatlog, emitChat, type MockChatlog } from '../../../helpers/chatlogMock';
@@ -12,7 +12,8 @@ vi.mock('../../../../src/lib/chat/migrateToLog', () => ({ ensureChatInLog: vi.fn
 vi.mock('../../../../src/components/Chat/ChatMessage', () => ({
   default: (props: any) => <div data-testid="chat-message" data-msg-id={props.message?.id} />,
 }));
-vi.mock('../../../../src/components/Chat/ChatInput', () => ({ default: () => <div data-testid="chat-input" /> }));
+let inputProps: any = null;
+vi.mock('../../../../src/components/Chat/ChatInput', () => ({ default: (props: any) => { inputProps = props; return <div data-testid="chat-input" />; } }));
 vi.mock('../../../../src/components/ThinkingAnimation', () => ({ default: () => <div /> }));
 
 import ChatPanel from '../../../../src/components/Chat/ChatPanel';
@@ -84,6 +85,7 @@ describe('ChatPanel scroll-follow', () => {
 
   it('touch scroll up releases follow', async () => {
     const { el, g } = await mountScroller();
+    fireEvent.touchStart(el, { touches: [{ clientY: 100 }] });
     scrollTo(el, g, 420);
     scrollTo(el, g, 300);
     g.writes.length = 0;
@@ -94,6 +96,7 @@ describe('ChatPanel scroll-follow', () => {
 
   it('a scroll back to the bottom re-pins follow', async () => {
     const { el, g } = await mountScroller();
+    fireEvent.wheel(el, { deltaY: -40 });
     scrollTo(el, g, 300);
     scrollTo(el, g, 480); // within the bottom threshold
     grow(g, 1200);
@@ -112,6 +115,7 @@ describe('ChatPanel scroll-follow', () => {
 
   it('small upward events after a release do not re-pin (touch momentum tail inside the threshold)', async () => {
     const { el, g } = await mountScroller();
+    fireEvent.pointerDown(el); // dragging the scrollbar
     scrollTo(el, g, 470); // within 60px of the bottom; drop of 30 releases
     scrollTo(el, g, 468); // small upward events, still within the threshold
     scrollTo(el, g, 466);
@@ -147,6 +151,61 @@ describe('ChatPanel scroll-follow', () => {
     g.writes.length = 0;
     grow(g, 1200);
     expect(g.writes.length).toBeGreaterThan(0);
+  });
+
+  it('an upward shift with no user input (a card re-laying out) keeps following', async () => {
+    const { el, g } = await mountScroller();
+    g.height = 1100; // content grew while the browser moved scrollTop up (scroll anchoring)
+    scrollTo(el, g, 431);
+    g.writes.length = 0;
+    grow(g, 1200);
+    expect(g.writes.length).toBeGreaterThan(0);
+    expect(screen.queryByTestId('follow-btn')).toBeNull();
+  });
+
+  it('dragging the scrollbar up releases follow', async () => {
+    const { el, g } = await mountScroller();
+    fireEvent.pointerDown(el);
+    scrollTo(el, g, 300);
+    fireEvent.pointerUp(window);
+    g.writes.length = 0;
+    grow(g, 1200);
+    expect(g.writes).toEqual([]);
+  });
+
+  it('a keyboard scroll up releases follow', async () => {
+    const { el, g } = await mountScroller();
+    fireEvent.keyDown(el, { key: 'PageUp' });
+    scrollTo(el, g, 300);
+    g.writes.length = 0;
+    grow(g, 1200);
+    expect(g.writes).toEqual([]);
+  });
+
+  it('sending while scrolled up re-pins follow and heads for the bottom', async () => {
+    const { el, g } = await mountScroller();
+    fireEvent.wheel(el, { deltaY: -40 });
+    scrollTo(el, g, 100);
+    expect(screen.getByTestId('follow-btn')).toBeTruthy();
+    g.writes.length = 0;
+    // Reduced motion: the scroll to the bottom is one instant write.
+    vi.stubGlobal('matchMedia', (q: string) => ({ matches: q.includes('reduce'), addEventListener() {}, removeEventListener() {} }));
+    await act(async () => { await inputProps.onSend('hello'); });
+    await waitFor(() => expect(screen.queryByTestId('follow-btn')).toBeNull());
+    expect(g.writes).toContain(1000);
+  });
+
+  it('a queued send while scrolled up mid-turn (no bubble yet) still re-pins follow', async () => {
+    const { el, g } = await mountScroller();
+    await emitChat(sai, { type: 'streaming_start', projectPath: '/project', scope: 'c1', turnSeq: 1 });
+    fireEvent.wheel(el, { deltaY: -40 });
+    scrollTo(el, g, 100);
+    expect(screen.getByTestId('follow-btn')).toBeTruthy();
+    vi.stubGlobal('matchMedia', (q: string) => ({ matches: q.includes('reduce'), addEventListener() {}, removeEventListener() {} }));
+    g.writes.length = 0;
+    await act(async () => { inputProps.onQueue('later', 'later'); await new Promise(r => setTimeout(r, 50)); });
+    await waitFor(() => expect(screen.queryByTestId('follow-btn')).toBeNull());
+    expect(g.writes).toContain(1000);
   });
 
   it('wheel up still releases follow', async () => {
