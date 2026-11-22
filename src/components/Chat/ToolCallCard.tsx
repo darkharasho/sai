@@ -21,6 +21,8 @@ import { parseSearchResults, isSearchTool, highlightMatches, type SearchRow } fr
 import { TaskRegistryContext, type TaskInfo } from './taskRegistry';
 import { ToolResultImagePreview } from './ToolResultImagePreview';
 import { parseToolError } from '../../lib/toolResultContent';
+import { BashCommandView } from './BashCommandView';
+import { BashOutputView } from './BashOutputView';
 
 function parseMcpName(name: string): { server: string; tool: string } | null {
   if (!name.startsWith('mcp__')) return null;
@@ -945,7 +947,7 @@ function BashInOut({ command, output, live, showAll, onToggleShowAll }: {
   const inRow = command ? (
     <div className="bash-io-row bash-in-row">
       <span className="bash-io-label bash-in-label">IN</span>
-      <div className="bash-io-command" data-testid="bash-full-command">{command}</div>
+      <div className="bash-io-command" data-testid="bash-full-command"><BashCommandView command={command} /></div>
     </div>
   ) : null;
 
@@ -966,11 +968,6 @@ function BashInOut({ command, output, live, showAll, onToggleShowAll }: {
     );
   }
 
-  const outputLines = output.split('\n').filter(l => l.trim());
-  const MAX_OUT = 8;
-  const isTruncated = outputLines.length > MAX_OUT;
-  const visibleLines = showAll ? outputLines : outputLines.slice(0, MAX_OUT);
-
   return (
     <div className="tool-call-body bash-inout-body">
       {inRow}
@@ -984,17 +981,7 @@ function BashInOut({ command, output, live, showAll, onToggleShowAll }: {
             stickToBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
           }}
         >
-          {visibleLines.map((line, i) => (
-            <div key={i} className="bash-out-line">
-              <span className="bash-out-bullet">•</span>
-              <span>{line}</span>
-            </div>
-          ))}
-          {isTruncated && (
-            <button className="tool-call-show-more bash-show-more" onClick={onToggleShowAll}>
-              {showAll ? 'Show less' : `Show all (${outputLines.length} lines)`}
-            </button>
-          )}
+          <BashOutputView command={command} output={output} live={live} showAll={showAll} onToggleShowAll={onToggleShowAll} />
         </div>
       </div>
     </div>
@@ -1756,32 +1743,91 @@ export default function ToolCallCard({ toolCall, defaultExpanded = true, metaRun
             font-size: 12px;
             color: var(--text);
             white-space: pre-wrap;
-            word-break: break-all;
+            overflow-wrap: anywhere;
+          }
+          .bash-io-command code {
+            font: inherit;
+            background: none;
+            padding: 0;
+          }
+          .bash-cmd-shell, .bash-cmd-heredoc-end {
+            white-space: pre-wrap;
+          }
+          .bash-cmd-heredoc {
+            position: relative;
+            margin: 3px 0;
+            padding: 6px 10px;
+            border-left: 2px solid var(--border-hairline);
+            border-radius: 0 6px 6px 0;
+            background: color-mix(in srgb, var(--text) 3%, transparent);
+            white-space: pre-wrap;
+          }
+          .bash-cmd-heredoc[data-lang]::after {
+            content: attr(data-lang);
+            position: absolute;
+            top: 5px;
+            right: 6px;
+            font-size: 9.5px;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+            color: var(--text-muted);
+            border: 1px solid var(--border-hairline);
+            border-radius: 4px;
+            padding: 0 5px;
+            background: var(--bg-elevated, transparent);
+            pointer-events: none;
+          }
+          .bash-cmd-heredoc-end {
+            color: var(--text-muted);
           }
           .bash-out-lines {
             display: flex;
             flex-direction: column;
             gap: 2px;
             flex: 1;
+            min-width: 0;
           }
-          .bash-out-line {
-            display: flex;
-            align-items: baseline;
-            gap: 6px;
+          .bash-out-body {
             font-family: 'Geist Mono', 'JetBrains Mono', monospace;
             font-size: 11px;
+            line-height: 1.5;
             color: var(--text-secondary);
+            user-select: text;
+            min-width: 0;
           }
-          .bash-out-bullet {
+          .bash-out-line {
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+            min-height: 1.5em;
+          }
+          .bash-out-code {
+            display: block;
+            font: inherit;
+            background: none;
+            padding: 0;
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+          }
+          .bash-out-loc { color: var(--text-muted); }
+          .bash-out-meta { color: var(--text-muted); font-style: italic; }
+          .bash-out-error, .bash-out-del { color: var(--red); }
+          .bash-out-warn { color: var(--orange); }
+          .bash-out-ok, .bash-out-add { color: var(--green); }
+          .bash-out-hunk { color: var(--accent); }
+          .bash-out-diffmeta { color: var(--text-muted); font-weight: 600; }
+          .bash-out-del { background: color-mix(in srgb, var(--red) 8%, transparent); }
+          .bash-out-add { background: color-mix(in srgb, var(--green) 8%, transparent); }
+          .bash-out-more {
+            display: block;
+            margin: 2px 0;
+            padding: 0;
+            border: none;
+            background: none;
+            font: inherit;
             color: var(--text-muted);
-            flex-shrink: 0;
+            cursor: pointer;
           }
-          .bash-show-more {
-            margin-top: 4px;
-            border-top: none !important;
-            text-align: left;
-            padding: 2px 0;
-          }
+          .bash-out-more:hover { color: var(--accent); }
           /* Todo list */
           .todo-list-body {
             border-top: 1px solid var(--border-hairline);

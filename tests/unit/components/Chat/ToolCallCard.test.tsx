@@ -360,7 +360,8 @@ describe('ToolCallCard search rendering', () => {
     const header = container.querySelector('.tool-call-header') as HTMLElement;
     expect(header.className).toContain('tool-call-header-expandable');
     if (!container.querySelector('[data-testid="bash-full-command"]')) fireEvent.click(header);
-    expect(container.querySelector('[data-testid="bash-full-command"]')?.textContent).toBe(command);
+    // Each top-level command goes on its own line.
+    expect(container.querySelector('[data-testid="bash-full-command"]')?.textContent).toBe(command.replace(' && ', ' &&\n'));
   });
 
   it('keeps a Codex web-search query readable in the expanded card', () => {
