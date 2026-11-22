@@ -220,7 +220,14 @@ def submit(asc: Asc, app: str, release: str, whats_new: str | None, replace_wait
         if whats_new and current != whats_new or not current:
             if not whats_new:
                 raise RuntimeError(f"What's New is empty for {loc['attributes']['locale']}; pass --whats-new")
-            asc.patch("appStoreVersionLocalizations", loc["id"], {"whatsNew": whats_new})
+            try:
+                asc.patch("appStoreVersionLocalizations", loc["id"], {"whatsNew": whats_new})
+            except RuntimeError as e:
+                # An app's first version has no What's New: App Store Connect refuses to edit it.
+                if "cannot be edited" not in str(e):
+                    raise
+                print(f"What's New can't be set for {loc['attributes']['locale']} (first version); skipped")
+                continue
             print(f"Set What's New for {loc['attributes']['locale']}")
 
     drafts = [s for s in submissions(asc, app) if s["attributes"]["state"] == "READY_FOR_REVIEW"]
