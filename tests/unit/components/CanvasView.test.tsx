@@ -168,4 +168,52 @@ describe('CanvasView', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(0); });
     expect(writes[0]).toContain('- [x] a');
   });
+
+  it('both sides rewriting a block keeps the user text and shows the conflict', async () => {
+    const { store, writes } = await setup('first\n\nsecond\n');
+    view(store);
+    fireEvent.click(screen.getByLabelText('Edit block 2'));
+    fireEvent.change(screen.getByLabelText('Edit block 2', { selector: 'textarea' }), { target: { value: 'second mine\n' } });
+    await act(async () => { await store.onDiskChange(P, 'first\n\nsecond agent\n', true); });
+    fireEvent.click(screen.getByText('Save'));
+    await act(async () => { await vi.advanceTimersByTimeAsync(400); });
+    expect(writes[writes.length - 1]).toContain('second mine');
+    expect(screen.getByText(/Agent also changed this/)).toBeTruthy();
+    await act(async () => { fireEvent.click(screen.getByText("Use agent's")); await vi.advanceTimersByTimeAsync(0); });
+    expect(writes[writes.length - 1]).toContain('second agent');
+  });
+
+  it('path change resets editor and flushes the old write to the old path', async () => {
+    const { store, writes } = await setup('old one\n\nold two\n');
+    const P2 = '/ws/.sai/canvas/other.md';
+    await store.onDiskChange(P2, 'new one\n\nnew two\n', true);
+    const spies = { onSendNow() {}, onHoldToggle() {}, onOpenSource() {}, onOpenCanvas() {} };
+    const { rerender } = render(<CanvasView path={P} store={store} {...base} {...spies} />);
+    fireEvent.click(screen.getByLabelText('Edit block 2'));
+    fireEvent.change(screen.getByLabelText('Edit block 2', { selector: 'textarea' }), { target: { value: 'draft' } });
+    fireEvent.click(screen.getByText('Save'));
+    rerender(<CanvasView path={P2} store={store} {...base} {...spies} />);
+    expect(document.querySelector('textarea')).toBeNull();
+    expect(screen.getByText('new two')).toBeTruthy();
+    expect(screen.queryByText('draft')).toBeNull();
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(writes[0]).toContain('draft');
+    expect(store.get(P2)!.content).toBe('new one\n\nnew two\n');
+  });
+
+  it('renders a checklist indented by 1-3 spaces', async () => {
+    const { store, writes } = await setup(' - [ ] a\n - [ ] b\n');
+    view(store);
+    fireEvent.click(screen.getByLabelText('b'));
+    await act(async () => { await vi.advanceTimersByTimeAsync(400); });
+    expect(writes[0]).toContain(' - [x] b');
+  });
+
+  it('emit bridge is injected before the user html', async () => {
+    const { store } = await setup('```html\n<script>sai.canvas.emit(1)</script>\n```\n');
+    view(store);
+    const doc = document.querySelector('iframe')!.getAttribute('srcdoc')!;
+    expect(doc.indexOf('__saiCanvasEmit')).toBeGreaterThan(-1);
+    expect(doc.indexOf('__saiCanvasEmit')).toBeLessThan(doc.indexOf('sai.canvas.emit(1)'));
+  });
 });

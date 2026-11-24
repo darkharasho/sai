@@ -237,7 +237,7 @@ export function createCanvasStore(deps: CanvasStoreDeps) {
     },
 
     /** User edit from the pane; writes the file (caller debounces). */
-    userWrite(path: string, content: string): Promise<void> {
+    userWrite(path: string, content: string, conflicts?: MergeConflict[]): Promise<void> {
       return serialize(path, async () => {
         let e = canvases.get(path);
         if (!e) {
@@ -246,6 +246,11 @@ export function createCanvasStore(deps: CanvasStoreDeps) {
           canvases.set(path, e);
         } else {
           applyUserContent(e, content);
+        }
+        if (conflicts && conflicts.length > 0) {
+          // The caller's merge found blocks both sides changed: keep them visible.
+          const idx = new Set(conflicts.map((c) => c.index));
+          e.conflicts = [...conflicts, ...e.conflicts.filter((c) => !idx.has(c.index))].sort((a, b) => a.index - b.index);
         }
         changed(path);
         await saiWrite(path, e, content);

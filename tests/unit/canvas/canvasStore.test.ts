@@ -331,4 +331,12 @@ describe('canvasStore', () => {
     expect(writes).toEqual(['- [x] a\n\nx\n', '- [x] a\n\ny\n']);
     expect(store.get(P)?.content).toBe('- [x] a\n\ny\n');
   });
+
+  it('userWrite records caller-supplied conflicts, replacing one at the same index', async () => {
+    const { store } = await seeded('one\n\ntwo\n');
+    await store.userWrite(P, 'one\n\ntwo mine\n', [{ index: 1, ours: 'two mine', theirs: 'two old' }]);
+    expect(store.get(P)!.conflicts).toEqual([{ index: 1, ours: 'two mine', theirs: 'two old' }]);
+    await store.userWrite(P, 'one\n\ntwo mine\n', [{ index: 1, ours: 'two mine', theirs: 'two newer' }]);
+    expect(store.get(P)!.conflicts).toEqual([{ index: 1, ours: 'two mine', theirs: 'two newer' }]);
+  });
 });

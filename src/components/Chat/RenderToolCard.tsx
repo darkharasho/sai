@@ -174,7 +174,9 @@ export function RenderedHtml({ entry, enableSubmit, onNaturalWidth, onEmit }: {
   const sandbox = entry.appAccess === true && appAccessGranted
     ? 'allow-scripts allow-same-origin'
     : 'allow-scripts';
-  const bridge = (enableSubmit ? SUBMIT_BRIDGE : '') + (onEmit ? CANVAS_EMIT_BRIDGE : '');
+  const bridge = enableSubmit ? SUBMIT_BRIDGE : '';
+  // Canvas emit goes in <head> so inline scripts in the user's HTML can already call it.
+  const headBridge = onEmit ? CANVAS_EMIT_BRIDGE : '';
   // Memoized per background value: recomputing on theme change would alter the
   // srcDoc and reload the iframe, wiping in-progress form input (spec: theme
   // changes don't repaint mounted mocks).
@@ -183,7 +185,7 @@ export function RenderedHtml({ entry, enableSubmit, onNaturalWidth, onEmit }: {
     [entry.background],
   );
   const doc =
-    `<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="${SANDBOX_CSP}"></head>` +
+    `<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="${SANDBOX_CSP}">${headBridge}</head>` +
     `<body style="margin:0;background:${bodyBg}">${userHtml}${bridge}${SIZE_REPORTER}</body></html>`;
 
   useEffect(() => {

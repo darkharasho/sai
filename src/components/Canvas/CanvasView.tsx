@@ -51,10 +51,13 @@ interface Item { checked: boolean; text: string }
 /** Top-level `- [ ] text` items of a checklist block with their continuation lines. */
 function parseItems(source: string): Item[] {
   const items: Item[] = [];
+  let indent = -1; // the first item's indent (0-3) marks the top level
   for (const line of source.split('\n')) {
-    const m = /^(?:[*+-]|\d+[.)])[ \t]+\[([ xX])\][ \t]*(.*)$/.exec(line);
-    if (m) items.push({ checked: m[1] !== ' ', text: m[2] });
-    else if (items.length && line.trim()) items[items.length - 1].text += '\n' + line.replace(/^\s{1,4}/, '');
+    const m = /^( {0,3})(?:[*+-]|\d+[.)])[ \t]+\[([ xX])\][ \t]*(.*)$/.exec(line);
+    if (m && (indent < 0 || m[1].length === indent)) {
+      indent = m[1].length;
+      items.push({ checked: m[2] !== ' ', text: m[3] });
+    } else if (items.length && line.trim()) items[items.length - 1].text += '\n' + line.replace(/^\s{1,4}/, '');
   }
   return items;
 }
@@ -99,7 +102,12 @@ function Checklist({ block, onToggle, onNote }: {
   );
 }
 
+/** Keyed by path so editor/draft/pending state never leaks between canvases. */
 export default function CanvasView(props: CanvasViewProps) {
+  return <CanvasViewInner key={props.path} {...props} />;
+}
+
+function CanvasViewInner(props: CanvasViewProps) {
   const { path, store, agentStatus, sendIn, pending, onSendNow, onHoldToggle, onOpenSource, onOpenCanvas } = props;
   const state = useSyncExternalStore(store.subscribe, () => store.get(path));
   const list = useSyncExternalStore(store.subscribe, () => store.list());
@@ -120,7 +128,10 @@ export default function CanvasView(props: CanvasViewProps) {
 
   const commitEdit = (index: number, base: string, draft: string) => {
     const draftDoc = replaceBlock(base, index, draft);
-    apply((cur) => mergeBlocks(base, draftDoc, cur).merged);
+    apply((cur) => {
+      const r = mergeBlocks(base, draftDoc, cur);
+      return { doc: r.merged, conflicts: r.conflicts };
+    });
     setEditing(null);
   };
 
