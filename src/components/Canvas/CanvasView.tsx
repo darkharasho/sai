@@ -4,7 +4,7 @@ import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
 import { Pencil } from 'lucide-react';
 import './canvas.css';
-import { splitBlocks, replaceBlock, toggleTask, addTaskNote, canvasTitle, type CanvasBlock } from '../../canvas/canvasBlocks';
+import { splitBlocks, replaceBlock, toggleTask, addTaskNote, canvasTitle, blockName, type CanvasBlock } from '../../canvas/canvasBlocks';
 import { mergeBlocks } from '../../canvas/canvasMerge';
 import type { CanvasStore } from '../../canvas/canvasStore';
 import type { RenderEntry } from '../../render/renderStore';
@@ -63,6 +63,18 @@ const mdComponents = {
 
 const Md = ({ children }: { children: string }) => (
   <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]} components={mdComponents}>{children}</ReactMarkdown>
+);
+
+/** Inline-only components for a checklist label: a label may not hold block content. */
+const inlineMdComponents = { ...mdComponents, p: ({ children }: { children?: ReactNode }) => <>{children}</> };
+
+/**
+ * A checklist label as inline Markdown (links, `code`, **bold**): same safe pipeline as Md, no
+ * rehype-raw. A link is interactive content, so the label doesn't forward its click to the checkbox;
+ * the `a` override's preventDefault (it opens externally) cancels label activation as well.
+ */
+const InlineMd = ({ children }: { children: string }) => (
+  <ReactMarkdown remarkPlugins={[remarkGfm]} components={inlineMdComponents}>{children}</ReactMarkdown>
 );
 
 interface Item { checked: boolean; text: string }
@@ -235,7 +247,7 @@ function CanvasViewInner(props: CanvasViewProps) {
                   ) : b.kind === 'mermaid' ? (
                     <MermaidRender diagram={fenceBody(b.source)} />
                   ) : b.kind === 'html' ? (
-                    <CanvasHtml block={b} onEmit={(data) => store.userEmit(path, b.label ?? `block ${b.index + 1}`, data)} />
+                    <CanvasHtml block={b} onEmit={(data) => store.userEmit(path, blockName(blocks, b.index), data)} />
                   ) : (
                     <div className="md-preview-body"><Md>{b.source}</Md></div>
                   )}

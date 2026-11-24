@@ -269,4 +269,64 @@ describe('CanvasView', () => {
     expect(document.querySelector('iframe')).toBeNull();
     expect(document.querySelector('.raw-x')).toBeNull();
   });
+  it('D4: an untitled html block emits under its nearest preceding heading', async () => {
+    const { store } = await setup('# Plan\n\n## Shop flow\n\n```html\n<b>hi</b>\n```\n');
+    const spy = vi.spyOn(store, 'userEmit');
+    view(store);
+    const iframe = document.querySelector('iframe')!;
+    act(() => {
+      window.dispatchEvent(new MessageEvent('message', { data: { __saiCanvasEmit: 1, data: 1 }, source: iframe.contentWindow }));
+    });
+    expect(spy).toHaveBeenCalledWith(P, 'Shop flow', 1);
+  });
+
+  describe('D2: checklist labels are inline Markdown', () => {
+    const LINKY = '- [ ] Download dependencies from [Thunderstore](https://thunderstore.io)\n- [ ] Run `npm ci` **first**\n';
+
+    it('renders links, code and bold instead of raw Markdown, with no raw HTML', async () => {
+      const { store } = await setup(LINKY + '- [ ] tag <b class="raw-y">x</b>\n');
+      view(store);
+      const link = screen.getByRole('link', { name: 'Thunderstore' });
+      expect(link.getAttribute('href')).toBe('https://thunderstore.io');
+      expect(screen.getByText('npm ci').tagName).toBe('CODE');
+      expect(screen.getByText('first').tagName).toBe('STRONG');
+      expect(document.body.textContent).not.toContain('[Thunderstore]');
+      expect(document.body.textContent).not.toContain('`npm ci`');
+      expect(document.body.textContent).not.toContain('**first**');
+      expect(document.querySelector('.raw-y')).toBeNull();
+      // The checkbox's accessible name is the rendered label text.
+      expect(screen.getByLabelText('Download dependencies from Thunderstore')).toBeTruthy();
+      // Labels stay inline: no <p> inside a <label>.
+      expect(document.querySelector('label p')).toBeNull();
+    });
+
+    it('clicking a label link opens it externally and does not toggle the checkbox', async () => {
+      const openExternal = vi.fn();
+      (window as any).sai = { ...(window as any).sai, openExternal };
+      const { store, writes } = await setup(LINKY);
+      view(store);
+      const box = screen.getByLabelText('Download dependencies from Thunderstore') as HTMLInputElement;
+      fireEvent.click(screen.getByRole('link', { name: 'Thunderstore' }));
+      expect(openExternal).toHaveBeenCalledWith('https://thunderstore.io');
+      expect(box.checked).toBe(false);
+      await act(async () => { await vi.advanceTimersByTimeAsync(400); });
+      expect(writes).toHaveLength(0);
+    });
+
+    it('clicking the label text (not the link) still toggles', async () => {
+      const { store, writes } = await setup(LINKY);
+      view(store);
+      fireEvent.click(screen.getByText(/Download dependencies from/));
+      await act(async () => { await vi.advanceTimersByTimeAsync(400); });
+      expect(writes[0]).toContain('- [x] Download dependencies from [Thunderstore](https://thunderstore.io)');
+    });
+
+    it('editing the block edits the raw label source', async () => {
+      const { store } = await setup(LINKY);
+      view(store);
+      fireEvent.click(screen.getByRole('button', { name: 'Edit block 1' }));
+      const ta = screen.getByRole('textbox', { name: 'Edit block 1' }) as HTMLTextAreaElement;
+      expect(ta.value).toBe(LINKY);
+    });
+  });
 });
