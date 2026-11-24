@@ -9,12 +9,12 @@ export interface MergeConflict {
 type Side = 'ours' | 'theirs';
 
 /** How one side treated a base block. */
-type State =
+export type State =
   | { kind: 'kept'; block: CanvasBlock }
   | { kind: 'deleted' }
   | { kind: 'replaced'; block: CanvasBlock };
 
-interface SideDiff {
+export interface SideDiff {
   states: State[];
   /** inserted[i + 1] = blocks inserted after base block i (slot 0 = before the first). */
   inserted: CanvasBlock[][];
@@ -97,7 +97,7 @@ function pairBySimilarity(a: CanvasBlock[], b: CanvasBlock[]): Array<[number, nu
  * blocks pair up in order with unmatched other blocks (a replacement); leftovers are
  * deletions (base side) or insertions (other side).
  */
-function diffAgainstBase(base: CanvasBlock[], other: CanvasBlock[]): SideDiff {
+export function diffAgainstBase(base: CanvasBlock[], other: CanvasBlock[]): SideDiff {
   const states: State[] = new Array(base.length);
   const inserted: CanvasBlock[][] = Array.from({ length: base.length + 1 }, () => []);
   const pairs = lcsPairs(base, other);
