@@ -126,4 +126,100 @@ test.describe('live canvas', () => {
     expect(delivered).toContain('- ☑ "Launch game"');
     expect(delivered).not.toContain('sharing this canvas');
   });
+
+  test('redesign: section cards, a failed item, and stat tiles only with a stats block', async ({ window }) => {
+    await window.setViewportSize({ width: 1900, height: 1500 });
+    const chatInput = window.locator('textarea').first();
+    await chatInput.waitFor({ state: 'visible', timeout: 20000 });
+    await chatInput.click({ force: true });
+    await chatInput.fill('make me a test plan');
+    await window.keyboard.press('Enter');
+    await expect.poll(() => window.evaluate(() => (window as any).__canvas.sent.length)).toBe(1);
+
+    const ws = await window.evaluate(() => (window as any).sai.getCwd());
+    const file = `${ws}/.sai/canvas/shop-test.md`.replace(/^\/var(?=\/home\/)/, '');
+    const write = (content: string) => window.evaluate(([w, f, c]) => {
+      const x = (window as any).__canvas;
+      x.fs[f] = c;
+      x.subs.forEach((cb: any) => cb({ projectPath: w, path: f, content: c }));
+    }, [ws, file, content]);
+
+    const body = [
+      '## Shop flow', '',
+      '```mermaid', 'flowchart LR',
+      '  A[Launch game] --> B[Load save] --> C[Press F6] --> D{Shop open?}',
+      '  D -- closed --> E[Check BepInEx log]', '  D -- opens --> F[Buy item] --> G{Enough $?}',
+      '  G --> H[Deduct]', '  G --> I[Block buy]', '  class A,B,C pass', '  class F fail', '  class D current', '```', '',
+      '## Launch & load', '',
+      '- [x] Install dependencies from [Thunderstore](https://thunderstore.io) into the Dev profile',
+      '- [x] Launch the game and load any save',
+      '- [x] Log shows `[ShopMod] loaded successfully`', '  > Seen at 14:02:11, no warnings', '',
+      '## Shop', '',
+      '- [x] Press `F6` — shop window opens',
+      '- [!] Buy the cheapest item', '  > Crashed here — game froze ~2s then closed. Log ends at `NullReferenceException`',
+      '- [ ] Retry the purchase with `ShopMod.Debug=true` and copy the log here',
+      '- [ ] Advance a level — prices go up ~15%', '',
+      '## Price check', '',
+      '| Item | Level 1 | Level 2 | Expected | Status |', '|---|---|---|---|---|',
+      '| Health pack | $40 | $46 | $46 | Pass |', '| Stamina upgrade | $120 | — | $138 | Not run |', '| Crystal | $300 | — | $345 | Blocked by crash |', '',
+    ].join('\n');
+    const head = '# ShopMod — Manual test checklist\n\nBepInEx mod for R.E.P.O. · shop opens with `F6`, prices scale per level\n\n';
+    await write(head + body);
+
+    const cards = window.locator('section.canvas-card');
+    await expect(cards).toHaveCount(4, { timeout: 10000 });
+    await expect(cards.nth(0)).toHaveAttribute('aria-label', 'Shop flow');
+    await expect(window.locator('.canvas-h1')).toHaveText('ShopMod — Manual test checklist');
+    await expect(window.locator('.canvas-subtitle')).toContainText('BepInEx mod for R.E.P.O.');
+    // No ```stats block: no tiles.
+    await expect(window.locator('.canvas-stats')).toHaveCount(0);
+    // The failed item renders as failed, with its note as a red callout.
+    const failed = window.locator('li.canvas-task--failed');
+    await expect(failed).toHaveCount(1);
+    await expect(failed).toContainText('Buy the cheapest item');
+    await expect(failed.locator('.canvas-note--bad')).toContainText('NullReferenceException');
+    await expect(cards.nth(2).locator('.canvas-card__count')).toHaveText('1 / 4');
+    await expect(cards.nth(0).locator('.canvas-diagram svg')).toBeVisible({ timeout: 15000 });
+
+    // The agent adds a stats block and a step: tiles appear, the new step carries the agent marker.
+    const stats = '```stats\nProgress: auto\nPassed: auto\nFailed: auto\nBuild: v0.3.1-dev\n```\n\n';
+    await write(head + stats + body.replace('- [ ] Advance a level', '- [ ] Check the shop restocks after a level\n- [ ] Advance a level'));
+    await expect(window.locator('.canvas-stat')).toHaveCount(4, { timeout: 10000 });
+    await expect(window.locator('.canvas-stat').nth(0)).toContainText('4 of 8 steps');
+    await expect(window.locator('.canvas-stat').nth(2)).toContainText('1');
+    await expect(window.locator('li.canvas-agent-edge')).toContainText('Check the shop restocks');
+    // Screenshot for the visual check against the approved mockup (agent marker visible).
+    const dir = '/var/tmp/sai-dogfood/shots';
+    await window.waitForTimeout(800);
+    // The pane is short in the harness layout: shoot the page in viewport-sized slices.
+    const scroller = window.locator('.canvas-scroll');
+    const { total, step } = await scroller.evaluate((el) => ({ total: el.scrollHeight, step: el.clientHeight }));
+    for (let i = 0, y = 0; y < total && i < 8; i++, y += step) {
+      await scroller.evaluate((el, top) => { el.scrollTop = top; }, y);
+      await window.waitForTimeout(150);
+      await scroller.screenshot({ path: `${dir}/redesign-canvas-${i + 1}.png` }).catch(() => {});
+    }
+    await scroller.evaluate((el) => { el.scrollTop = 0; });
+
+    // The user ticks something: the header shows both sides' edit times.
+    await window.getByRole('checkbox', { name: 'Check the shop restocks after a level' }).click();
+    await expect(window.locator('.canvas-meta')).toContainText('you');
+    await expect(window.locator('li.canvas-agent-edge')).toHaveCount(0);
+    // Agent still busy: the pill waits for it.
+    await expect(window.locator('.canvas-pill')).toHaveText('Will send when agent is free');
+    await window.locator('.canvas-header').screenshot({ path: `${dir}/redesign-header-busy.png` }).catch(() => {});
+    // Turn ends: the countdown pill names the user's pending changes.
+    await window.evaluate(() => {
+      const c = (window as any).__canvas;
+      c.claude.forEach((cb: any) => cb({ projectPath: c.projectPath, scope: c.scope, type: 'result' }));
+      c.claude.forEach((cb: any) => cb({ projectPath: c.projectPath, scope: c.scope, type: 'done' }));
+    });
+    await expect(window.locator('.canvas-pill')).toContainText(/Sending your 1 change in \ds/, { timeout: 5000 });
+    await window.locator('.canvas-header').screenshot({ path: `${dir}/redesign-header.png` }).catch(() => {});
+    await window.getByRole('button', { name: 'Hold' }).click();
+
+    await window.locator('li.canvas-task--failed').hover();
+    await window.waitForTimeout(300);
+    await window.locator('section.canvas-card').nth(2).screenshot({ path: `${dir}/redesign-hover.png` }).catch(() => {});
+  });
 });

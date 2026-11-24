@@ -12,6 +12,7 @@
   --cv-dim: var(--text-muted);
   --cv-ok: #4ade80;
   --cv-bad: #f87171;
+  --cv-strong: color-mix(in srgb, var(--text) 55%, #fff);
   --cv-mono: 'Geist Mono', 'JetBrains Mono', 'Fira Code', monospace;
   display: flex; flex-direction: column; height: 100%; overflow: hidden; color: var(--text);
   background: var(--surface-1);
@@ -26,7 +27,7 @@
 .canvas-header__id { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .canvas-crumb { font-family: var(--cv-mono); font-size: 11px; color: var(--cv-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .canvas-crumb__file { color: var(--cv-muted); }
-.canvas-title { margin: 0; font-size: 14px; font-weight: 600; color: var(--text); letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.canvas-title { margin: 0; font-size: 14px; font-weight: 600; color: var(--cv-strong); letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .canvas-meta { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--cv-muted); align-self: flex-end; padding-bottom: 1px; }
 .canvas-meta__who { display: inline-flex; align-items: center; gap: 6px; }
 .canvas-meta__sep { color: var(--cv-dim); }
@@ -114,7 +115,7 @@
 .canvas-block:hover > .canvas-block__edit, .canvas-block__edit:focus-visible { opacity: 1; }
 
 .canvas-page-title { margin-bottom: 4px; }
-.canvas-h1 { margin: 0; font-size: 26px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.25; color: var(--text); }
+.canvas-h1 { margin: 0; font-size: 26px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.25; color: var(--cv-strong); }
 .canvas-subtitle { color: var(--cv-muted); font-size: 14px; margin-bottom: 6px; }
 .canvas-subtitle .canvas-md p { margin: 0; }
 .canvas-loose { margin: 14px 0; }
@@ -132,7 +133,7 @@
 }
 .canvas-card:has(> .canvas-card__head:only-child) .canvas-card__head { border-bottom: 0; }
 .canvas-card__head .canvas-editor { flex: 1; }
-.canvas-card__title { margin: 0; font-size: 14.5px; font-weight: 600; color: var(--text); letter-spacing: -0.01em; }
+.canvas-card__title { margin: 0; font-size: 14.5px; font-weight: 600; color: var(--cv-strong); letter-spacing: -0.01em; }
 .canvas-card__count { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: var(--cv-muted); font-variant-numeric: tabular-nums; }
 .canvas-minibar { position: relative; width: 60px; height: 4px; border-radius: 999px; background: var(--surface-4); overflow: hidden; }
 .canvas-minibar > span { position: absolute; inset: 0 auto 0 0; border-radius: 999px; background: var(--accent); transition: width var(--dur-base, 180ms) var(--ease-out-soft, ease); }
@@ -150,7 +151,7 @@
 
 /* ---------- agent-change marker ---------- */
 .canvas-agent-edge { box-shadow: inset 2px 0 0 var(--accent); }
-.canvas-loose.canvas-agent-edge, .canvas-subtitle.canvas-agent-edge, .canvas-page-title.canvas-agent-edge { padding-left: 12px; }
+.canvas-loose.canvas-agent-edge, .canvas-subtitle.canvas-agent-edge, .canvas-page-title.canvas-agent-edge { margin-left: -14px; padding-left: 14px; }
 .canvas-agent-meta {
   display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 11px; color: var(--cv-dim);
 }
@@ -250,8 +251,8 @@
   background-size: 18px 18px; background-position: 9px 9px;
   overflow-x: auto;
 }
-.canvas-diagram > div { padding: 22px 18px !important; }
-.canvas-diagram svg { max-width: 100%; height: auto; }
+.canvas-diagram > div { width: 100%; box-sizing: border-box; padding: 22px 18px !important; }
+.canvas-diagram svg { display: block; margin: 0 auto; height: auto; }
 .canvas-diagram .node rect, .canvas-diagram .node polygon, .canvas-diagram .node path { rx: 9px; ry: 9px; }
 .canvas-diagram .node .label, .canvas-diagram .nodeLabel { font-weight: 500; }
 .canvas-diagram .edgeLabel, .canvas-diagram .edgeLabel p { font-size: 11px; color: var(--cv-muted) !important; background: transparent !important; }
