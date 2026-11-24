@@ -216,4 +216,23 @@ describe('CanvasView', () => {
     expect(doc.indexOf('__saiCanvasEmit')).toBeGreaterThan(-1);
     expect(doc.indexOf('__saiCanvasEmit')).toBeLessThan(doc.indexOf('sai.canvas.emit(1)'));
   });
+
+  it('links open externally instead of navigating the app window', async () => {
+    const openExternal = vi.fn();
+    (window as any).sai = { ...(window as any).sai, openExternal };
+    const { store } = await setup('See [docs](https://example.com/x).\n');
+    view(store);
+    const link = screen.getByText('docs');
+    const notPrevented = fireEvent.click(link);
+    expect(notPrevented).toBe(false);
+    expect(openExternal).toHaveBeenCalledWith('https://example.com/x');
+  });
+
+  it('raw HTML in markdown blocks is not rendered as DOM', async () => {
+    const { store } = await setup('text <style>body{display:none}</style> and <iframe src="https://evil.example"></iframe>\n\n<div class="raw-x">hi</div>\n');
+    view(store);
+    expect(document.querySelector('style')).toBeNull();
+    expect(document.querySelector('iframe')).toBeNull();
+    expect(document.querySelector('.raw-x')).toBeNull();
+  });
 });

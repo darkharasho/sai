@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } fr
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
-import rehypeRaw from 'rehype-raw';
 import { Pencil } from 'lucide-react';
 import './canvas.css';
 import { splitBlocks, replaceBlock, toggleTask, addTaskNote, canvasTitle, type CanvasBlock } from '../../canvas/canvasBlocks';
@@ -42,8 +41,26 @@ function fenceBody(source: string): string {
   return source.replace(/^\s*```[^\n]*\n/, '').replace(/\n?```\s*$/, '');
 }
 
+/**
+ * Links open in the system browser: a plain anchor would navigate SAI's own window away.
+ * No rehype-raw: raw HTML belongs in ```html blocks, which render sandboxed.
+ */
+const mdComponents = {
+  a: ({ href, children }: { href?: string; children?: ReactNode }) => (
+    <a
+      href={href}
+      onClick={(e) => {
+        e.preventDefault();
+        if (href) window.sai?.openExternal?.(href);
+      }}
+    >
+      {children}
+    </a>
+  ),
+};
+
 const Md = ({ children }: { children: string }) => (
-  <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw, rehypeHighlight]}>{children}</ReactMarkdown>
+  <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]} components={mdComponents}>{children}</ReactMarkdown>
 );
 
 interface Item { checked: boolean; text: string }
