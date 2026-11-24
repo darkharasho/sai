@@ -63,7 +63,7 @@ test.describe('live canvas', () => {
     const file = `${ws}/.sai/canvas/steps.md`.replace(/^\/var(?=\/home\/)/, '');
     await window.evaluate(([w, f]) => {
       const c = (window as any).__canvas;
-      const content = '# Steps\n\n- [ ] Launch game\n- [ ] Get mods from [Thunderstore](https://thunderstore.io)\n';
+      const content = '# Steps\n\n- [ ] Launch game\n- [ ] Get mods from [Thunderstore](https://thunderstore.io)\n\nSee [the docs](https://example.com/docs).\n';
       c.fs[f] = content;
       c.subs.forEach((cb: any) => cb({ projectPath: w, path: f, content }));
     }, [ws, file]);
@@ -79,6 +79,21 @@ test.describe('live canvas', () => {
 
     // D3: the auto-open put the editor beside the chat; the chat panel stayed expanded.
     await expect(window.locator('.accordion-panel.accordion-expanded textarea.chat-textarea')).toBeVisible();
+
+    // Canvas links (labels and markdown blocks) use the app's accent color, like chat links,
+    // not the browser's default dark blue.
+    const accentAndLinks = await window.evaluate(() => {
+      const view = document.querySelector('.canvas-view')!;
+      const probe = document.createElement('span');
+      probe.style.color = 'var(--accent)';
+      view.appendChild(probe);
+      const accent = getComputedStyle(probe).color;
+      probe.remove();
+      const link = (name: string) => [...view.querySelectorAll('a')].find((a) => a.textContent === name)!;
+      return { accent, label: getComputedStyle(link('Thunderstore')).color, block: getComputedStyle(link('the docs')).color };
+    });
+    expect(accentAndLinks.label).toBe(accentAndLinks.accent);
+    expect(accentAndLinks.block).toBe(accentAndLinks.accent);
 
     // D2: a label renders inline Markdown; clicking its link opens it and does not tick the box.
     const linkBox = window.getByRole('checkbox', { name: 'Get mods from Thunderstore' });
