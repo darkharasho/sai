@@ -23,10 +23,20 @@ describe('describeUserEdits', () => {
     const cur = '# T\n\n```mermaid flow\nA-->C\n```\n';
     expect(describeUserEdits(seen, cur)).toEqual(['diagram "flow": edited']);
   });
-  it('mermaid edit without label uses block N', () => {
-    const seen = '# T\n\n```mermaid\nA-->B\n```\n';
-    const cur = '# T\n\n```mermaid\nA-->C\n```\n';
+  it('D4: mermaid edit without label uses the nearest preceding heading', () => {
+    const seen = '# Plan\n\nintro\n\n## Shop flow\n\ntext\n\n```mermaid\nA-->B\n```\n';
+    const cur = '# Plan\n\nintro\n\n## Shop flow\n\ntext\n\n```mermaid\nA-->C\n```\n';
+    expect(describeUserEdits(seen, cur)).toEqual(['diagram "Shop flow": edited']);
+  });
+  it('D4: mermaid edit with no title and no heading before it falls back to block N', () => {
+    const seen = 'intro\n\n```mermaid\nA-->B\n```\n\n# Later\n';
+    const cur = 'intro\n\n```mermaid\nA-->C\n```\n\n# Later\n';
     expect(describeUserEdits(seen, cur)).toEqual(['diagram "block 2": edited']);
+  });
+  it('D4: html edit without label uses the nearest preceding heading', () => {
+    const seen = '# T\n\nShop UI\n-------\n\n```html\n<b>a</b>\n```\n';
+    const cur = '# T\n\nShop UI\n-------\n\n```html\n<b>b</b>\n```\n';
+    expect(describeUserEdits(seen, cur)).toEqual(['html "Shop UI": edited']);
   });
   it('paragraph edit', () => {
     expect(describeUserEdits('# T\n\nhello world\n', '# T\n\nhello   brave\nworld\n')).toEqual([
@@ -55,7 +65,7 @@ describe('describeUserEdits', () => {
   it('html block edit', () => {
     const seen = '# T\n\n```html pick\n<b>a</b>\n```\n';
     const cur = '# T\n\n```html pick\n<b>b</b>\n```\n';
-    expect(describeUserEdits(seen, cur)).toEqual(['edited block 2: ```html pick <b>b</b> ```']);
+    expect(describeUserEdits(seen, cur)).toEqual(['html "pick": edited']);
   });
   it('kind change', () => {
     const seen = '# T\n\n- [ ] a\n';

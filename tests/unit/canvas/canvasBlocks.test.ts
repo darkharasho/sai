@@ -69,3 +69,14 @@ describe('canvasBlocks', () => {
     expect(splitBlocks('other\n')[0].hash).not.toBe(a.hash);
   });
 });
+
+import { blockName } from '../../../src/canvas/canvasBlocks';
+
+describe('blockName (D4)', () => {
+  it('prefers the fence title, then the nearest preceding heading, then "block N"', () => {
+    const blocks = splitBlocks('intro\n\n```html\n<b/>\n```\n\n# A\n\n## Shop flow\n\npara\n\n```mermaid\nA-->B\n```\n\n```html id=picker\n<i/>\n```\n');
+    expect(blockName(blocks, 1)).toBe('block 2');
+    expect(blockName(blocks, 5)).toBe('Shop flow');
+    expect(blockName(blocks, 6)).toBe('id=picker');
+  });
+});

@@ -96,7 +96,7 @@ function Checklist({ block, onToggle, onNote }: {
         return (
           <li key={i} className="canvas-task">
             <input id={id} type="checkbox" checked={it.checked} onChange={() => onToggle(i)} />
-            <label htmlFor={id}>{first}</label>
+            <label htmlFor={id}><InlineMd>{first}</InlineMd></label>
             <button type="button" className="canvas-btn canvas-btn--ghost" onClick={() => { setNoteFor(i); setNote(''); }}>
               Add note
             </button>

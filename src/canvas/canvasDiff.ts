@@ -2,7 +2,7 @@ import { fromMarkdown } from 'mdast-util-from-markdown';
 import { gfm } from 'micromark-extension-gfm';
 import { gfmFromMarkdown } from 'mdast-util-gfm';
 import type { ListItem } from 'mdast';
-import { splitBlocks, type CanvasBlock } from './canvasBlocks';
+import { blockName, splitBlocks, type CanvasBlock } from './canvasBlocks';
 import { diffAgainstBase } from './canvasMerge';
 
 const PREVIEW_CHARS = 80;
@@ -71,22 +71,24 @@ function describeChecklist(seen: CanvasBlock, cur: CanvasBlock): string[] {
   return lines;
 }
 
-function describePair(seen: CanvasBlock, cur: CanvasBlock): string[] {
-  const n = cur.index + 1;
+/** `cur` is `curBlocks[cur.index]`: diagrams and html blocks are named in the current canvas. */
+function describePair(seen: CanvasBlock, cur: CanvasBlock, curBlocks: readonly CanvasBlock[]): string[] {
   if (seen.kind === 'checklist' && cur.kind === 'checklist') return describeChecklist(seen, cur);
-  if (seen.kind === 'mermaid' && cur.kind === 'mermaid') return [`diagram "${cur.label ?? `block ${n}`}": edited`];
-  return [`edited block ${n}: ${oneLine(cur.source)}`];
+  if (seen.kind === 'mermaid' && cur.kind === 'mermaid') return [`diagram "${blockName(curBlocks, cur.index)}": edited`];
+  if (seen.kind === 'html' && cur.kind === 'html') return [`html "${blockName(curBlocks, cur.index)}": edited`];
+  return [`edited block ${cur.index + 1}: ${oneLine(cur.source)}`];
 }
 
 /** Compact, agent-facing lines describing how `current` differs from the `seen` canvas. */
 export function describeUserEdits(seen: string, current: string): string[] {
   const seenBlocks = splitBlocks(seen);
-  const { states, inserted } = diffAgainstBase(seenBlocks, splitBlocks(current));
+  const curBlocks = splitBlocks(current);
+  const { states, inserted } = diffAgainstBase(seenBlocks, curBlocks);
   const added = (slot: number) => inserted[slot].map((b) => `+ block ${b.index + 1}: ${oneLine(b.source)}`);
   const lines: string[] = [...added(0)];
   seenBlocks.forEach((block, i) => {
     const state = states[i];
-    if (state.kind === 'replaced') lines.push(...describePair(block, state.block));
+    if (state.kind === 'replaced') lines.push(...describePair(block, state.block, curBlocks));
     else if (state.kind === 'deleted') lines.push(`− block ${i + 1}`);
     lines.push(...added(i + 1));
   });

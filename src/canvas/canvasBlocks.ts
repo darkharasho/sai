@@ -115,3 +115,24 @@ function collectText(node: any): string {
   if (typeof node.value === 'string') return node.value;
   return Array.isArray(node.children) ? node.children.map(collectText).join('') : '';
 }
+
+/** Text of a block that is a lone heading (ATX or setext), else null. */
+function headingText(source: string): string | null {
+  const [node] = parse(source).children;
+  return node?.type === 'heading' ? collectText(node).trim() || null : null;
+}
+
+/**
+ * Agent-facing name of a block (diagram/html): its fence title, else the nearest preceding
+ * heading ("Shop flow"), else "block N".
+ */
+export function blockName(blocks: readonly CanvasBlock[], index: number): string {
+  const b = blocks[index];
+  if (b?.label) return b.label;
+  for (let i = index - 1; i >= 0; i--) {
+    if (blocks[i].kind !== 'markdown') continue;
+    const h = headingText(blocks[i].source);
+    if (h) return h;
+  }
+  return `block ${index + 1}`;
+}
