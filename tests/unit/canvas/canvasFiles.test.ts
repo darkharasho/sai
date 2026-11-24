@@ -70,7 +70,7 @@ describe('findOpenCanvasPath', () => {
   });
 });
 
-import { canvasWatchSet, workspaceAgentLive, workspaceLiveChats, isTextEntry, closeDeletedCanvasTabs } from '../../../src/canvas/canvasFiles';
+import { canvasWatchSet, workspaceAgentLive, workspaceLiveChats, isTextEntry, defersAutoOpen, closeDeletedCanvasTabs } from '../../../src/canvas/canvasFiles';
 
 describe('canvasWatchSet', () => {
   it('watches every store workspace still open, plus the active one', () => {
@@ -117,6 +117,24 @@ describe('isTextEntry', () => {
     for (const id of ['c', 'b', 'r']) expect(isTextEntry(host.querySelector(`#${id}`))).toBe(false);
     expect(isTextEntry(document.body)).toBe(false);
     expect(isTextEntry(null)).toBe(false);
+    host.remove();
+  });
+});
+
+describe('defersAutoOpen (D1)', () => {
+  it('the chat composer does not defer auto-open: it is not an editor tab', () => {
+    const host = document.createElement('div');
+    host.innerHTML = '<div class="input-box"><textarea class="chat-textarea" id="composer"></textarea></div>';
+    document.body.appendChild(host);
+    expect(defersAutoOpen(host.querySelector('#composer'))).toBe(false);
+    host.remove();
+  });
+  it('every other text entry still defers it', () => {
+    const host = document.createElement('div');
+    host.innerHTML = '<div class="canvas-view"><textarea id="t"></textarea></div><div class="monaco-editor"><div id="m"></div></div><input id="i">';
+    document.body.appendChild(host);
+    for (const id of ['t', 'm', 'i']) expect(defersAutoOpen(host.querySelector(`#${id}`))).toBe(true);
+    expect(defersAutoOpen(document.body)).toBe(false);
     host.remove();
   });
 });

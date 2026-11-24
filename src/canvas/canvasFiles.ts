@@ -58,6 +58,15 @@ export function isTextEntry(el: Element | null): boolean {
 }
 
 /**
+ * Focus where an agent canvas must not auto-open yet: any text entry except the chat composer.
+ * The spec only protects typing in another editor tab; after sending a message focus stays in the
+ * composer, so deferring there meant the canvas never opened. Auto-open never moves focus.
+ */
+export function defersAutoOpen(el: Element | null): boolean {
+  return isTextEntry(el) && !el!.closest('.chat-textarea');
+}
+
+/**
  * Workspaces whose canvases to watch: every workspace with a canvas store (opened this run)
  * that is still open, plus the active one. Sorted for a stable effect key.
  */

@@ -2,7 +2,7 @@ import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRe
 import type { OpenFile } from '../types';
 import CanvasView from '../components/Canvas/CanvasView';
 import { createCanvasStore, type CanvasStore } from './canvasStore';
-import { canvasKey, canvasRelPath, canvasWatchSet, closeDeletedCanvas, closeDeletedCanvasTabs, findOpenCanvasPath, isProjectCanvas, isTextEntry } from './canvasFiles';
+import { canvasKey, canvasRelPath, canvasWatchSet, closeDeletedCanvas, closeDeletedCanvasTabs, findOpenCanvasPath, isProjectCanvas, defersAutoOpen } from './canvasFiles';
 import { useCanvasDelivery } from './useCanvasDelivery';
 
 /** The active workspace's canvases, for Code-panel canvas tabs. Paths are canvasKey()s. */
@@ -41,8 +41,11 @@ export interface CanvasControllerOpts {
   /** chatSendTextRef: the active chat panel's queueing send. */
   sendRef: MutableRefObject<((text: string, opts?: { skipFileContext?: boolean }) => void) | null>;
   getOpenFiles(ws: string): OpenFile[];
-  /** Open a tab in the active workspace. */
-  openFile(path: string, opts?: { canvasSource?: boolean }): void;
+  /**
+   * Open a tab in the active workspace. `auto`: an automatic open (agent-written canvas), which
+   * must keep the chat panel expanded.
+   */
+  openFile(path: string, opts?: { canvasSource?: boolean; auto?: boolean }): void;
   /** Close a tab of the active workspace. */
   closeFile(path: string): void;
   /** Rewrite a background workspace's tabs. */
@@ -100,13 +103,15 @@ export function useCanvasController(opts: CanvasControllerOpts): CanvasControlle
     const deferred = setFor(deferredRef.current);
     const opened = setFor(autoOpenedRef.current);
     for (const p of s.takeAgentTouched()) if (!opened.has(p)) deferred.add(p);
-    if (deferred.size === 0 || isTextEntry(document.activeElement)) return;
+    if (deferred.size === 0 || defersAutoOpen(document.activeElement)) return;
     const paths = [...deferred];
     deferred.clear();
     for (const p of paths) {
       if (!s.get(p) || opened.has(p)) continue;
       opened.add(p);
-      optsRef.current.openFile(tabPathFor(p));
+      // Canvas view, never raw source: Monaco focuses itself on mount and would pull focus out of
+      // the chat composer. The canvas view takes no focus.
+      optsRef.current.openFile(tabPathFor(p), { canvasSource: false, auto: true });
     }
   }, [tabPathFor]);
 

@@ -6,6 +6,8 @@ import type { OpenFile } from '../../../src/types';
 const WS = '/home/u/p';
 const REAL = '/var/home/u/p/.sai/canvas/plan.md';
 const TAB = '/home/u/p/.sai/canvas/plan.md';
+/** Auto-open: canvas view (never Monaco, which grabs focus on mount), chat layout kept. */
+const AUTO = { canvasSource: false, auto: true };
 
 type Ev = { projectPath: string; path: string; content: string | null };
 let listeners: Array<(e: Ev) => void>;
@@ -68,7 +70,7 @@ describe('useCanvasController', () => {
     live.add(WS);
     act(() => emit({ projectPath: WS, path: REAL, content: '- [ ] a\n\nnew\n' }));
     await flush();
-    expect(opts.openFile).toHaveBeenCalledWith(TAB);
+    expect(opts.openFile).toHaveBeenCalledWith(TAB, AUTO);
   });
 
   it('defers auto-open while focus is in any text entry, even inside a canvas view, then opens on focus change', async () => {
@@ -87,8 +89,26 @@ describe('useCanvasController', () => {
     vi.useFakeTimers();
     act(() => { ta.blur(); vi.runAllTimers(); });
     vi.useRealTimers();
-    expect(opts.openFile).toHaveBeenCalledWith(TAB);
+    expect(opts.openFile).toHaveBeenCalledWith(TAB, AUTO);
     view.remove();
+  });
+
+  it('D1: focus in the chat composer does not defer auto-open, and focus stays in the composer', async () => {
+    const { live, opts } = setup();
+    await flush();
+    live.add(WS);
+    const composer = document.createElement('textarea');
+    composer.className = 'chat-textarea';
+    document.body.appendChild(composer);
+    composer.focus();
+    composer.value = 'typing al';
+    composer.setSelectionRange(9, 9);
+    act(() => emit({ projectPath: WS, path: REAL, content: '- [ ] a\n\nnew\n' }));
+    await flush();
+    expect(opts.openFile).toHaveBeenCalledWith(TAB, AUTO);
+    expect(document.activeElement).toBe(composer);
+    expect(composer.selectionStart).toBe(9);
+    composer.remove();
   });
 
   it('auto-opens a canvas once per session, not on every agent write', async () => {
@@ -161,7 +181,7 @@ describe('useCanvasController', () => {
     cb.focus();
     act(() => emit({ projectPath: WS, path: REAL, content: '- [ ] a\n\nnew\n' }));
     await flush();
-    expect(opts.openFile).toHaveBeenCalledWith(TAB);
+    expect(opts.openFile).toHaveBeenCalledWith(TAB, AUTO);
     cb.remove();
   });
 
@@ -240,7 +260,7 @@ describe('useCanvasController', () => {
     expect(hook.result.current.store).toBe(first);
     expect(sai.canvasList.mock.calls.filter((c: string[]) => c[0] === WS)).toHaveLength(1);
     expect(first.hasPending(TAB, 'c')).toBe(false);
-    expect(opts.openFile).toHaveBeenCalledWith(TAB);
+    expect(opts.openFile).toHaveBeenCalledWith(TAB, AUTO);
   });
 
   it('closes a background workspace tab on delete via patchTabs', async () => {
