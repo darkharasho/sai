@@ -408,3 +408,79 @@ describe('canvasStore', () => {
     expect(store.isAutoTarget(P, 'b')).toBe(false);
   });
 });
+
+describe('edit times and agent-change marks', () => {
+  it('first sight by a live agent sets the agent edit time but marks nothing; a quiet first sight sets neither', async () => {
+    const { store } = setup();
+    await store.onDiskChange(P, '# T\n\n- [ ] a\n', true);
+    expect(store.get(P)!.agentEditedAt).toBeGreaterThan(0);
+    expect(store.get(P)!.userEditedAt).toBe(0);
+    expect(store.get(P)!.agentMarks).toBeNull();
+    const Q = '/ws/.sai/canvas/q.md';
+    await store.onDiskChange(Q, 'x\n', false);
+    expect(store.get(Q)!.agentEditedAt).toBe(0);
+    expect(store.get(Q)!.userEditedAt).toBe(0);
+  });
+
+  it('an agent write records its time and what it changed; a user edit clears the marks and records its own time', async () => {
+    const { store } = await seeded('# T\n\n- [ ] a\n- [ ] b\n');
+    const t0 = store.get(P)!.agentEditedAt;
+    await store.onDiskChange(P, '# T\n\n- [ ] a\n- [ ] b\n- [ ] c\n\nnew para\n', true);
+    const s = store.get(P)!;
+    expect(s.agentEditedAt).toBeGreaterThan(t0);
+    expect(s.agentMarks).toEqual({ blocks: [{ index: 2, kind: 'added' }], items: [{ block: 1, item: 2, kind: 'added' }] });
+    await store.userWrite(P, s.content.replace('- [ ] a', '- [x] a'));
+    const u = store.get(P)!;
+    expect(u.agentMarks).toBeNull();
+    expect(u.userEditedAt).toBeGreaterThan(s.agentEditedAt);
+    expect(u.agentEditedAt).toBe(s.agentEditedAt);
+  });
+
+  it('marks are relative to the content before the agent write, so merged-back user edits are not marked', async () => {
+    const { store } = await seeded('one\n\ntwo\n\nthree\n');
+    await store.userWrite(P, 'one\n\ntwo mine\n\nthree\n');
+    // The agent writes from its stale copy: only `three` changed on its side.
+    await store.onDiskChange(P, 'one\n\ntwo\n\nthree agent\n', true);
+    expect(store.get(P)!.content).toBe('one\n\ntwo mine\n\nthree agent\n');
+    expect(store.get(P)!.agentMarks).toEqual({ blocks: [{ index: 2, kind: 'edited' }], items: [] });
+  });
+
+  it('an outside (non-agent) disk change counts as a user edit', async () => {
+    const { store } = await seeded('a\n');
+    await store.onDiskChange(P, 'b\n', true);
+    expect(store.get(P)!.agentMarks).not.toBeNull();
+    await store.onDiskChange(P, 'c\n', false);
+    expect(store.get(P)!.agentMarks).toBeNull();
+    expect(store.get(P)!.userEditedAt).toBeGreaterThan(0);
+  });
+
+  it('a user-created canvas has a user edit time', async () => {
+    const { store } = setup();
+    await store.userWrite(P, '# new\n');
+    expect(store.get(P)!.userEditedAt).toBeGreaterThan(0);
+    expect(store.get(P)!.agentEditedAt).toBe(0);
+  });
+});
+
+describe('pendingChangeCount', () => {
+  it('counts undelivered user change lines plus emits for the chat', async () => {
+    const { store } = await seeded('- [ ] a\n- [ ] b\n');
+    expect(store.pendingChangeCount(P, 'c')).toBe(0);
+    await store.userWrite(P, '- [x] a\n- [x] b\n');
+    expect(store.pendingChangeCount(P, 'c')).toBe(2);
+    store.userEmit(P, 'w', 1);
+    store.userEmit(P, 'w', 2);
+    expect(store.pendingChangeCount(P, 'c')).toBe(3);
+    store.markDelivered(P, 'c');
+    expect(store.pendingChangeCount(P, 'c')).toBe(0);
+  });
+
+  it('a chat that has never seen the canvas counts the edits since the agent last wrote', async () => {
+    const { store } = setup();
+    await store.onDiskChange(P, '- [ ] a\n', true);
+    expect(store.pendingChangeCount(P, 'other')).toBe(0);
+    await store.userWrite(P, '- [x] a\n');
+    expect(store.pendingChangeCount(P, 'other')).toBe(1);
+    expect(store.pendingChangeCount('/nope', 'c')).toBe(0);
+  });
+});

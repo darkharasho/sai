@@ -1,6 +1,7 @@
 import { mergeBlocks, type MergeConflict } from './canvasMerge';
 import { describeUserEdits, buildCanvasUpdateMessage, type CanvasEmit } from './canvasDiff';
 import { splitBlocks, replaceBlock } from './canvasBlocks';
+import { deriveAgentMarks, type AgentMarks } from './canvasAgentMarks';
 
 export interface CanvasStoreDeps {
   writeFile(path: string, content: string): Promise<void>;
@@ -14,6 +15,12 @@ export interface CanvasState {
   lastEditedAt: number;
   /** Last user edit or emit (0 = none since first sight): drives the auto-send idle window. */
   lastUserActivityAt: number;
+  /** Last agent write (0 = none seen). */
+  agentEditedAt: number;
+  /** Last user edit, not counting emits (0 = none seen). */
+  userEditedAt: number;
+  /** What the latest agent write changed; null once the user edits (or before any agent write). */
+  agentMarks: AgentMarks | null;
   conflicts: MergeConflict[];
   autoSend: boolean;
 }
@@ -27,6 +34,9 @@ interface Entry {
   lastEditor: 'user' | 'agent';
   lastEditedAt: number;
   lastUserActivityAt: number;
+  agentEditedAt: number;
+  userEditedAt: number;
+  agentMarks: AgentMarks | null;
   conflicts: MergeConflict[];
   autoSend: boolean;
   /** Per-chat content last delivered (agent edits applied on top). */
@@ -56,6 +66,9 @@ function makeView(path: string, e: Omit<Entry, 'view'>): CanvasState {
     lastEditor: e.lastEditor,
     lastEditedAt: e.lastEditedAt,
     lastUserActivityAt: e.lastUserActivityAt,
+    agentEditedAt: e.agentEditedAt,
+    userEditedAt: e.userEditedAt,
+    agentMarks: e.agentMarks,
     conflicts: e.conflicts,
     autoSend: e.autoSend,
   };
@@ -134,16 +147,22 @@ export function createCanvasStore(deps: CanvasStoreDeps) {
     e.lastEditor = 'user';
     e.lastEditedAt = deps.now();
     e.lastUserActivityAt = e.lastEditedAt;
+    e.userEditedAt = e.lastEditedAt;
+    e.agentMarks = null;
   };
 
   const newEntry = (path: string, content: string, agentBase: string, lastEditor: 'user' | 'agent'): Entry => {
+    const at = deps.now();
     const base = {
       content,
       userContent: content,
       agentBase,
       lastEditor,
-      lastEditedAt: deps.now(),
+      lastEditedAt: at,
       lastUserActivityAt: 0,
+      agentEditedAt: 0,
+      userEditedAt: 0,
+      agentMarks: null,
       conflicts: [],
       autoSend: true,
       seen: new Map<string, string>(),
@@ -167,6 +186,9 @@ export function createCanvasStore(deps: CanvasStoreDeps) {
   const onAgentWrite = async (path: string, e: Entry, disk: string, liveChats: readonly string[]) => {
     const res = mergeBlocks(e.agentBase, e.userContent, disk);
     const final = res.changed ? res.merged : disk;
+    // Marks compare what the pane showed before with what it shows now: user edits merged back
+    // in are on both sides, so only the agent's own changes are marked.
+    const marks = deriveAgentMarks(e.content, final);
     // Carry the agent's own block changes (agentBase -> disk) into every chat's seen-snapshot,
     // so they never read as user edits while undelivered user edits still do.
     for (const [chat, seen] of e.seen) e.seen.set(chat, mergeBlocks(e.agentBase, seen, disk).merged);
@@ -181,6 +203,8 @@ export function createCanvasStore(deps: CanvasStoreDeps) {
     e.conflicts = [...fresh, ...older].sort((a, b) => a.index - b.index);
     e.lastEditor = 'agent';
     e.lastEditedAt = deps.now();
+    e.agentEditedAt = e.lastEditedAt;
+    e.agentMarks = marks.blocks.length || marks.items.length ? marks : null;
     agentTouched.add(path);
     changed(path);
     if (res.changed) await saiWrite(path, e, final);
@@ -199,6 +223,14 @@ export function createCanvasStore(deps: CanvasStoreDeps) {
     const lines = describeUserEdits(seen, e.content);
     if (lines.length === 0 && e.emits.length === 0) return null;
     return buildCanvasUpdateMessage({ relPath, lines, emits: e.emits });
+  };
+
+  /** Number of change lines (plus coalesced emits) `pendingMessage` would deliver to chatKey. */
+  const pendingChangeCount = (path: string, chatKey: string): number => {
+    const e = canvases.get(path);
+    if (!e) return 0;
+    const seen = e.seen.get(chatKey) ?? e.agentBase;
+    return describeUserEdits(seen, e.content).length + e.emits.length;
   };
 
   return {
@@ -237,6 +269,8 @@ export function createCanvasStore(deps: CanvasStoreDeps) {
           const fresh = newEntry(path, content, content, agentLive ? 'agent' : 'user');
           canvases.set(path, fresh);
           if (agentLive) {
+            // Agent-created: everything is new, so nothing is marked; the header shows the time.
+            fresh.agentEditedAt = fresh.lastEditedAt;
             seedWriters(fresh, content, liveChats);
             agentTouched.add(path);
           }
@@ -270,6 +304,7 @@ export function createCanvasStore(deps: CanvasStoreDeps) {
           // A canvas the user created: its whole content counts as a user edit.
           e = newEntry(path, content, '', 'user');
           e.lastUserActivityAt = e.lastEditedAt;
+          e.userEditedAt = e.lastEditedAt;
           canvases.set(path, e);
         } else {
           applyUserContent(e, content);
@@ -350,6 +385,8 @@ export function createCanvasStore(deps: CanvasStoreDeps) {
       const e = canvases.get(path);
       return !!e && (e.owner === null || e.owner === chatKey);
     },
+
+    pendingChangeCount,
 
     hasPending(path: string, chatKey: string): boolean {
       return pendingMessage(path, chatKey) !== null;

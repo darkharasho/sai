@@ -3,14 +3,17 @@ import { gfm } from 'micromark-extension-gfm';
 import { gfmFromMarkdown } from 'mdast-util-gfm';
 import type { Root, RootContent, List, ListItem } from 'mdast';
 
-export type BlockKind = 'markdown' | 'checklist' | 'mermaid' | 'html';
+export type BlockKind = 'markdown' | 'checklist' | 'mermaid' | 'html' | 'stats';
+
+/** A checklist item: `- [ ]` open, `- [x]` done, `- [!]` failed (SAI convention). */
+export type TaskState = 'open' | 'done' | 'failed';
 
 export interface CanvasBlock {
   index: number;
   kind: BlockKind;
   source: string;
   hash: string;
-  /** html/mermaid only: first line after the fence lang, e.g. ```html id=picker */
+  /** html/mermaid/stats only: first line after the fence lang, e.g. ```html id=picker */
   label?: string;
 }
 
@@ -45,11 +48,29 @@ function hashSource(source: string): string {
   return (h >>> 0).toString(36);
 }
 
-function classify(node: RootContent | null): { kind: BlockKind; label?: string } {
-  if (node?.type === 'list' && node.children.every((item) => item.checked !== null && item.checked !== undefined)) {
+/**
+ * `- [!] text`: GFM has no failed state, so remark-gfm parses it as a plain item whose text
+ * starts with `[!]`. Detected from the item's source (its marker, then `[!]` and a space or EOL).
+ */
+const FAILED_RE = /^(?:[*+-]|\d+[.)])[ \t]+\[!\](?=[ \t]|\r?\n|$)/;
+
+function isFailedItem(md: string, item: ListItem): boolean {
+  const at = item.position?.start.offset;
+  return (item.checked === null || item.checked === undefined) && at !== undefined && FAILED_RE.test(md.slice(at, at + 64));
+}
+
+/** State of a list item, or null when it is not a task item. */
+function itemState(md: string, item: ListItem): TaskState | null {
+  if (item.checked === true) return 'done';
+  if (item.checked === false) return 'open';
+  return isFailedItem(md, item) ? 'failed' : null;
+}
+
+function classify(md: string, node: RootContent | null): { kind: BlockKind; label?: string } {
+  if (node?.type === 'list' && node.children.every((item) => itemState(md, item) !== null)) {
     return { kind: 'checklist' };
   }
-  if (node?.type === 'code' && (node.lang === 'mermaid' || node.lang === 'html')) {
+  if (node?.type === 'code' && (node.lang === 'mermaid' || node.lang === 'html' || node.lang === 'stats')) {
     const label = node.meta?.trim();
     return label ? { kind: node.lang, label } : { kind: node.lang };
   }
@@ -59,7 +80,7 @@ function classify(node: RootContent | null): { kind: BlockKind; label?: string }
 export function splitBlocks(md: string): CanvasBlock[] {
   return parseBlocks(md).map((b, index) => {
     const source = md.slice(b.start, b.end);
-    return { index, source, hash: hashSource(source), ...classify(b.node) };
+    return { index, source, hash: hashSource(source), ...classify(md, b.node) };
   });
 }
 
@@ -80,14 +101,50 @@ function findItem(md: string, blockIndex: number, itemIndex: number): { item: Li
   return item?.position?.start.offset !== undefined ? { item, list: block.node } : null;
 }
 
-export function toggleTask(md: string, blockIndex: number, itemIndex: number): string {
+const TASK_BOX_RE = /^(?:[*+-]|\d+[.)])[ \t]+\[([ xX!])\]/;
+
+/** Rewrite the target item's `[?]` box to `[mark]`. */
+function setBox(md: string, blockIndex: number, itemIndex: number, mark: (state: TaskState) => string | null): string {
   const found = findItem(md, blockIndex, itemIndex);
-  if (!found || found.item.checked === null || found.item.checked === undefined) return md;
+  const state = found ? itemState(md, found.item) : null;
+  if (!found || !state) return md;
+  const next = mark(state);
+  if (next === null) return md;
   const start = found.item.position!.start.offset!;
-  const m = /^(?:[*+-]|\d+[.)])[ \t]+\[([ xX])\]/.exec(md.slice(start));
+  const m = TASK_BOX_RE.exec(md.slice(start));
   if (!m) return md;
   const at = start + m[0].length - 2;
-  return md.slice(0, at) + (found.item.checked ? ' ' : 'x') + md.slice(at + 1);
+  return md.slice(0, at) + next + md.slice(at + 1);
+}
+
+/** Click on a checkbox: open -> done, done -> open, failed -> open. */
+export function toggleTask(md: string, blockIndex: number, itemIndex: number): string {
+  return setBox(md, blockIndex, itemIndex, (s) => (s === 'open' ? 'x' : ' '));
+}
+
+/** "Mark failed": writes `[!]`. A failed item stays as is. */
+export function markTaskFailed(md: string, blockIndex: number, itemIndex: number): string {
+  return setBox(md, blockIndex, itemIndex, (s) => (s === 'failed' ? null : '!'));
+}
+
+export interface TaskItem {
+  state: TaskState;
+  /** Label line, then continuation lines (notes) with their indent stripped. */
+  text: string;
+}
+
+/** Top-level task items of a checklist block's source, with their continuation lines. */
+export function taskItems(source: string): TaskItem[] {
+  const items: TaskItem[] = [];
+  let indent = -1; // the first item's indent (0-3) marks the top level
+  for (const line of source.split('\n')) {
+    const m = /^( {0,3})(?:[*+-]|\d+[.)])[ \t]+\[([ xX!])\](?:[ \t]+(.*))?$/.exec(line);
+    if (m && (indent < 0 || m[1].length === indent)) {
+      indent = m[1].length;
+      items.push({ state: m[2] === '!' ? 'failed' : m[2] === ' ' ? 'open' : 'done', text: (m[3] ?? '').replace(/\r$/, '') });
+    } else if (items.length && line.trim()) items[items.length - 1].text += '\n' + line.replace(/^\s{1,4}/, '').replace(/\r$/, '');
+  }
+  return items;
 }
 
 export function addTaskNote(md: string, blockIndex: number, itemIndex: number, note: string): string {
@@ -114,6 +171,21 @@ export function canvasTitle(md: string, fallbackSlug: string): string {
 function collectText(node: any): string {
   if (typeof node.value === 'string') return node.value;
   return Array.isArray(node.children) ? node.children.map(collectText).join('') : '';
+}
+
+export type BlockShape =
+  | { type: 'heading'; depth: number; text: string }
+  | { type: 'paragraph' | 'table' | 'list' | 'code' | 'blockquote' | 'other' | 'empty' };
+
+/** What a block is by its first node: drives page title / subtitle / section cards in the view. */
+export function blockShape(source: string): BlockShape {
+  const [node] = parse(source).children;
+  if (!node) return { type: 'empty' };
+  if (node.type === 'heading') return { type: 'heading', depth: node.depth, text: collectText(node).trim() };
+  if (node.type === 'paragraph' || node.type === 'table' || node.type === 'list' || node.type === 'code' || node.type === 'blockquote') {
+    return { type: node.type };
+  }
+  return { type: 'other' };
 }
 
 /** Text of a block that is a lone heading (ATX or setext), else null. */

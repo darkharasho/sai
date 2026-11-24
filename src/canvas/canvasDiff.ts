@@ -17,11 +17,16 @@ function collectText(node: any): string {
   return Array.isArray(node.children) ? node.children.map(collectText).join('') : '';
 }
 
+type ItemState = 'open' | 'done' | 'failed';
+
 interface ItemInfo {
   text: string;
-  checked: boolean;
+  state: ItemState;
   notes: string[];
 }
+
+/** `- [!] text` (failed, a SAI convention) parses as a plain item whose text starts with `[!]`. */
+const FAILED_PREFIX = /^\[!\](?:\s+|$)/;
 
 /** Task items (nested ones included) keyed by first-paragraph text plus occurrence index. */
 function itemsOf(source: string): Map<string, ItemInfo> {
@@ -30,13 +35,17 @@ function itemsOf(source: string): Map<string, ItemInfo> {
   const seenCount = new Map<string, number>();
   const walk = (node: any) => {
     for (const child of node.children ?? []) {
-      if (child.type === 'listItem' && child.checked !== null && child.checked !== undefined) {
-        const para = child.children.find((c: any) => c.type === 'paragraph');
-        const text = para ? collectText(para).trim() : '';
+      const para = child.type === 'listItem' ? child.children.find((c: any) => c.type === 'paragraph') : undefined;
+      const raw = para ? collectText(para).trim() : '';
+      const task = child.type === 'listItem' && child.checked !== null && child.checked !== undefined;
+      const failed = child.type === 'listItem' && !task && FAILED_PREFIX.test(raw);
+      if (task || failed) {
+        const text = failed ? raw.replace(FAILED_PREFIX, '') : raw;
+        const state: ItemState = failed ? 'failed' : child.checked === true ? 'done' : 'open';
         const n = seenCount.get(text) ?? 0;
         seenCount.set(text, n + 1);
         const notes = child.children.filter((c: any) => c.type === 'blockquote').map((c: any) => collectText(c).trim());
-        items.set(`${text}\u0000${n}`, { text, checked: child.checked === true, notes });
+        items.set(`${text}\u0000${n}`, { text, state, notes });
       }
       walk(child);
     }
@@ -47,6 +56,9 @@ function itemsOf(source: string): Map<string, ItemInfo> {
 
 const normalize = (s: string) => s.replace(/\s+/g, ' ').trim();
 
+const STATE_MARK: Record<ItemState, string> = { done: '☑', open: '☐', failed: '✗' };
+const stateLine = (state: ItemState, text: string) => `${STATE_MARK[state]} "${text}"`;
+
 function describeChecklist(seen: CanvasBlock, cur: CanvasBlock): string[] {
   const before = itemsOf(seen.source);
   const after = itemsOf(cur.source);
@@ -56,10 +68,9 @@ function describeChecklist(seen: CanvasBlock, cur: CanvasBlock): string[] {
     const old = before.get(key);
     if (!old) {
       lines.push(`+ item "${text}"`);
-      if (info.checked) lines.push(`☑ "${text}"`);
+      if (info.state !== 'open') lines.push(stateLine(info.state, text));
     } else {
-      if (!old.checked && info.checked) lines.push(`☑ "${text}"`);
-      else if (old.checked && !info.checked) lines.push(`☐ "${text}"`);
+      if (old.state !== info.state) lines.push(stateLine(info.state, text));
       for (const note of info.notes) if (note && !old.notes.includes(note)) lines.push(`note on "${text}": ${note}`);
     }
   }
@@ -76,6 +87,7 @@ function describePair(seen: CanvasBlock, cur: CanvasBlock, curBlocks: readonly C
   if (seen.kind === 'checklist' && cur.kind === 'checklist') return describeChecklist(seen, cur);
   if (seen.kind === 'mermaid' && cur.kind === 'mermaid') return [`diagram "${blockName(curBlocks, cur.index)}": edited`];
   if (seen.kind === 'html' && cur.kind === 'html') return [`html "${blockName(curBlocks, cur.index)}": edited`];
+  if (seen.kind === 'stats' && cur.kind === 'stats') return ['stats: edited'];
   return [`edited block ${cur.index + 1}: ${oneLine(cur.source)}`];
 }
 
