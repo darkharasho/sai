@@ -271,7 +271,7 @@ export function registerGeminiHandlers(win: BrowserWindow) {
     ws.gemini.lastSendScope = scope;
     safeSend(win, { type: 'streaming_start', projectPath, scope, turnSeq, sessionId: scopeSession(ws, scope) });
     try {
-      const preamble = geminiSessionPreamble(ws.gemini.metaPreamble, !!scopeSession(ws, scope));
+      const preamble = geminiSessionPreamble(ws.gemini.metaPreamble ?? '', !!scopeSession(ws, scope));
       await promptAntigravityText(win, ws, { scope, prompt: `${preamble}${withLoadNote('gemini', projectPath, scope, message)}`, imagePaths, approvalMode, conversationMode, model });
       safeSend(win, { type: 'result', projectPath, scope, usage: { input_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, output_tokens: 0 } });
       notifyCompletion(win, projectPath, { provider: DISPLAY_NAME }, { site: 'gemini.turnEnd' });
