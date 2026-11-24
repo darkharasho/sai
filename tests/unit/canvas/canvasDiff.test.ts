@@ -44,6 +44,49 @@ describe('describeUserEdits', () => {
   it('removed block', () => {
     expect(describeUserEdits('# T\n\nbye\n', '# T\n')).toEqual(['− block 2']);
   });
+  it('indexes: edited/added use current, removed uses seen', () => {
+    const seen = '# T\n\nold intro\n\nkeep me\n\ngone soon\n\ntail text\n';
+    const cur = '# T\n\nbrand new\n\nold intro\n\nkeep me\n\ntail text changed\n';
+    expect(describeUserEdits(seen, cur)).toEqual(['+ block 2: brand new', '− block 4', 'edited block 5: tail text changed']);
+  });
+  it('insertion at slot 0', () => {
+    expect(describeUserEdits('# T\n', 'first\n\n# T\n')).toEqual(['+ block 1: first']);
+  });
+  it('html block edit', () => {
+    const seen = '# T\n\n```html pick\n<b>a</b>\n```\n';
+    const cur = '# T\n\n```html pick\n<b>b</b>\n```\n';
+    expect(describeUserEdits(seen, cur)).toEqual(['edited block 2: ```html pick <b>b</b> ```']);
+  });
+  it('kind change', () => {
+    const seen = '# T\n\n- [ ] a\n';
+    const cur = '# T\n\n- a\n';
+    expect(describeUserEdits(seen, cur)).toEqual(['edited block 2: - a']);
+  });
+  it('checklist whitespace-only change', () => {
+    expect(describeUserEdits('- [ ] a\n- [ ] b\n', '- [ ] a\n\n- [ ] b\n')).toEqual([]);
+  });
+  it('duplicate-text tick', () => {
+    expect(describeUserEdits('- [ ] Test\n- [ ] Test\n', '- [ ] Test\n- [x] Test\n')).toEqual(['☑ "Test"']);
+  });
+  it('nested tick, add and remove', () => {
+    const seen = '- [ ] p\n  - [ ] c1\n  - [ ] c2\n';
+    const cur = '- [ ] p\n  - [x] c1\n  - [ ] c3\n';
+    expect(describeUserEdits(seen, cur)).toEqual(['☑ "c1"', '+ item "c3"', '− item "c2"']);
+  });
+  it('item added already checked', () => {
+    expect(describeUserEdits('- [ ] a\n', '- [ ] a\n- [x] b\n')).toEqual(['+ item "b"', '☑ "b"']);
+  });
+  it('item edited and ticked keeps checked state', () => {
+    expect(describeUserEdits('- [ ] old\n', '- [x] new\n')).toEqual(['+ item "new"', '☑ "new"', '− item "old"']);
+  });
+  it('changed note counts as new note', () => {
+    const seen = '- [ ] a\n  > one\n';
+    const cur = '- [ ] a\n  > two\n';
+    expect(describeUserEdits(seen, cur)).toEqual(['note on "a": two']);
+  });
+  it('fallback: reordered items still reported', () => {
+    expect(describeUserEdits('- [ ] a\n- [ ] b\n', '- [ ] b\n- [ ] a\n')).toEqual(['edited block 1: - [ ] b - [ ] a']);
+  });
   it('no change', () => {
     expect(describeUserEdits('# T\n\n- [ ] a\n', '# T\n\n- [ ] a\n')).toEqual([]);
   });

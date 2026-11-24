@@ -18,42 +18,56 @@ function collectText(node: any): string {
 }
 
 interface ItemInfo {
+  text: string;
   checked: boolean;
   notes: string[];
 }
 
-/** Checklist items keyed by their first-paragraph text. */
+/** Task items (nested ones included) keyed by first-paragraph text plus occurrence index. */
 function itemsOf(source: string): Map<string, ItemInfo> {
   const root = fromMarkdown(source, { extensions: [gfm()], mdastExtensions: [gfmFromMarkdown()] });
   const items = new Map<string, ItemInfo>();
-  for (const list of root.children) {
-    if (list.type !== 'list') continue;
-    for (const item of list.children as ListItem[]) {
-      const para = item.children.find((c) => c.type === 'paragraph');
-      const text = para ? collectText(para).trim() : '';
-      if (items.has(text)) continue;
-      const notes = item.children.filter((c) => c.type === 'blockquote').map((c) => collectText(c).trim());
-      items.set(text, { checked: item.checked === true, notes });
+  const seenCount = new Map<string, number>();
+  const walk = (node: any) => {
+    for (const child of node.children ?? []) {
+      if (child.type === 'listItem' && child.checked !== null && child.checked !== undefined) {
+        const para = child.children.find((c: any) => c.type === 'paragraph');
+        const text = para ? collectText(para).trim() : '';
+        const n = seenCount.get(text) ?? 0;
+        seenCount.set(text, n + 1);
+        const notes = child.children.filter((c: any) => c.type === 'blockquote').map((c: any) => collectText(c).trim());
+        items.set(`${text}\u0000${n}`, { text, checked: child.checked === true, notes });
+      }
+      walk(child);
     }
-  }
+  };
+  walk(root);
   return items;
 }
+
+const normalize = (s: string) => s.replace(/\s+/g, ' ').trim();
 
 function describeChecklist(seen: CanvasBlock, cur: CanvasBlock): string[] {
   const before = itemsOf(seen.source);
   const after = itemsOf(cur.source);
   const lines: string[] = [];
-  for (const [text, info] of after) {
-    const old = before.get(text);
+  for (const [key, info] of after) {
+    const { text } = info;
+    const old = before.get(key);
     if (!old) {
       lines.push(`+ item "${text}"`);
-      continue;
+      if (info.checked) lines.push(`☑ "${text}"`);
+    } else {
+      if (!old.checked && info.checked) lines.push(`☑ "${text}"`);
+      else if (old.checked && !info.checked) lines.push(`☐ "${text}"`);
+      for (const note of info.notes) if (note && !old.notes.includes(note)) lines.push(`note on "${text}": ${note}`);
     }
-    if (!old.checked && info.checked) lines.push(`☑ "${text}"`);
-    else if (old.checked && !info.checked) lines.push(`☐ "${text}"`);
-    for (const note of info.notes) if (note && !old.notes.includes(note)) lines.push(`note on "${text}": ${note}`);
   }
-  for (const text of before.keys()) if (!after.has(text)) lines.push(`− item "${text}"`);
+  for (const [key, info] of before) if (!after.has(key)) lines.push(`− item "${info.text}"`);
+  // Never lose an edit the item-level view can't express (e.g. reordered or restructured items).
+  if (lines.length === 0 && normalize(seen.source) !== normalize(cur.source)) {
+    return [`edited block ${cur.index + 1}: ${oneLine(cur.source)}`];
+  }
   return lines;
 }
 
