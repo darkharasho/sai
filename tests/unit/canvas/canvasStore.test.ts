@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { createCanvasStore } from '../../../src/canvas/canvasStore';
 
 const P = '/ws/.sai/canvas/plan.md';
@@ -231,6 +231,47 @@ describe('canvasStore', () => {
     const { store } = await conflicted();
     await store.onDiskChange(P, '# T2\n\nmine\n', true);
     expect(store.get(P)?.conflicts).toEqual([{ index: 1, ours: 'mine', theirs: 'agent' }]);
+  });
+
+  it('echo matches the newest copy: A->B->A then an agent write of B is real', async () => {
+    const { store, writes } = await seeded('# T\n');
+    await store.userWrite(P, '- [ ] a\n'); // A
+    await store.userWrite(P, '- [x] a\n'); // B
+    await store.userWrite(P, '- [ ] a\n'); // A again
+    await store.onDiskChange(P, '- [ ] a\n', false); // only the final write observed
+    store.markDelivered(P, 'c'); // the agent has seen A
+    const n = writes.length;
+    await store.onDiskChange(P, '- [x] a\n', true); // agent ticks
+    expect(store.get(P)?.content).toBe('- [x] a\n');
+    expect(store.get(P)?.lastEditor).toBe('agent');
+    expect(writes).toHaveLength(n);
+  });
+
+  it('a non-echo change clears unobserved SAI writes', async () => {
+    const { store } = await seeded('h\n\nx\n');
+    await store.userWrite(P, 'H\n\nx\n'); // never observed
+    await store.onDiskChange(P, 'Z\n', false); // disk moved past it
+    store.markDelivered(P, 'c'); // the agent has seen Z
+    await store.onDiskChange(P, 'H\n\nx\n', true); // agent writes exactly the old SAI content
+    expect(store.get(P)?.content).toBe('H\n\nx\n');
+    expect(store.get(P)?.lastEditor).toBe('agent');
+  });
+
+  it('a throwing subscriber does not abort merge-back', async () => {
+    const { store, writes } = await seeded('- [ ] a\n\nx\n');
+    await store.userWrite(P, '- [x] a\n\nx\n');
+    await store.onDiskChange(P, '- [x] a\n\nx\n', false); // echo
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    let other = 0;
+    store.subscribe(() => {
+      throw new Error('boom');
+    });
+    store.subscribe(() => other++);
+    await store.onDiskChange(P, '- [ ] a\n\ny\n', true);
+    expect(writes.at(-1)!.content).toBe('- [x] a\n\ny\n');
+    expect(other).toBe(1);
+    expect(err).toHaveBeenCalled();
+    err.mockRestore();
   });
 
   it('autoSend defaults on and can be toggled; subscribers fire', async () => {

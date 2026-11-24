@@ -68,7 +68,14 @@ export function createCanvasStore(deps: CanvasStoreDeps) {
     const e = canvases.get(path);
     if (e) e.view = makeView(path, e);
     listView = null;
-    for (const fn of [...listeners]) fn();
+    for (const fn of [...listeners]) {
+      // A broken listener must not abort the operation (e.g. a pending merge-back write).
+      try {
+        fn();
+      } catch (err) {
+        console.error('[canvasStore] subscriber threw', err);
+      }
+    }
   };
 
   /** Run `fn` after every earlier operation on `path` has settled. */
@@ -210,12 +217,15 @@ export function createCanvasStore(deps: CanvasStoreDeps) {
           changed(path);
           return;
         }
-        const echo = e.saiWrites.indexOf(content);
+        const echo = e.saiWrites.lastIndexOf(content);
         if (echo >= 0) {
-          // Our own write (possibly coalesced with older ones the watcher skipped).
+          // Our own write (possibly coalesced with older ones the watcher skipped): drop it
+          // and everything older. Matching the newest copy keeps A->B->A from leaving a stale B.
           e.saiWrites.splice(0, echo + 1);
           return;
         }
+        // The disk moved past every SAI write not yet observed; they can never echo now.
+        e.saiWrites = [];
         if (content === e.content) return;
         if (agentLive) {
           await onAgentWrite(path, e, content);
@@ -259,6 +269,7 @@ export function createCanvasStore(deps: CanvasStoreDeps) {
     resolveConflict(path: string, index: number, take: 'ours' | 'theirs'): Promise<void> {
       return serialize(path, async () => {
         const e = canvases.get(path);
+        // Indices are current: every content change re-anchors conflicts (reanchor).
         const conflict = e?.conflicts.find((c) => c.index === index);
         if (!e || !conflict) return;
         e.conflicts = e.conflicts.filter((c) => c !== conflict);
