@@ -7,6 +7,7 @@ import { enrichedEnv } from './shellEnv';
 import { withScopeTag } from './loadGuard/scopeTag';
 import { withLoadNote } from './loadGuard/hook';
 import { emitChat } from './chatEmitter';
+import { CHAT_CANVAS_NUDGE } from './chatNudges';
 
 /**
  * Compatibility module for the provider that used to be backed by Gemini CLI.
@@ -216,6 +217,15 @@ export async function listGeminiModels(cwd?: string) {
   return { models, defaultModel: models[0]?.id || '' };
 }
 
+/**
+ * Text prepended to the first prompt of a Gemini session: the workspace meta preamble plus
+ * the canvas nudge (Gemini has no system-prompt hook, so guidance rides the first prompt).
+ */
+export function geminiSessionPreamble(metaPreamble: string, hasSession: boolean): string {
+  if (hasSession) return '';
+  return `${[metaPreamble, CHAT_CANVAS_NUDGE].filter(Boolean).join('\n\n')}\n\n`;
+}
+
 export function registerGeminiHandlers(win: BrowserWindow) {
   ipcMain.handle('gemini:models', (_event, cwd?: string) => listGeminiModels(cwd));
   ipcMain.handle('gemini:start', async (_event, cwd: string, ...tail: unknown[]) => {
@@ -261,7 +271,7 @@ export function registerGeminiHandlers(win: BrowserWindow) {
     ws.gemini.lastSendScope = scope;
     safeSend(win, { type: 'streaming_start', projectPath, scope, turnSeq, sessionId: scopeSession(ws, scope) });
     try {
-      const preamble = ws.gemini.metaPreamble && !scopeSession(ws, scope) ? `${ws.gemini.metaPreamble}\n\n` : '';
+      const preamble = geminiSessionPreamble(ws.gemini.metaPreamble, !!scopeSession(ws, scope));
       await promptAntigravityText(win, ws, { scope, prompt: `${preamble}${withLoadNote('gemini', projectPath, scope, message)}`, imagePaths, approvalMode, conversationMode, model });
       safeSend(win, { type: 'result', projectPath, scope, usage: { input_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, output_tokens: 0 } });
       notifyCompletion(win, projectPath, { provider: DISPLAY_NAME }, { site: 'gemini.turnEnd' });
