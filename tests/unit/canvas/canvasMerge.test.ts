@@ -69,9 +69,9 @@ describe('mergeBlocks', () => {
     const ours = 'one\n\ntwo';
     const theirs = 'one\n\ntwo\n\nthree';
     expect(mergeBlocks(base, ours, theirs).merged).toBe(theirs);
-    // user appends after unterminated last block, agent changes nothing
-    const r = mergeBlocks('one\n\ntwo', 'one\n\ntwo', 'one\n\ntwo');
-    expect(r.merged).toBe('one\n\ntwo');
+    // user appends after unterminated last block, agent changes nothing; must not glue
+    const r = mergeBlocks('one\n\ntwo', 'one\n\ntwo\n\nY', 'one\n\ntwo');
+    expect(r.merged).toBe('one\n\ntwo\n\nY');
     // both append after an unterminated block
     const m = mergeBlocks('one\n\ntwo', 'one\n\ntwo\n\nY', 'one\n\ntwo\n\nX');
     expect(m.merged).toBe('one\n\ntwo\n\nX\n\nY');
@@ -89,5 +89,47 @@ describe('mergeBlocks', () => {
     const r = mergeBlocks(base, ours, theirs);
     expect(r.merged).toBe(doc(H, 'same', 'agent mid', 'same', Z, 'user tail'));
     expect(r.conflicts).toEqual([]);
+  });
+
+  describe('similarity pairing in gaps', () => {
+    it('does not mispair an agent-inserted block with a ticked item', () => {
+      const base = doc(H, '- [ ] buy fresh milk today', Z);
+      const ours = doc(H, '- [x] buy fresh milk today', Z);
+      const theirs = doc(H, 'New intro paragraph about shopping.', '- [ ] buy fresh milk today please', Z);
+      const r = mergeBlocks(base, ours, theirs);
+      expect(r.merged).toContain('New intro paragraph about shopping.');
+      expect(r.merged).toContain('- [x] buy fresh milk today');
+      expect(r.conflicts).toHaveLength(1);
+      expect(r.conflicts[0].ours).toBe('- [x] buy fresh milk today');
+      expect(r.conflicts[0].theirs).toBe('- [ ] buy fresh milk today please');
+    });
+
+    const A = 'The alpha section describes the opening goals clearly.';
+    const Au = 'The alpha section describes the opening goals clearly, per user.';
+    const B = 'The beta section lists every open question here.';
+    const Ba = 'The beta section lists every open question here, per agent.';
+    const Bu = 'The beta section lists every open question here, per user.';
+
+    it('agent deletes A (user changed it) and edits untouched B', () => {
+      const r = mergeBlocks(doc(H, A, B, Z), doc(H, Au, B, Z), doc(H, Ba, Z));
+      expect(r.merged).toBe(doc(H, Au, Ba, Z));
+      expect(r.conflicts).toEqual([]);
+    });
+
+    it('user deletes A and edits B; agent edits B only -> conflict on B', () => {
+      const r = mergeBlocks(doc(H, A, B, Z), doc(H, Bu, Z), doc(H, A, Ba, Z));
+      expect(r.merged).toBe(doc(H, Bu, Z));
+      expect(r.conflicts).toHaveLength(1);
+      expect(r.conflicts[0].ours).toBe(Bu);
+      expect(r.conflicts[0].theirs).toBe(Ba);
+    });
+
+    it('mirror: agent deletes A and edits B; user edits B only -> conflict on B', () => {
+      const r = mergeBlocks(doc(H, A, B, Z), doc(H, A, Bu, Z), doc(H, Ba, Z));
+      expect(r.merged).toBe(doc(H, Bu, Z));
+      expect(r.conflicts).toHaveLength(1);
+      expect(r.conflicts[0].ours).toBe(Bu);
+      expect(r.conflicts[0].theirs).toBe(Ba);
+    });
   });
 });
