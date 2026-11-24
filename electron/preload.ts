@@ -259,6 +259,14 @@ contextBridge.exposeInMainWorld('sai', {
     ipcRenderer.on('fs:fileChanged', listener);
     return () => ipcRenderer.removeListener('fs:fileChanged', listener);
   },
+  canvasWatch: (projectPath: string): Promise<void> => ipcRenderer.invoke('canvas:watch', projectPath),
+  canvasUnwatch: (projectPath: string): Promise<void> => ipcRenderer.invoke('canvas:unwatch', projectPath),
+  canvasList: (projectPath: string): Promise<{ path: string; content: string }[]> => ipcRenderer.invoke('canvas:list', projectPath),
+  onCanvasChanged: (callback: (e: { projectPath: string; path: string; content: string | null }) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, e: { projectPath: string; path: string; content: string | null }) => callback(e);
+    ipcRenderer.on('canvas:changed', listener);
+    return () => ipcRenderer.removeListener('canvas:changed', listener);
+  },
   fsReadFileBase64: (filePath: string) => ipcRenderer.invoke('fs:readFileBase64', filePath),
   storeToolResultImage: (dataUrl: string): Promise<string> => ipcRenderer.invoke('toolResultImage:store', dataUrl),
   pruneToolResultImages: (referenced: string[]): Promise<{ deleted: number; freedBytes: number }> =>

@@ -8,6 +8,7 @@ import { syntheticRootFor } from './metaSyntheticRoot';
 import { safeJoin } from './remote/safe-join';
 import { storeImageBase64, pruneOrphanImages } from './toolResultImageStore';
 import { createSenderWatches } from './fileWatch';
+import { createSenderCanvasWatches, listCanvases } from './canvasWatch';
 
 function fileSha(content: string): string {
   return createHash('sha256').update(content, 'utf8').digest('hex').slice(0, 16);
@@ -132,6 +133,11 @@ export function registerFsHandlers(mainWindow: BrowserWindow) {
   const senderWatches = createSenderWatches();
   ipcMain.handle('fs:watchFile', (e, filePath: string) => senderWatches.watch(e.sender, filePath));
   ipcMain.handle('fs:unwatchFile', (e, filePath: string) => senderWatches.unwatch(e.sender, filePath));
+
+  const canvasWatches = createSenderCanvasWatches();
+  ipcMain.handle('canvas:watch', (e, projectPath: string) => canvasWatches.watch(e.sender, projectPath));
+  ipcMain.handle('canvas:unwatch', (e, projectPath: string) => canvasWatches.unwatch(e.sender, projectPath));
+  ipcMain.handle('canvas:list', (_e, projectPath: string) => listCanvases(projectPath));
 
   ipcMain.handle('fs:readFileBase64', async (_event, filePath: string) => {
     const buffer = await fs.promises.readFile(filePath);
