@@ -167,7 +167,17 @@ export function createCanvasWatcher(
           const was = p.mode;
           closeWatcher(p);
           p.mode = null;
-          if (was === 'canvas') nullKnown(p);
+          if (was === 'canvas') {
+            // Transient errors must not wipe files that are still on disk.
+            const present = new Set(listMd(p.canvasDir));
+            for (const name of [...p.known]) {
+              if (present.has(name)) continue;
+              const t = p.timers.get(name);
+              if (t) { clearTimeout(t); p.timers.delete(name); }
+              p.known.delete(name);
+              fire(p, name, null);
+            }
+          }
           scheduleRetry(p);
         });
       } catch (err) {
@@ -183,7 +193,8 @@ export function createCanvasWatcher(
           for (const n of present) p.known.add(n);
         } else {
           // Dir appeared after the watch started: report what is already in it.
-          for (const n of present) schedule(p, n);
+          // Union with known so files that vanished during an outage get their null.
+          for (const n of new Set([...p.known, ...present])) schedule(p, n);
         }
       }
       initial = false;

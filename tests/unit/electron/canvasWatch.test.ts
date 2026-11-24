@@ -90,29 +90,47 @@ describe('createCanvasWatcher', () => {
     expect(events.every(e => e.content !== null)).toBe(true);
   });
 
-  it('re-arms after a watcher error and after the project .sai is removed and recreated', async () => {
-    const created: fs.FSWatcher[] = [];
-    const orig = fs.watch;
-    const spy = vi.spyOn(fs, 'watch').mockImplementation(((...args: unknown[]) => {
-      const watcher = (orig as (...a: unknown[]) => fs.FSWatcher)(...args);
-      created.push(watcher);
-      return watcher;
-    }) as typeof fs.watch);
-    try {
+  describe('watcher errors', () => {
+    let created: fs.FSWatcher[];
+    let spy: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => {
+      created = [];
+      const orig = fs.watch;
+      spy = vi.spyOn(fs, 'watch').mockImplementation(((...args: unknown[]) => {
+        const watcher = (orig as (...a: unknown[]) => fs.FSWatcher)(...args);
+        created.push(watcher);
+        return watcher;
+      }) as typeof fs.watch);
+    });
+    afterEach(() => spy.mockRestore());
+    const fail = () => created.at(-1)!.emit('error', Object.assign(new Error('EMFILE'), { code: 'EMFILE' }));
+
+    it('re-arms without nulling files that are still on disk', async () => {
       mkCanvas();
       const a = path.join(canvasDir(), 'a.md');
       fs.writeFileSync(a, 'a');
       w.watch(proj);
-      created.at(-1)!.emit('error', Object.assign(new Error('EMFILE'), { code: 'EMFILE' }));
-      await vi.waitFor(() => expect(events).toContainEqual({ projectPath: proj, path: a, content: null }));
-      events.length = 0;
+      fail();
       // The retry re-attaches and reports what is on disk.
       await vi.waitFor(() => expect(events.at(-1)).toEqual({ projectPath: proj, path: a, content: 'a' }));
       fs.writeFileSync(a, 'b');
       await vi.waitFor(() => expect(events.at(-1)?.content).toBe('b'));
-    } finally {
-      spy.mockRestore();
-    }
+      expect(events.every(e => e.content !== null)).toBe(true);
+    });
+
+    it('nulls files that are gone when the error hits, then resumes', async () => {
+      mkCanvas();
+      const a = path.join(canvasDir(), 'a.md');
+      fs.writeFileSync(a, 'a');
+      w.watch(proj);
+      fs.rmSync(path.join(real, '.sai'), { recursive: true });
+      fail();
+      expect(events).toEqual([{ projectPath: proj, path: a, content: null }]);
+      events.length = 0;
+      mkCanvas();
+      fs.writeFileSync(a, 'back');
+      await vi.waitFor(() => expect(events.at(-1)).toEqual({ projectPath: proj, path: a, content: 'back' }));
+    });
   });
 
   it('ignores invalid project paths', () => {
