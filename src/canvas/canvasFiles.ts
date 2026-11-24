@@ -98,6 +98,23 @@ export function workspaceAgentLive<T>(
   return false;
 }
 
+/**
+ * Chat keys (scopes) of `ws` with a streaming turn or a live background task: the chats that may
+ * have written a canvas change that lands now. Keys are `${ws}:${scope}`, scope = chat key.
+ */
+export function workspaceLiveChats<T>(
+  ws: string,
+  streamingScopes: ReadonlySet<string>,
+  tasksByScope: ReadonlyMap<string, readonly T[]>,
+  isLive: (t: T) => boolean,
+): string[] {
+  const out = new Set<string>();
+  const add = (k: string) => { if (scopeKeyProjectPath(k) === ws) out.add(k.slice(ws.length + 1)); };
+  for (const k of streamingScopes) add(k);
+  for (const [k, tasks] of tasksByScope) if (tasks.some(isLive)) add(k);
+  return [...out];
+}
+
 /** A workspace's tabs without the deleted canvas, keeping the active tab valid. */
 export function closeDeletedCanvasTabs(
   w: { openFiles: OpenFile[]; activeFilePath: string | null },

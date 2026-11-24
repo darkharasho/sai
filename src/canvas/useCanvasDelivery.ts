@@ -77,7 +77,7 @@ export function useCanvasDelivery({ store, chatKey, chatBusy, send }: CanvasDeli
   let sendIn: number | null = null;
   if (ready && !backingOff) {
     for (const c of list) {
-      if (!c.autoSend || !store.hasPending(c.path, chatKey!)) continue;
+      if (!c.autoSend || !store.isAutoTarget(c.path, chatKey!) || !store.hasPending(c.path, chatKey!)) continue;
       const from = Math.max(c.lastUserActivityAt, chatSince);
       const secs = Math.max(0, Math.ceil((from + CANVAS_IDLE_MS - now) / 1000));
       perPath.set(c.path, secs);
@@ -96,7 +96,8 @@ export function useCanvasDelivery({ store, chatKey, chatBusy, send }: CanvasDeli
     let next = Infinity;
     for (const c of store.list()) {
       const forced = forcedRef.current.has(c.path);
-      if (!forced && !c.autoSend) continue;
+      // Auto-send only reaches the canvas's own chat; others need an explicit send.
+      if (!forced && (!c.autoSend || !store.isAutoTarget(c.path, chatKey!))) continue;
       if (!store.hasPending(c.path, chatKey!)) {
         forcedRef.current.delete(c.path);
         continue;

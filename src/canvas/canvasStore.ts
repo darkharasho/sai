@@ -31,6 +31,11 @@ interface Entry {
   autoSend: boolean;
   /** Per-chat content last delivered (agent edits applied on top). */
   seen: Map<string, string>;
+  /**
+   * The chat that most recently wrote or was sent this canvas: the only chat updates auto-send to.
+   * null = no chat has it yet, so the active chat is the target.
+   */
+  owner: string | null;
   /** Undelivered emits, one per label (latest payload + count), in first-emit order. */
   emits: Required<CanvasEmit>[];
   /** Contents SAI wrote that the watcher has not reported yet (oldest first). */
@@ -142,18 +147,30 @@ export function createCanvasStore(deps: CanvasStoreDeps) {
       conflicts: [],
       autoSend: true,
       seen: new Map<string, string>(),
+      owner: null,
       emits: [],
       saiWrites: [],
     };
     return { ...base, view: makeView(path, base) };
   };
 
-  const onAgentWrite = async (path: string, e: Entry, disk: string) => {
+  /**
+   * An agent write while `liveChats` are streaming: one of them wrote it, so each now knows the
+   * agent's content (`disk`) and gets diffs from here on rather than a full-content first message.
+   */
+  const seedWriters = (e: Entry, disk: string, liveChats: readonly string[]) => {
+    if (liveChats.length === 0) return;
+    for (const chat of liveChats) if (!e.seen.has(chat)) e.seen.set(chat, disk);
+    if (!e.owner || !liveChats.includes(e.owner)) e.owner = liveChats[0];
+  };
+
+  const onAgentWrite = async (path: string, e: Entry, disk: string, liveChats: readonly string[]) => {
     const res = mergeBlocks(e.agentBase, e.userContent, disk);
     const final = res.changed ? res.merged : disk;
     // Carry the agent's own block changes (agentBase -> disk) into every chat's seen-snapshot,
     // so they never read as user edits while undelivered user edits still do.
     for (const [chat, seen] of e.seen) e.seen.set(chat, mergeBlocks(e.agentBase, seen, disk).merged);
+    seedWriters(e, disk, liveChats);
     e.content = final;
     e.userContent = final;
     // Base the next merge on what the agent actually wrote, so a later write built from that
@@ -201,8 +218,11 @@ export function createCanvasStore(deps: CanvasStoreDeps) {
       return listView;
     },
 
-    /** Watcher event. agentLive = workspace has a live chat turn or background task. */
-    onDiskChange(path: string, content: string | null, agentLive: boolean): Promise<void> {
+    /**
+     * Watcher event. agentLive = workspace has a live chat turn or background task;
+     * liveChats = chat keys with a turn streaming in the workspace (the possible writers).
+     */
+    onDiskChange(path: string, content: string | null, agentLive: boolean, liveChats: readonly string[] = []): Promise<void> {
       return serialize(path, async () => {
         const e = canvases.get(path);
         if (content === null) {
@@ -214,8 +234,12 @@ export function createCanvasStore(deps: CanvasStoreDeps) {
         }
         if (!e) {
           // First sight is a baseline, never a user edit.
-          canvases.set(path, newEntry(path, content, content, agentLive ? 'agent' : 'user'));
-          if (agentLive) agentTouched.add(path);
+          const fresh = newEntry(path, content, content, agentLive ? 'agent' : 'user');
+          canvases.set(path, fresh);
+          if (agentLive) {
+            seedWriters(fresh, content, liveChats);
+            agentTouched.add(path);
+          }
           changed(path);
           return;
         }
@@ -230,7 +254,7 @@ export function createCanvasStore(deps: CanvasStoreDeps) {
         e.saiWrites = [];
         if (content === e.content) return;
         if (agentLive) {
-          await onAgentWrite(path, e, content);
+          await onAgentWrite(path, e, content, liveChats);
         } else {
           applyUserContent(e, content);
           changed(path);
@@ -312,9 +336,19 @@ export function createCanvasStore(deps: CanvasStoreDeps) {
       const e = canvases.get(path);
       if (!e) return;
       e.seen.set(chatKey, e.content);
+      e.owner = chatKey;
       e.emits = [];
       e.agentBase = e.content;
       changed(path);
+    },
+
+    /**
+     * Auto-send may deliver to chatKey: it is the chat that last wrote or was sent this canvas,
+     * or no chat has it yet. Other chats only get it by an explicit send ("Send to this chat").
+     */
+    isAutoTarget(path: string, chatKey: string): boolean {
+      const e = canvases.get(path);
+      return !!e && (e.owner === null || e.owner === chatKey);
     },
 
     hasPending(path: string, chatKey: string): boolean {

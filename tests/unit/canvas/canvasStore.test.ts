@@ -365,4 +365,46 @@ describe('canvasStore', () => {
     await store.resolveConflict(P, 2, 'theirs');
     expect(store.get(P)!.content).toBe('new\n\none\n\ntwo agent\n');
   });
+
+  it('I4a: the streaming chat that wrote a new canvas gets diffs, not a full-content share', async () => {
+    const { store } = setup();
+    await store.onDiskChange(P, '# T\n\n- [ ] a\n', true, ['w']);
+    expect(store.hasPending(P, 'w')).toBe(false);
+    await store.userWrite(P, '# T\n\n- [x] a\n');
+    const msg = store.pendingMessage(P, 'w')!;
+    expect(msg).toContain('☑ "a"');
+    expect(msg).not.toContain('sharing this canvas');
+  });
+
+  it('I4a: a later agent write seeds a streaming chat that had never seen the canvas', async () => {
+    const { store } = await seeded('one\n\ntwo\n');
+    await store.onDiskChange(P, 'one\n\ntwo agent\n', true, ['w']);
+    expect(store.hasPending(P, 'w')).toBe(false);
+    await store.userWrite(P, 'one mine\n\ntwo agent\n');
+    const msg = store.pendingMessage(P, 'w')!;
+    expect(msg).toContain('edited block 1: one mine');
+    expect(msg).not.toContain('sharing this canvas');
+  });
+
+  it('I4a: merged-back user edits still reach the seeded writer chat', async () => {
+    const { store } = await seeded('one\n\ntwo\n');
+    await store.userWrite(P, 'one mine\n\ntwo\n');
+    // Agent writes from a stale copy; the user's block is merged back.
+    await store.onDiskChange(P, 'one\n\ntwo agent\n', true, ['w']);
+    expect(store.get(P)!.content).toBe('one mine\n\ntwo agent\n');
+    expect(store.pendingMessage(P, 'w')).toContain('edited block 1: one mine');
+  });
+
+  it('I4b: only the chat that last wrote or was sent the canvas is the auto-send target', async () => {
+    const { store } = setup();
+    await store.onDiskChange(P, 'x\n', false);
+    // Nobody has seen it: the active chat (any) is the target.
+    expect(store.isAutoTarget(P, 'a')).toBe(true);
+    store.markDelivered(P, 'b');
+    expect(store.isAutoTarget(P, 'b')).toBe(true);
+    expect(store.isAutoTarget(P, 'a')).toBe(false);
+    await store.onDiskChange(P, 'y\n', true, ['a']);
+    expect(store.isAutoTarget(P, 'a')).toBe(true);
+    expect(store.isAutoTarget(P, 'b')).toBe(false);
+  });
 });

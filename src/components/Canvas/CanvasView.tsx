@@ -19,6 +19,8 @@ export interface CanvasViewProps {
   sendIn: number | null;
   /** The target chat has an unsent update (store.hasPending). */
   pending: boolean;
+  /** The target chat is this canvas's auto-send target (store.isAutoTarget). Default true. */
+  autoTarget?: boolean;
   onSendNow(): void;
   onHoldToggle(): void;
   onOpenSource(): void;
@@ -125,7 +127,7 @@ export default function CanvasView(props: CanvasViewProps) {
 }
 
 function CanvasViewInner(props: CanvasViewProps) {
-  const { path, store, agentStatus, sendIn, pending, onSendNow, onHoldToggle, onOpenSource, onOpenCanvas } = props;
+  const { path, store, agentStatus, sendIn, pending, autoTarget = true, onSendNow, onHoldToggle, onOpenSource, onOpenCanvas } = props;
   const state = useSyncExternalStore(store.subscribe, () => store.get(path));
   const list = useSyncExternalStore(store.subscribe, () => store.list());
   const { pendingDoc, apply, latest, error } = usePendingWrites(path, store);
@@ -165,6 +167,13 @@ function CanvasViewInner(props: CanvasViewProps) {
     pill = (
       <span className="canvas-pill">
         Held · <button type="button" className="canvas-pill__btn" onClick={onSendNow}>Send</button>
+      </span>
+    );
+  } else if (pending && !autoTarget) {
+    // Another chat owns this canvas: never auto-sent here, only on request.
+    pill = (
+      <span className="canvas-pill">
+        Not sent to this chat · <button type="button" className="canvas-pill__btn" onClick={onSendNow}>Send to this chat</button>
       </span>
     );
   } else if (pending && agentStatus === 'busy') {

@@ -93,6 +93,8 @@ test.describe('live canvas', () => {
     const delivered = await window.evaluate(() => (window as any).__canvas.sent[1] as string);
     // No [File: ...] prefix: canvas delivery skips file context, the update names its own path.
     expect(delivered.startsWith('[Canvas update] .sai/canvas/steps.md')).toBe(true);
-    expect(delivered).toContain('- [x] Launch game');
+    // The chat that wrote the canvas already knows it: it gets the tick as a diff line, not the whole file.
+    expect(delivered).toContain('- ☑ "Launch game"');
+    expect(delivered).not.toContain('sharing this canvas');
   });
 });

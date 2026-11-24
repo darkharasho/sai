@@ -34,6 +34,8 @@ export interface CanvasControllerOpts {
   openWorkspaces: string[];
   /** `ws` has a live chat turn or background task: its disk changes are agent writes. */
   isAgentLive(ws: string): boolean;
+  /** Chat keys of `ws` with a live turn or task: an agent write there is attributed to them. */
+  liveChats?(ws: string): string[];
   /** chatSendTextRef: the active chat panel's queueing send. */
   sendRef: MutableRefObject<((text: string, opts?: { skipFileContext?: boolean }) => void) | null>;
   getOpenFiles(ws: string): OpenFile[];
@@ -151,9 +153,9 @@ export function useCanvasController(opts: CanvasControllerOpts): CanvasControlle
     let disposed = false;
     let seeded = false;
     const buffered: CanvasEvent[] = [];
-    const apply = (path: string, content: string | null, agentLive: boolean) => {
+    const apply = (path: string, content: string | null, agentLive: boolean, liveChats: string[] = []) => {
       const key = canvasKey(path);
-      s.onDiskChange(key, content, agentLive)
+      s.onDiskChange(key, content, agentLive, liveChats)
         .then(() => {
           if (disposed) return;
           if (content === null) closeTabsIn(ws, key);
@@ -161,7 +163,11 @@ export function useCanvasController(opts: CanvasControllerOpts): CanvasControlle
         })
         .catch(logReject('disk change'));
     };
-    const handle = (ev: CanvasEvent) => apply(ev.path, ev.content, optsRef.current.isAgentLive(ws));
+    const handle = (ev: CanvasEvent) => {
+      const o = optsRef.current;
+      const agentLive = o.isAgentLive(ws);
+      apply(ev.path, ev.content, agentLive, agentLive ? o.liveChats?.(ws) ?? [] : []);
+    };
     const off = sai.onCanvasChanged((ev: CanvasEvent) => {
       if (disposed || ev.projectPath !== ws) return;
       if (seeded) handle(ev);
@@ -262,6 +268,7 @@ function CanvasTabInner({ ctl, path }: { ctl: CanvasController; path: string }) 
   const key = canvasKey(path);
   const { store, chatKey } = ctl;
   const pending = useSyncExternalStore(store.subscribe, () => (chatKey ? store.hasPending(key, chatKey) : false));
+  const autoTarget = useSyncExternalStore(store.subscribe, () => (chatKey ? store.isAutoTarget(key, chatKey) : true));
   return (
     <CanvasView
       path={key}
@@ -269,6 +276,7 @@ function CanvasTabInner({ ctl, path }: { ctl: CanvasController; path: string }) 
       agentStatus={ctl.agentStatus}
       sendIn={ctl.sendInFor(key)}
       pending={pending}
+      autoTarget={autoTarget}
       onSendNow={() => ctl.sendNow(key)}
       onHoldToggle={() => ctl.holdToggle(key)}
       onOpenSource={() => ctl.openSource(path)}

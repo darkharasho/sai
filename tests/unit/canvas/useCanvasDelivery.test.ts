@@ -229,4 +229,30 @@ describe('useCanvasDelivery', () => {
     });
     expect(send).toHaveBeenCalledTimes(2);
   });
+
+  it('I4b: never auto-sends to a never-seen chat when another chat has seen the canvas; manual send works', async () => {
+    const store = await makeStore();
+    const { send, hook } = setup(store, { chatKey: 'd' });
+    await act(async () => { await store.userWrite(A, '- [x] a\n'); });
+    expect(store.hasPending(A, 'd')).toBe(true);
+    expect(hook.result.current.sendInFor(A)).toBeNull();
+    act(() => { vi.advanceTimersByTime(20000); });
+    expect(send).not.toHaveBeenCalled();
+    act(() => { hook.result.current.sendNow(A); });
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0][0]).toContain('sharing this canvas');
+  });
+
+  it('I4b: delivering to one chat does not re-send the same edits to another just by switching to it', async () => {
+    const store = await makeStore();
+    store.markDelivered(A, 'b');
+    const { send, hook, props } = setup(store, { chatKey: 'b' });
+    await act(async () => { await store.userWrite(A, '- [x] a\n'); });
+    act(() => { vi.advanceTimersByTime(5000); });
+    expect(send).toHaveBeenCalledTimes(1);
+    hook.rerender({ ...props, chatKey: 'c' });
+    act(() => { vi.advanceTimersByTime(20000); });
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(store.hasPending(A, 'c')).toBe(true);
+  });
 });

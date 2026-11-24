@@ -184,6 +184,17 @@ describe('useCanvasController', () => {
     expect(opts.closeFile).not.toHaveBeenCalled();
   });
 
+  it('I4a: an agent write is attributed to the workspace\'s streaming chats (they get diffs)', async () => {
+    const { hook, live } = setup({ liveChats: (ws) => (ws === WS ? ['c'] : []) });
+    await flush();
+    live.add(WS);
+    act(() => emit({ projectPath: WS, path: REAL, content: '- [ ] a\n\nnew\n' }));
+    await flush();
+    const s = hook.result.current.store;
+    await act(async () => { await s.userWrite(TAB, '- [x] a\n\nnew\n'); });
+    expect(s.pendingMessage(TAB, 'c')).toContain('☑ "a"');
+  });
+
   it('ignores events for other projects', async () => {
     const { hook } = setup();
     await flush();

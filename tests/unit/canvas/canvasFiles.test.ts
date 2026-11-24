@@ -70,7 +70,7 @@ describe('findOpenCanvasPath', () => {
   });
 });
 
-import { canvasWatchSet, workspaceAgentLive, isTextEntry, closeDeletedCanvasTabs } from '../../../src/canvas/canvasFiles';
+import { canvasWatchSet, workspaceAgentLive, workspaceLiveChats, isTextEntry, closeDeletedCanvasTabs } from '../../../src/canvas/canvasFiles';
 
 describe('canvasWatchSet', () => {
   it('watches every store workspace still open, plus the active one', () => {
@@ -151,5 +151,13 @@ describe('canvasLiveness', () => {
     expect(canvasLiveness(new Set(['/a']), none, '/a', 'sess1')).toMatchObject({ chatBusy: true });
     expect(canvasLiveness(new Set(['/a']), none, '/a', 'sess1').streamingWs.has('/a')).toBe(true);
     expect(canvasLiveness(none, new Set(['/a:chat']), '/a', '').chatBusy).toBe(true);
+  });
+});
+
+describe('workspaceLiveChats', () => {
+  it('lists chat keys streaming or running a live task in the workspace only', () => {
+    const streaming = new Set(['/w:s1', '/w:chat', '/w2:s9', '/w-x:s5']);
+    const tasks = new Map<string, { live: boolean }[]>([['/w:s2', [{ live: true }]], ['/w:s3', [{ live: false }]], ['/w:s1', [{ live: true }]]]);
+    expect(workspaceLiveChats('/w', streaming, tasks, (t) => t.live).sort()).toEqual(['chat', 's1', 's2']);
   });
 });

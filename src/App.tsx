@@ -80,7 +80,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { getCapabilities } from './providers/capabilities';
 import { normalizeCodexEffort } from './lib/codexEffort';
 import { CanvasContext, useCanvasController } from './canvas/CanvasContext';
-import { canvasLiveness, isCanvasFile, workspaceAgentLive } from './canvas/canvasFiles';
+import { canvasLiveness, isCanvasFile, workspaceAgentLive, workspaceLiveChats } from './canvas/canvasFiles';
 
 interface ScopeReconcileBridge {
   claudeReconcileScope?: (projectPath: string, scope?: string) => void;
@@ -2560,6 +2560,7 @@ export default function App() {
     chatBusy: canvasChatBusy,
     openWorkspaces: [...workspaces.keys()],
     isAgentLive: (ws) => workspaceAgentLive(ws, canvasStreamingWs, backgroundTasksByScope, (t) => !isTerminalDetail(t)),
+    liveChats: (ws) => workspaceLiveChats(ws, streamingScopes, backgroundTasksByScope, (t) => !isTerminalDetail(t)),
     sendRef: chatSendTextRef,
     getOpenFiles: (ws) => workspacesRef.current.get(ws)?.openFiles ?? [],
     openFile: (p, o) => { void handleFileOpen(p, undefined, o); },

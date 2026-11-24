@@ -148,6 +148,12 @@ describe('CanvasView', () => {
       fireEvent.click(screen.getByText('Auto-send off'));
       expect(v.onHoldToggle).toHaveBeenCalled();
     });
+    it('I4b: "Send to this chat" for a chat that is not the canvas\'s auto-send target', async () => {
+      const { store } = await setup();
+      const v = view(store, { pending: true, autoTarget: false });
+      fireEvent.click(screen.getByText('Send to this chat'));
+      expect(v.onSendNow).toHaveBeenCalled();
+    });
     it('no pill by default', async () => {
       const { store } = await setup();
       view(store);
