@@ -58,6 +58,14 @@ describe('chatNudges', () => {
     expect(CHAT_CANVAS_NUDGE).toContain('"[Canvas update]"');
   });
 
+  it('canvas nudge teaches failed items, stats tiles and diagram result classes', () => {
+    expect(CHAT_CANVAS_NUDGE).toContain('- [!]');
+    expect(CHAT_CANVAS_NUDGE).toContain('```stats fence');
+    expect(CHAT_CANVAS_NUDGE).toContain('auto');
+    for (const c of ['pass', 'fail', 'current']) expect(CHAT_CANVAS_NUDGE).toContain(c);
+    expect(CHAT_CANVAS_NUDGE).not.toMatch(/sai_|mcp|tool/i);
+  });
+
   it('exposes the render + github nudges as non-empty strings', () => {
     expect(CHAT_RENDER_NUDGE).toContain('render_html');
     expect(CHAT_GITHUB_WATCH_NUDGE).toContain('sai_watch_github_run');

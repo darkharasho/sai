@@ -31,7 +31,12 @@ export const CHAT_CANVAS_NUDGE =
   '```mermaid fences for diagrams, and ```html fences for small interactive widgets (they may ' +
   'call sai.canvas.emit(data) to send you an event). The user edits canvases directly; their ' +
   'changes arrive as messages starting with "[Canvas update]". When you get one, re-read the ' +
-  'file before editing it, and keep the user\'s ticks and notes intact.';
+  'file before editing it, and keep the user\'s ticks and notes intact. ' +
+  'Mark a failed step with - [!] (and add the reason as a > note under it). ' +
+  'Optional summary tiles: a ```stats fence with one "Label: value" per line; the value auto ' +
+  'computes Progress, Passed, Failed or Remaining from the checklist items. ' +
+  'In flowcharts, tag result nodes with the classes pass, fail or current ' +
+  '(class A,B pass or A:::fail); SAI colors them.';
 
 /**
  * Newer Opus models under-reach for the task tools without an explicit trigger
