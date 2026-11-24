@@ -1,5 +1,5 @@
 import { mergeBlocks, type MergeConflict } from './canvasMerge';
-import { describeUserEdits, buildCanvasUpdateMessage } from './canvasDiff';
+import { describeUserEdits, buildCanvasUpdateMessage, type CanvasEmit } from './canvasDiff';
 import { splitBlocks, replaceBlock } from './canvasBlocks';
 
 export interface CanvasStoreDeps {
@@ -18,11 +18,6 @@ export interface CanvasState {
   autoSend: boolean;
 }
 
-interface Emit {
-  label: string;
-  data: unknown;
-}
-
 interface Entry {
   content: string;
   /** Latest content that includes every user edit (equals `content` after any change). */
@@ -36,7 +31,8 @@ interface Entry {
   autoSend: boolean;
   /** Per-chat content last delivered (agent edits applied on top). */
   seen: Map<string, string>;
-  emits: Emit[];
+  /** Undelivered emits, one per label (latest payload + count), in first-emit order. */
+  emits: Required<CanvasEmit>[];
   /** Contents SAI wrote that the watcher has not reported yet (oldest first). */
   saiWrites: string[];
   view: CanvasState;
@@ -267,7 +263,12 @@ export function createCanvasStore(deps: CanvasStoreDeps) {
     userEmit(path: string, label: string, data: unknown): void {
       const e = canvases.get(path);
       if (!e) return;
-      e.emits.push({ label, data });
+      // Coalesce per label: a slider emitting on input must not produce hundreds of lines.
+      const prev = e.emits.find((x) => x.label === label);
+      if (prev) {
+        prev.data = data;
+        prev.count += 1;
+      } else e.emits.push({ label, data, count: 1 });
       e.lastUserActivityAt = deps.now();
       changed(path);
     },

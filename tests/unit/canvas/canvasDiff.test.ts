@@ -116,4 +116,22 @@ describe('buildCanvasUpdateMessage', () => {
       '[Canvas update] .sai/canvas/plan.md\nThe user is sharing this canvas with you (current content below).\n\n```markdown\n# T\n```\n- html "p" sent: 1\nRe-read the file for full context.',
     );
   });
+  it('cyclic emit payload does not throw', () => {
+    const data: any = { a: 1 };
+    data.self = data;
+    const msg = buildCanvasUpdateMessage({ relPath, lines: [], emits: [{ label: 'c', data }] });
+    expect(msg).toContain('html "c" sent: {"a":1,"self":"[Circular]"}');
+  });
+  it('BigInt emit payload is stringified', () => {
+    const msg = buildCanvasUpdateMessage({ relPath, lines: [], emits: [{ label: 'b', data: { n: 10n } }] });
+    expect(msg).toContain('html "b" sent: {"n":"10"}');
+  });
+  it('a throwing toJSON falls back instead of throwing', () => {
+    const data = { toJSON() { throw new Error('nope'); } };
+    expect(() => buildCanvasUpdateMessage({ relPath, lines: [], emits: [{ label: 't', data }] })).not.toThrow();
+  });
+  it('shows the emit count when coalesced', () => {
+    const msg = buildCanvasUpdateMessage({ relPath, lines: [], emits: [{ label: 'picker', data: 5, count: 37 }] });
+    expect(msg).toContain('- html "picker" sent: 5 (×37)');
+  });
 });

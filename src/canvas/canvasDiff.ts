@@ -93,15 +93,50 @@ export function describeUserEdits(seen: string, current: string): string[] {
   return lines;
 }
 
+/**
+ * JSON for an emit payload that never throws: this runs during render (hasPending), so a
+ * cyclic or BigInt payload from a canvas widget must not take the app down.
+ */
+export function safeStringify(value: unknown): string {
+  const ancestors: unknown[] = [];
+  try {
+    const out = JSON.stringify(value, function (this: unknown, _key, val: unknown) {
+      if (typeof val === 'bigint') return val.toString();
+      if (typeof val !== 'object' || val === null) return val;
+      // `this` is the object holding `val`: unwind to it, so only true ancestors count as cycles.
+      while (ancestors.length > 0 && ancestors[ancestors.length - 1] !== this) ancestors.pop();
+      if (ancestors.includes(val)) return '[Circular]';
+      ancestors.push(val);
+      return val;
+    });
+    return out ?? 'null';
+  } catch {
+    try {
+      return String(value);
+    } catch {
+      return '[unserializable]';
+    }
+  }
+}
+
+export interface CanvasEmit {
+  label: string;
+  /** Latest payload for this label. */
+  data: unknown;
+  /** Emits coalesced into this one (1 when omitted). */
+  count?: number;
+}
+
 export function buildCanvasUpdateMessage(input: {
   relPath: string;
   lines: string[];
-  emits: { label: string; data: unknown }[];
+  emits: CanvasEmit[];
   fullContent?: string;
 }): string {
-  const emitLines = input.emits.map(
-    (e) => `html "${e.label}" sent: ${(JSON.stringify(e.data) ?? 'null').slice(0, EMIT_MAX_CHARS)}`,
-  );
+  const emitLines = input.emits.map((e) => {
+    const times = e.count && e.count > 1 ? ` (×${e.count})` : '';
+    return `html "${e.label}" sent: ${safeStringify(e.data).slice(0, EMIT_MAX_CHARS)}${times}`;
+  });
   const out = [`[Canvas update] ${input.relPath}`];
   if (input.fullContent !== undefined) {
     out.push(

@@ -101,6 +101,24 @@ describe('canvasStore', () => {
     expect(store.pendingMessage(P, 'c')).toBeNull();
   });
 
+  it('coalesces emits per label: latest payload plus a count', async () => {
+    const { store } = await seeded('# T\n');
+    for (let i = 1; i <= 37; i++) store.userEmit(P, 'picker', { v: i });
+    store.userEmit(P, 'other', 'x');
+    const msg = store.pendingMessage(P, 'c')!;
+    const lines = msg.split('\n').filter((l) => l.includes('html "'));
+    expect(lines).toEqual(['- html "picker" sent: {"v":37} (×37)', '- html "other" sent: "x"']);
+  });
+
+  it('hasPending does not throw on a cyclic emit payload', async () => {
+    const { store } = await seeded('# T\n');
+    const data: any = {};
+    data.me = data;
+    store.userEmit(P, 'cyc', data);
+    expect(() => store.hasPending(P, 'c')).not.toThrow();
+    expect(store.hasPending(P, 'c')).toBe(true);
+  });
+
   it('R1: delivered edits are not re-reported after an agent write', async () => {
     const { store } = await seeded('- [ ] a\n\nx\n');
     await store.userWrite(P, '- [x] a\n\nx\n');
