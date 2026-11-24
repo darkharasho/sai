@@ -914,6 +914,15 @@ function createWindow() {
       return stableExtensionDir;
     };
     const relayScript = () => unpacked(path.join(__dirname, 'browser-bridge-host.js'));
+    // A launcher written by an earlier launch (or an older SAI that pinned the
+    // AppImage mount path) would exec a binary that no longer exists, so
+    // resharing a tab could never connect. Re-point it at this build.
+    try {
+      const refreshed = browserDeploy.refreshLauncher(relayScript());
+      if (refreshed) console.log('[browser-bridge] launcher refreshed at', refreshed);
+    } catch (err) {
+      console.error('[browser-bridge] could not refresh launcher:', err);
+    }
 
     const browsersById = (ids: string[]): browserDeploy.BrowserDef[] => {
       const detected = browserDeploy.detectBrowsers({ extensionDir: extensionDir() });

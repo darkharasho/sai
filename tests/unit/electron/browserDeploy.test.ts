@@ -24,6 +24,8 @@ import {
   uninstallNativeHost,
   isHostInstalled,
   writeLauncher,
+  launcherBinary,
+  refreshLauncher,
   writeFlatpakLauncher,
   grantFlatpakAccess,
   syncExtensionCopy,
@@ -376,11 +378,40 @@ describe('launcher shim', () => {
     const body = fs.readFileSync(launcher, 'utf8');
 
     expect(body).toContain('/usr/bin/node');
-    expect(body).toContain(relayScript);
+    // Points at a stable copy of the relay, never the (AppImage-mounted) bundle.
+    const relayCopy = path.join(home, '.sai', 'browser-bridge', 'bridge-host.js');
+    expect(body).toContain(relayCopy);
+    expect(body).not.toContain(relayScript);
+    expect(fs.readFileSync(relayCopy, 'utf8')).toBe('// relay');
     // Chromium execs this directly, so it has to be runnable, and Electron
     // binaries need ELECTRON_RUN_AS_NODE to behave as a plain Node.
     expect(body).toContain('ELECTRON_RUN_AS_NODE=1');
     expect(fs.statSync(launcher).mode & 0o111).toBeTruthy();
+  });
+
+  it('prefers the stable $APPIMAGE file over the per-launch mount binary', () => {
+    const appImage = path.join(home, 'sai.appimage');
+    fs.writeFileSync(appImage, '');
+    const mount = '/tmp/.mount_saiXYZ/sai';
+    expect(launcherBinary({ APPIMAGE: appImage }, mount)).toBe(appImage);
+    expect(launcherBinary({}, mount)).toBe(mount);
+    // A stale $APPIMAGE (file moved or deleted) falls back to execPath.
+    expect(launcherBinary({ APPIMAGE: path.join(home, 'gone.appimage') }, mount)).toBe(mount);
+  });
+
+  it.skipIf(process.platform === 'win32')('refreshes an installed launcher and leaves an absent one alone', () => {
+    expect(refreshLauncher(relayScript, '/usr/bin/node', home)).toBeNull();
+    expect(fs.existsSync(path.join(home, '.sai', 'browser-bridge', 'bridge-host.sh'))).toBe(false);
+
+    // Simulate a launcher an older SAI pinned to a dead AppImage mount.
+    const sh = path.join(home, '.sai', 'browser-bridge', 'bridge-host.sh');
+    fs.mkdirSync(path.dirname(sh), { recursive: true });
+    fs.writeFileSync(sh, '#!/bin/sh\nexec "/tmp/.mount_old/sai" "/tmp/.mount_old/relay.js"\n');
+
+    expect(refreshLauncher(relayScript, '/opt/sai.appimage', home)).toBe(sh);
+    const body = fs.readFileSync(sh, 'utf8');
+    expect(body).toContain('/opt/sai.appimage');
+    expect(body).not.toContain('.mount_old');
   });
 });
 

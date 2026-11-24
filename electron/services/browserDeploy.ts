@@ -281,33 +281,80 @@ export function detectBrowsers(opts: DetectOptions): DetectedBrowser[] {
 }
 
 /**
+ * The binary the launcher should exec. Inside an AppImage, process.execPath
+ * lives in the /tmp/.mount_* (or $TMPDIR) mount, which gets a fresh random
+ * name every launch — a launcher pinned to it dies on SAI's next restart.
+ * $APPIMAGE is the stable .appimage file; running it with
+ * ELECTRON_RUN_AS_NODE=1 mounts it and runs the script as plain Node.
+ */
+export function launcherBinary(
+  env: NodeJS.ProcessEnv = process.env,
+  execPath: string = process.execPath,
+): string {
+  const appImage = env.APPIMAGE;
+  return appImage && fs.existsSync(appImage) ? appImage : execPath;
+}
+
+function launcherPath(home: string, platform: string = process.platform): string {
+  return path.join(bridgeDir(home), platform === 'win32' ? 'bridge-host.bat' : 'bridge-host.sh');
+}
+
+/**
  * Chromium execs the native host directly, so the manifest `path` has to point
  * at an executable — it can't be "node script.js". Write a shim that execs the
  * current Node/Electron binary with the relay script.
+ *
+ * The relay is copied next to the shim rather than referenced in place: in a
+ * packaged app it sits inside the AppImage mount, whose path changes every
+ * launch. It's a self-contained CJS bundle (node built-ins only), so the copy
+ * runs anywhere.
  */
 export function writeLauncher(
   relayScript: string,
-  nodeBinary: string = process.execPath,
+  nodeBinary: string = launcherBinary(),
   home: string = os.homedir(),
 ): string {
   const dir = bridgeDir(home);
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
 
-  if (process.platform === 'win32') {
-    const cmd = path.join(dir, 'bridge-host.bat');
-    fs.writeFileSync(cmd, `@echo off\r\n"${nodeBinary}" "${relayScript}" %*\r\n`);
-    return cmd;
+  const relayCopy = path.join(dir, 'bridge-host.js');
+  if (path.resolve(relayScript) !== path.resolve(relayCopy)) {
+    fs.copyFileSync(relayScript, relayCopy);
   }
 
-  const sh = path.join(dir, 'bridge-host.sh');
+  const launcher = launcherPath(home);
+  if (process.platform === 'win32') {
+    fs.writeFileSync(launcher, `@echo off\r\n"${nodeBinary}" "${relayCopy}" %*\r\n`);
+    return launcher;
+  }
+
   // ELECTRON_RUN_AS_NODE matters when nodeBinary is the Electron binary from a
   // packaged app: without it, Electron boots an app instead of running the script.
   fs.writeFileSync(
-    sh,
-    `#!/bin/sh\nexport ELECTRON_RUN_AS_NODE=1\nexec "${nodeBinary}" "${relayScript}" "$@"\n`,
+    launcher,
+    `#!/bin/sh\nexport ELECTRON_RUN_AS_NODE=1\nexec "${nodeBinary}" "${relayCopy}" "$@"\n`,
     { mode: 0o755 },
   );
-  return sh;
+  // writeFileSync's mode only applies on create; an older copy keeps its own.
+  fs.chmodSync(launcher, 0o755);
+  return launcher;
+}
+
+/**
+ * Rewrites the native launcher at startup when one is already installed, so
+ * it always runs this build's relay with this build's binary. Covers
+ * launchers written by older versions that pinned the AppImage mount path,
+ * and picks up relay changes after an update. No-op when the bridge was
+ * never set up. Returns the launcher path when it rewrote it.
+ */
+export function refreshLauncher(
+  relayScript: string,
+  nodeBinary: string = launcherBinary(),
+  home: string = os.homedir(),
+): string | null {
+  if (!fs.existsSync(launcherPath(home))) return null;
+  if (!fs.existsSync(relayScript)) return null;
+  return writeLauncher(relayScript, nodeBinary, home);
 }
 
 /**
