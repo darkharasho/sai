@@ -80,7 +80,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { getCapabilities } from './providers/capabilities';
 import { normalizeCodexEffort } from './lib/codexEffort';
 import { CanvasContext, useCanvasController } from './canvas/CanvasContext';
-import { isCanvasFile } from './canvas/canvasFiles';
+import { isCanvasFile, workspaceAgentLive } from './canvas/canvasFiles';
 
 interface ScopeReconcileBridge {
   claudeReconcileScope?: (projectPath: string, scope?: string) => void;
@@ -2552,18 +2552,19 @@ export default function App() {
     });
   }, [activeProjectPath, updateWorkspace]);
 
-  // Live canvases (.sai/canvas/*.md) of the active workspace: watch, auto-open, deliver user edits.
+  // Live canvases (.sai/canvas/*.md): watch every open workspace, auto-open + deliver for the active one.
   const canvasChatBusy = !!activeProjectPath && chatStreamingWorkspaces.has(activeProjectPath);
   const canvas = useCanvasController({
     projectPath: activeProjectPath,
     chatKey: activeProjectPath ? activeSession.id || 'chat' : null,
     chatBusy: canvasChatBusy,
-    agentLive: canvasChatBusy || [...backgroundTasksByScope].some(([k, tasks]) =>
-      k.startsWith(`${activeProjectPath}:`) && tasks.some((t) => !isTerminalDetail(t))),
+    openWorkspaces: [...workspaces.keys()],
+    isAgentLive: (ws) => workspaceAgentLive(ws, chatStreamingWorkspaces, backgroundTasksByScope, (t) => !isTerminalDetail(t)),
     sendRef: chatSendTextRef,
-    getOpenFiles: () => (activeProjectPath ? workspacesRef.current.get(activeProjectPath)?.openFiles : undefined) ?? [],
+    getOpenFiles: (ws) => workspacesRef.current.get(ws)?.openFiles ?? [],
     openFile: (p, o) => { void handleFileOpen(p, undefined, o); },
     closeFile: doFileClose,
+    patchTabs: (ws, fn) => updateWorkspace(ws, (w) => ({ ...w, ...fn(w) })),
   });
 
   const handleFileClose = useCallback((path: string) => {

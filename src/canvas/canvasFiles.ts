@@ -39,13 +39,49 @@ export function findOpenCanvasPath(openFiles: OpenFile[], path: string): string 
   return openFiles.find((f) => canvasKey(f.path) === key)?.path ?? null;
 }
 
-/** Focus is in a text editor/field that is not part of a canvas view. */
-export function isEditingOutsideCanvas(el: Element | null): boolean {
+const TEXT_INPUT_TYPES = new Set(['', 'text', 'search', 'email', 'url', 'tel', 'password', 'number']);
+
+/**
+ * Focus is in a text entry (Monaco, textarea, contenteditable, text-like input), anywhere,
+ * including the canvas block editor. Checkboxes, buttons and other inputs do not count.
+ */
+export function isTextEntry(el: Element | null): boolean {
   if (!el || el === document.body) return false;
-  const editable =
-    el.tagName === 'TEXTAREA' ||
-    el.tagName === 'INPUT' ||
-    (el as HTMLElement).isContentEditable ||
-    !!el.closest('.monaco-editor');
-  return editable && !el.closest('.canvas-view');
+  if (el.tagName === 'TEXTAREA') return true;
+  if (el.tagName === 'INPUT') return TEXT_INPUT_TYPES.has(((el as HTMLInputElement).getAttribute('type') ?? '').toLowerCase());
+  return (el as HTMLElement).isContentEditable || !!el.closest('.monaco-editor');
+}
+
+/**
+ * Workspaces whose canvases to watch: every workspace with a canvas store (opened this run)
+ * that is still open, plus the active one. Sorted for a stable effect key.
+ */
+export function canvasWatchSet(storeWorkspaces: Iterable<string>, openWorkspaces: Iterable<string>, active: string | null): string[] {
+  const open = new Set(openWorkspaces);
+  if (active) open.add(active);
+  return [...new Set(storeWorkspaces)].filter((ws) => ws && open.has(ws)).sort();
+}
+
+/** `ws` has a live chat turn or a live background task in any of its scopes (`${ws}:${scope}`). */
+export function workspaceAgentLive<T>(
+  ws: string,
+  streamingWorkspaces: ReadonlySet<string>,
+  tasksByScope: ReadonlyMap<string, readonly T[]>,
+  isLive: (t: T) => boolean,
+): boolean {
+  if (streamingWorkspaces.has(ws)) return true;
+  const prefix = `${ws}:`;
+  for (const [k, tasks] of tasksByScope) if (k.startsWith(prefix) && tasks.some(isLive)) return true;
+  return false;
+}
+
+/** A workspace's tabs without the deleted canvas, keeping the active tab valid. */
+export function closeDeletedCanvasTabs(
+  w: { openFiles: OpenFile[]; activeFilePath: string | null },
+  path: string,
+): { openFiles: OpenFile[]; activeFilePath: string | null } {
+  const openFiles = closeDeletedCanvas(w.openFiles, path);
+  if (openFiles === w.openFiles) return w;
+  const activeFilePath = openFiles.some((f) => f.path === w.activeFilePath) ? w.activeFilePath : openFiles[0]?.path ?? null;
+  return { openFiles, activeFilePath };
 }

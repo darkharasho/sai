@@ -8,17 +8,22 @@ const REAL = '/var/home/u/p/.sai/canvas/plan.md';
 const TAB = '/home/u/p/.sai/canvas/plan.md';
 
 type Ev = { projectPath: string; path: string; content: string | null };
-let emit: (e: Ev) => void;
+let listeners: Array<(e: Ev) => void>;
+const emit = (e: Ev) => { for (const l of [...listeners]) l(e); };
 let listed: { path: string; content: string }[];
 let sai: any;
 
 beforeEach(() => {
   listed = [{ path: REAL, content: '- [ ] a\n' }];
+  listeners = [];
   sai = {
     canvasWatch: vi.fn().mockResolvedValue(undefined),
     canvasUnwatch: vi.fn().mockResolvedValue(undefined),
-    canvasList: vi.fn(async () => listed),
-    onCanvasChanged: vi.fn((cb: (e: Ev) => void) => { emit = cb; return () => {}; }),
+    canvasList: vi.fn(async (ws: string) => (ws === WS ? listed : [])),
+    onCanvasChanged: vi.fn((cb: (e: Ev) => void) => {
+      listeners.push(cb);
+      return () => { listeners = listeners.filter((l) => l !== cb); };
+    }),
     fsWriteFile: vi.fn().mockResolvedValue(undefined),
   };
   (window as any).sai = sai;
@@ -26,17 +31,25 @@ beforeEach(() => {
 
 const flush = () => act(async () => { for (let i = 0; i < 10; i++) await Promise.resolve(); });
 
+const Q = '/home/u/q';
+
 function setup(over: Partial<CanvasControllerOpts> = {}) {
-  let files: OpenFile[] = [];
+  const files = new Map<string, OpenFile[]>();
+  const live = new Set<string>();
   const opts: CanvasControllerOpts = {
-    projectPath: WS, chatKey: 'c', chatBusy: false, agentLive: false,
+    projectPath: WS, chatKey: 'c', chatBusy: false,
+    openWorkspaces: [WS, Q],
+    isAgentLive: (ws) => live.has(ws),
     sendRef: { current: vi.fn() },
-    getOpenFiles: () => files,
-    openFile: vi.fn(), closeFile: vi.fn(),
+    getOpenFiles: (ws) => files.get(ws) ?? [],
+    openFile: vi.fn(), closeFile: vi.fn(), patchTabs: vi.fn(),
     ...over,
   };
   const hook = renderHook((p: CanvasControllerOpts) => useCanvasController(p), { initialProps: opts });
-  return { hook, opts, setFiles: (f: OpenFile[]) => { files = f; } };
+  return {
+    hook, opts, live,
+    setFiles: (f: OpenFile[], ws = WS) => { files.set(ws, f); },
+  };
 }
 
 describe('useCanvasController', () => {
@@ -50,20 +63,23 @@ describe('useCanvasController', () => {
   });
 
   it('auto-opens an agent-written canvas in the project spelling', async () => {
-    const { hook, opts } = setup();
+    const { live, opts } = setup();
     await flush();
-    hook.rerender({ ...opts, agentLive: true });
+    live.add(WS);
     act(() => emit({ projectPath: WS, path: REAL, content: '- [ ] a\n\nnew\n' }));
     await flush();
     expect(opts.openFile).toHaveBeenCalledWith(TAB);
   });
 
-  it('defers auto-open while typing outside a canvas, then opens on focus change', async () => {
-    const { hook, opts } = setup();
+  it('defers auto-open while focus is in any text entry, even inside a canvas view, then opens on focus change', async () => {
+    const { live, opts } = setup();
     await flush();
-    hook.rerender({ ...opts, agentLive: true });
+    live.add(WS);
+    const view = document.createElement('div');
+    view.className = 'canvas-view';
     const ta = document.createElement('textarea');
-    document.body.appendChild(ta);
+    view.appendChild(ta);
+    document.body.appendChild(view);
     ta.focus();
     act(() => emit({ projectPath: WS, path: REAL, content: '- [ ] a\n\nnew\n' }));
     await flush();
@@ -72,7 +88,21 @@ describe('useCanvasController', () => {
     act(() => { ta.blur(); vi.runAllTimers(); });
     vi.useRealTimers();
     expect(opts.openFile).toHaveBeenCalledWith(TAB);
-    ta.remove();
+    view.remove();
+  });
+
+  it('a focused checkbox does not defer auto-open', async () => {
+    const { live, opts } = setup();
+    await flush();
+    live.add(WS);
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    document.body.appendChild(cb);
+    cb.focus();
+    act(() => emit({ projectPath: WS, path: REAL, content: '- [ ] a\n\nnew\n' }));
+    await flush();
+    expect(opts.openFile).toHaveBeenCalledWith(TAB);
+    cb.remove();
   });
 
   it('closes the tab when the canvas is deleted (either spelling)', async () => {
@@ -93,21 +123,57 @@ describe('useCanvasController', () => {
     expect(hook.result.current.store.list()).toHaveLength(1);
   });
 
-  it('keeps one store per workspace; unwatches on switch and re-seeds on return', async () => {
-    const { hook, opts } = setup();
+  it('keeps watching a background workspace and absorbs its agent writes as agent edits', async () => {
+    const { hook, opts, live } = setup();
     await flush();
     const first = hook.result.current.store;
-    hook.rerender({ ...opts, projectPath: '/home/u/q' });
+    // Switch to Q: WS stays watched (no unwatch, no re-seed).
+    hook.rerender({ ...opts, projectPath: Q });
     await flush();
-    expect(sai.canvasUnwatch).toHaveBeenCalledWith(WS);
-    expect(sai.canvasWatch).toHaveBeenCalledWith('/home/u/q');
+    expect(sai.canvasUnwatch).not.toHaveBeenCalled();
+    expect(sai.canvasWatch).toHaveBeenCalledWith(Q);
     expect(hook.result.current.store).not.toBe(first);
+    // WS's agent writes while WS is in the background.
+    live.add(WS);
+    act(() => emit({ projectPath: WS, path: REAL, content: '- [ ] a\n\nagent\n' }));
+    await flush();
+    expect(first.get(TAB)?.lastEditor).toBe('agent');
+    expect(first.hasPending(TAB, 'c')).toBe(false);
+    // Not auto-opened into Q.
+    expect(opts.openFile).not.toHaveBeenCalled();
+    // Back to WS: same store, seeded once only, and the touched canvas opens now.
+    live.delete(WS);
     hook.rerender({ ...opts });
     await flush();
     expect(hook.result.current.store).toBe(first);
-    expect(sai.canvasList).toHaveBeenCalledTimes(3);
-    // Unchanged re-seed is a no-op: still nothing pending.
+    expect(sai.canvasList.mock.calls.filter((c: string[]) => c[0] === WS)).toHaveLength(1);
     expect(first.hasPending(TAB, 'c')).toBe(false);
+    expect(opts.openFile).toHaveBeenCalledWith(TAB);
+  });
+
+  it('closes a background workspace tab on delete via patchTabs', async () => {
+    const { hook, opts, setFiles } = setup();
+    await flush();
+    hook.rerender({ ...opts, projectPath: Q });
+    await flush();
+    setFiles([{ path: TAB, viewMode: 'editor' }], WS);
+    act(() => emit({ projectPath: WS, path: REAL, content: null }));
+    await flush();
+    expect(opts.closeFile).not.toHaveBeenCalled();
+    expect(opts.patchTabs).toHaveBeenCalledWith(WS, expect.any(Function));
+  });
+
+  it('unwatches a workspace once it is closed, and everything on unmount', async () => {
+    const { hook, opts } = setup();
+    await flush();
+    hook.rerender({ ...opts, projectPath: Q });
+    await flush();
+    hook.rerender({ ...opts, projectPath: Q, openWorkspaces: [Q] });
+    await flush();
+    expect(sai.canvasUnwatch).toHaveBeenCalledWith(WS);
+    expect(sai.canvasUnwatch).not.toHaveBeenCalledWith(Q);
+    hook.unmount();
+    expect(sai.canvasUnwatch).toHaveBeenCalledWith(Q);
   });
 
   it('routes source saves of project canvases through the store', async () => {
