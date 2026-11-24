@@ -142,8 +142,14 @@ const SIZE_REPORTER =
   'post();setTimeout(post,50);setTimeout(post,300);' +
   '})();<\/script>';
 
-function RenderedHtml({ entry, enableSubmit, onNaturalWidth }: {
+// Canvas html blocks only: window.sai.canvas.emit(data) posts to the parent,
+// validated there by event.source exactly like SUBMIT_BRIDGE (same '*' reasoning).
+const CANVAS_EMIT_BRIDGE =
+  '<script>window.sai={canvas:{emit:function(d){try{parent.postMessage({__saiCanvasEmit:1,data:d},\'*\');}catch(e){}}}};<\/script>';
+
+export function RenderedHtml({ entry, enableSubmit, onNaturalWidth, onEmit }: {
   entry: RenderEntry; enableSubmit?: boolean; onNaturalWidth?: (w: number) => void;
+  onEmit?: (data: unknown) => void;
 }) {
   const payload = entry.payload as {
     html?: string; mode?: string; cwd?: string; path?: string; baseDir?: string; height?: number;
@@ -154,6 +160,8 @@ function RenderedHtml({ entry, enableSubmit, onNaturalWidth }: {
   const userHtml = String(payload.html ?? '');
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const submittedRef = useRef(false);
+  const onEmitRef = useRef(onEmit);
+  onEmitRef.current = onEmit;
   const initialViewport = entry.height && entry.height > 0
     ? entry.height
     : entry.kind === 'form' ? 120 : 480;
@@ -166,7 +174,7 @@ function RenderedHtml({ entry, enableSubmit, onNaturalWidth }: {
   const sandbox = entry.appAccess === true && appAccessGranted
     ? 'allow-scripts allow-same-origin'
     : 'allow-scripts';
-  const bridge = enableSubmit ? SUBMIT_BRIDGE : '';
+  const bridge = (enableSubmit ? SUBMIT_BRIDGE : '') + (onEmit ? CANVAS_EMIT_BRIDGE : '');
   // Memoized per background value: recomputing on theme change would alter the
   // srcDoc and reload the iframe, wiping in-progress form input (spec: theme
   // changes don't repaint mounted mocks).
@@ -182,9 +190,11 @@ function RenderedHtml({ entry, enableSubmit, onNaturalWidth }: {
     function onMessage(e: MessageEvent) {
       const win = iframeRef.current?.contentWindow;
       if (!win || e.source !== win) return;
-      const data = e.data as { __saiRender?: number; height?: number; width?: number; __saiFormSubmit?: number; value?: unknown } | null;
+      const data = e.data as { __saiRender?: number; height?: number; width?: number; __saiFormSubmit?: number; value?: unknown; __saiCanvasEmit?: number; data?: unknown } | null;
       if (!data) return;
-      if (data.__saiRender) {
+      if (onEmit && data.__saiCanvasEmit) {
+        onEmitRef.current?.(data.data);
+      } else if (data.__saiRender) {
         const h = Number(data.height);
         if (Number.isFinite(h) && h > 0) setSizer((s) => nextRenderHeight(s, h));
         const wRep = Number((data as { width?: number }).width);
@@ -196,7 +206,7 @@ function RenderedHtml({ entry, enableSubmit, onNaturalWidth }: {
     }
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
-  }, [enableSubmit, onNaturalWidth]);
+  }, [enableSubmit, onNaturalWidth, !!onEmit]);
 
   return (
     <>
@@ -282,7 +292,7 @@ function FileRenderedHtml({
   );
 }
 
-function MermaidRender({ diagram }: { diagram: string }) {
+export function MermaidRender({ diagram }: { diagram: string }) {
   const [svg, setSvg] = useState('');
   const [err, setErr] = useState('');
   useEffect(() => {
