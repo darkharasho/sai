@@ -30,7 +30,15 @@ interface Project {
   timers: Map<string, NodeJS.Timeout>;
   warned: Set<string>;
   closed: boolean;
+  retryTimer: NodeJS.Timeout | null;
+  retryDelay: number;
 }
+
+const isValidProjectPath = (p: unknown): p is string =>
+  typeof p === 'string' && p.length > 0 && path.isAbsolute(p);
+
+const RETRY_BASE_MS = 200;
+const RETRY_MAX_MS = 5000;
 
 const isDir = (p: string): boolean => {
   try { return fs.statSync(p).isDirectory(); } catch { return false; }
@@ -48,6 +56,7 @@ function listMd(dir: string): string[] {
 
 /** Absolute canvas files for a project (empty if `.sai/canvas` is missing; never creates it). */
 export function listCanvases(projectPath: string): { path: string; content: string }[] {
+  if (!isValidProjectPath(projectPath)) return [];
   let real: string;
   try { real = fs.realpathSync(projectPath); } catch { return []; }
   const dir = path.join(real, '.sai', 'canvas');
@@ -110,6 +119,25 @@ export function createCanvasWatcher(
     }
   }
 
+  /** The watched files are gone (dir removed or watcher lost): report them as deleted. */
+  function nullKnown(p: Project) {
+    for (const t of p.timers.values()) clearTimeout(t);
+    p.timers.clear();
+    for (const name of [...p.known]) fire(p, name, null);
+    p.known.clear();
+  }
+
+  /** Re-arm after a failed/lost watcher, with capped exponential backoff. */
+  function scheduleRetry(p: Project) {
+    if (p.closed || p.retryTimer) return;
+    const delay = p.retryDelay;
+    p.retryDelay = Math.min(p.retryDelay * 2, RETRY_MAX_MS);
+    p.retryTimer = setTimeout(() => {
+      p.retryTimer = null;
+      if (!p.closed) sync(p);
+    }, delay);
+  }
+
   function desiredMode(p: Project): Mode {
     if (isDir(p.canvasDir)) return 'canvas';
     if (isDir(path.dirname(p.canvasDir))) return 'sai';
@@ -129,24 +157,26 @@ export function createCanvasWatcher(
       closeWatcher(p);
       if (was === 'canvas') {
         // Canvas dir vanished: the files are gone with it.
-        for (const t of p.timers.values()) clearTimeout(t);
-        p.timers.clear();
-        for (const name of [...p.known]) fire(p, name, null);
-        p.known.clear();
+        nullKnown(p);
       }
       p.mode = want;
       try {
         p.watcher = fs.watch(dirFor(p, want), (_ev, filename) => onEvent(p, filename == null ? null : String(filename)));
         p.watcher.on('error', err => {
           console.warn(`[canvasWatch] watcher error for ${p.real}:`, err);
+          const was = p.mode;
           closeWatcher(p);
           p.mode = null;
+          if (was === 'canvas') nullKnown(p);
+          scheduleRetry(p);
         });
       } catch (err) {
         console.warn(`[canvasWatch] fs.watch failed for ${p.real}:`, err);
         p.mode = null;
+        scheduleRetry(p);
         return;
       }
+      p.retryDelay = RETRY_BASE_MS;
       if (want === 'canvas') {
         const present = listMd(p.canvasDir);
         if (initial) {
@@ -181,6 +211,7 @@ export function createCanvasWatcher(
     p.closed = true;
     for (const t of p.timers.values()) clearTimeout(t);
     p.timers.clear();
+    if (p.retryTimer) { clearTimeout(p.retryTimer); p.retryTimer = null; }
     closeWatcher(p);
     projects.delete(key);
     for (const [s, k] of realBySpelling) if (k === key) realBySpelling.delete(s);
@@ -188,6 +219,7 @@ export function createCanvasWatcher(
 
   return {
     watch(projectPath) {
+      if (!isValidProjectPath(projectPath)) return;
       let real: string;
       try { real = fs.realpathSync(projectPath); } catch {
         console.warn(`[canvasWatch] project dir missing, not watching: ${projectPath}`);
@@ -205,6 +237,8 @@ export function createCanvasWatcher(
           timers: new Map(),
           warned: new Set(),
           closed: false,
+          retryTimer: null,
+          retryDelay: RETRY_BASE_MS,
         };
         projects.set(real, p);
         p.spellings.set(projectPath, 1);
@@ -216,6 +250,7 @@ export function createCanvasWatcher(
       realBySpelling.set(projectPath, real);
     },
     unwatch(projectPath) {
+      if (!isValidProjectPath(projectPath)) return;
       let key = realBySpelling.get(projectPath);
       if (!key) { try { key = fs.realpathSync(projectPath); } catch { return; } }
       const p = projects.get(key);

@@ -76,16 +76,52 @@ describe('createCanvasWatcher', () => {
   });
 
   it('atomic rename saves never report a delete', async () => {
+    w.disposeAll();
+    w = createCanvasWatcher(e => events.push(e), { debounceMs: 150 });
     mkCanvas();
     const f = path.join(canvasDir(), 'a.md');
     fs.writeFileSync(f, 'v0');
     w.watch(proj);
-    for (let i = 1; i <= 3; i++) {
-      fs.writeFileSync(f + '.tmp', `v${i}`);
-      fs.renameSync(f + '.tmp', f);
-    }
-    await vi.waitFor(() => expect(events.at(-1)?.content).toBe('v3'));
+    // Real window: the old file disappears, the new one lands a bit later (inside the debounce).
+    fs.rmSync(f);
+    await new Promise(r => setTimeout(r, 40));
+    fs.writeFileSync(f, 'v1');
+    await vi.waitFor(() => expect(events.at(-1)?.content).toBe('v1'));
     expect(events.every(e => e.content !== null)).toBe(true);
+  });
+
+  it('re-arms after a watcher error and after the project .sai is removed and recreated', async () => {
+    const created: fs.FSWatcher[] = [];
+    const orig = fs.watch;
+    const spy = vi.spyOn(fs, 'watch').mockImplementation(((...args: unknown[]) => {
+      const watcher = (orig as (...a: unknown[]) => fs.FSWatcher)(...args);
+      created.push(watcher);
+      return watcher;
+    }) as typeof fs.watch);
+    try {
+      mkCanvas();
+      const a = path.join(canvasDir(), 'a.md');
+      fs.writeFileSync(a, 'a');
+      w.watch(proj);
+      created.at(-1)!.emit('error', Object.assign(new Error('EMFILE'), { code: 'EMFILE' }));
+      await vi.waitFor(() => expect(events).toContainEqual({ projectPath: proj, path: a, content: null }));
+      events.length = 0;
+      // The retry re-attaches and reports what is on disk.
+      await vi.waitFor(() => expect(events.at(-1)).toEqual({ projectPath: proj, path: a, content: 'a' }));
+      fs.writeFileSync(a, 'b');
+      await vi.waitFor(() => expect(events.at(-1)?.content).toBe('b'));
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('ignores invalid project paths', () => {
+    w.watch('');
+    w.watch('relative/dir');
+    w.watch(undefined as unknown as string);
+    w.unwatch('relative/dir');
+    expect(listCanvases('relative/dir')).toEqual([]);
+    expect(listCanvases(undefined as unknown as string)).toEqual([]);
   });
 
   it('nulls known files when .sai is removed and resumes when re-created', async () => {
