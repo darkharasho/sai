@@ -307,6 +307,26 @@ describe('ChatPanel: the queue lives in the log', () => {
   });
 });
 
+describe('ChatPanel: file-context prefix on programmatic sends', () => {
+  it('a send through sendTextRef still gets the [File:] prefix by default', async () => {
+    const sendTextRef: { current: ((t: string, o?: { skipFileContext?: boolean }) => void) | null } = { current: null };
+    await mount({ sendTextRef, activeFilePath: '/p/a.ts' } as any);
+    await act(async () => { sendTextRef.current!('hello'); });
+    await flushChatlog();
+    expect(log.commands('send')[0]).toMatchObject({ text: 'hello', promptOverride: '[File: /p/a.ts]\n\nhello' });
+  });
+
+  it('skipFileContext suppresses the prefix (canvas delivery)', async () => {
+    const sendTextRef: { current: ((t: string, o?: { skipFileContext?: boolean }) => void) | null } = { current: null };
+    await mount({ sendTextRef, activeFilePath: '/p/a.ts' } as any);
+    await act(async () => { sendTextRef.current!('[Canvas update] x', { skipFileContext: true }); });
+    await flushChatlog();
+    const sent = log.commands('send')[0];
+    expect(sent.text).toBe('[Canvas update] x');
+    expect(sent.promptOverride).toBeUndefined();
+  });
+});
+
 describe('ChatPanel: command palette sends', () => {
   it('palette /compact mid-turn queues behind the running turn instead of compacting now', async () => {
     const sendTextRef: { current: ((t: string) => void) | null } = { current: null };

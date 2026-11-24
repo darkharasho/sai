@@ -35,7 +35,7 @@ export interface CanvasControllerOpts {
   /** `ws` has a live chat turn or background task: its disk changes are agent writes. */
   isAgentLive(ws: string): boolean;
   /** chatSendTextRef: the active chat panel's queueing send. */
-  sendRef: MutableRefObject<((text: string) => void) | null>;
+  sendRef: MutableRefObject<((text: string, opts?: { skipFileContext?: boolean }) => void) | null>;
   getOpenFiles(ws: string): OpenFile[];
   /** Open a tab in the active workspace. */
   openFile(path: string, opts?: { canvasSource?: boolean }): void;
@@ -218,7 +218,8 @@ export function useCanvasController(opts: CanvasControllerOpts): CanvasControlle
   const send = useCallback((text: string) => {
     const fn = optsRef.current.sendRef.current;
     if (!fn) throw new Error('no active chat to send to');
-    fn(text);
+    // The update names its own path: no [File: ...] prefix, so it starts with "[Canvas update]".
+    fn(text, { skipFileContext: true });
   }, []);
   const delivery = useCanvasDelivery({ store, chatKey, chatBusy, send: projectPath ? send : null });
 

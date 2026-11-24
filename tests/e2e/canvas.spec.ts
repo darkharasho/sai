@@ -41,7 +41,7 @@ test.describe('live canvas', () => {
       claudeSend: (projectPath: string, prompt: string, _i: any, _pm: any, _e: any, _m: any, scope: string) => {
         const c = ((window as any).__canvas = (window as any).__canvas || { fs: {}, sent: [], subs: [], claude: [] });
         c.sent.push(prompt);
-        c.scope = 'chat';
+        c.scope = scope;
         c.projectPath = projectPath;
         // The turn stays open until the test ends it.
         c.claude.forEach((cb: any) => cb({ projectPath, scope: c.scope, type: 'streaming_start' }));
@@ -77,6 +77,11 @@ test.describe('live canvas', () => {
     await checkbox.click();
     await expect.poll(() => window.evaluate((f) => (window as any).__canvas.fs[f], file)).toContain('- [x] Launch game');
 
+    // Nothing is delivered mid-turn (even though the file was just edited).
+    await expect.poll(() => window.evaluate(() => (window as any).__canvas.sent.filter((p: string) => p.includes('[Canvas update]')).length), { timeout: 1500 }).toBe(0);
+    await window.waitForTimeout(1500);
+    expect(await window.evaluate(() => (window as any).__canvas.sent.length)).toBe(1);
+
     // End the turn; the edit is delivered once the canvas has been idle for 5 s.
     await window.evaluate(() => {
       const c = (window as any).__canvas;
@@ -85,9 +90,8 @@ test.describe('live canvas', () => {
     });
     await expect.poll(() => window.evaluate(() => (window as any).__canvas.sent.length), { timeout: 15000 }).toBe(2);
     const delivered = await window.evaluate(() => (window as any).__canvas.sent[1] as string);
-    // ChatPanel prepends "[File: <active tab>]" when file context is on (the canvas tab is active).
-    const body = delivered.replace(/^\[File: [^\]]*\]\n\n/, '');
-    expect(body.startsWith('[Canvas update] .sai/canvas/steps.md')).toBe(true);
-    expect(body).toContain('- [x] Launch game');
+    // No [File: ...] prefix: canvas delivery skips file context, the update names its own path.
+    expect(delivered.startsWith('[Canvas update] .sai/canvas/steps.md')).toBe(true);
+    expect(delivered).toContain('- [x] Launch game');
   });
 });

@@ -461,7 +461,7 @@ export default function App() {
   // accordion-bar IncludedProjectsControl so both share the same callback.
   const mentionInsertRef = useRef<((linkName: string) => void) | null>(null);
   /** The active chat panel's send (command palette slash commands). */
-  const chatSendTextRef = useRef<((text: string) => void) | null>(null);
+  const chatSendTextRef = useRef<((text: string, opts?: { skipFileContext?: boolean }) => void) | null>(null);
   const workspacesRef = useRef(workspaces);
   const workspaceStatusRef = useRef<{ busy: Set<string>; streaming: Set<string>; completed: Set<string>; approval: Set<string>; awaitingQuestion: Set<string> }>({
     busy: new Set(), streaming: new Set(), completed: new Set(), approval: new Set(), awaitingQuestion: new Set(),
@@ -2553,13 +2553,18 @@ export default function App() {
   }, [activeProjectPath, updateWorkspace]);
 
   // Live canvases (.sai/canvas/*.md): watch every open workspace, auto-open + deliver for the active one.
-  const canvasChatBusy = !!activeProjectPath && chatStreamingWorkspaces.has(activeProjectPath);
+  // chatStreamingWorkspaces only tracks the legacy 'chat' scope; real chats stream under their session id,
+  // so liveness also reads streamingScopes (`${ws}:${scope}`).
+  const canvasChatBusy = !!activeProjectPath
+    && (chatStreamingWorkspaces.has(activeProjectPath) || streamingScopes.has(`${activeProjectPath}:${activeSession.id}`));
+  const canvasStreamingWs = new Set(chatStreamingWorkspaces);
+  for (const k of streamingScopes) for (const ws of workspaces.keys()) if (k.startsWith(`${ws}:`)) canvasStreamingWs.add(ws);
   const canvas = useCanvasController({
     projectPath: activeProjectPath,
     chatKey: activeProjectPath ? activeSession.id || 'chat' : null,
     chatBusy: canvasChatBusy,
     openWorkspaces: [...workspaces.keys()],
-    isAgentLive: (ws) => workspaceAgentLive(ws, chatStreamingWorkspaces, backgroundTasksByScope, (t) => !isTerminalDetail(t)),
+    isAgentLive: (ws) => workspaceAgentLive(ws, canvasStreamingWs, backgroundTasksByScope, (t) => !isTerminalDetail(t)),
     sendRef: chatSendTextRef,
     getOpenFiles: (ws) => workspacesRef.current.get(ws)?.openFiles ?? [],
     openFile: (p, o) => { void handleFileOpen(p, undefined, o); },

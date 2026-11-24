@@ -269,7 +269,7 @@ interface ChatPanelProps {
    * Optional: populated with a callback that sends text into this chat the
    * way the composer does (App's command palette). A busy chat queues it.
    */
-  sendTextRef?: React.MutableRefObject<((text: string) => void) | null>;
+  sendTextRef?: React.MutableRefObject<((text: string, opts?: { skipFileContext?: boolean }) => void) | null>;
   terminalTabs?: TerminalTab[];
   onSlashCommandsUpdate?: (commands: SlashCommandInfo[]) => void;
   /**
@@ -2056,7 +2056,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode:
   // `opts.queue` (Ctrl+Enter) never interrupts; `opts.now` (send-now from the
   // queue strip) always does.
   // `opts.label` is the short text the queue strip shows (Ctrl+Enter).
-  const handleSend = async (text: string, images?: string[], opts?: { taskCard?: TaskCard | null; queue?: boolean; now?: boolean; label?: string }) => {
+  const handleSend = async (text: string, images?: string[], opts?: { taskCard?: TaskCard | null; queue?: boolean; now?: boolean; label?: string; skipFileContext?: boolean }) => {
     // Slash commands must reach the command handler as typed, so they are never redirected.
     const directCard = taskUiEnabled && !text.trim().startsWith('/') && opts?.taskCard?.source === 'declared' ? opts.taskCard : null;
     // Handle built-in commands locally
@@ -2135,7 +2135,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode:
       );
     }
 
-    const builtPrompt = activeFilePath && fileContextEnabled ? `[File: ${activeFilePath}]\n\n${text}` : text;
+    const builtPrompt = activeFilePath && fileContextEnabled && !opts?.skipFileContext ? `[File: ${activeFilePath}]\n\n${text}` : text;
     const prompt = directCard ? directAtTask(builtPrompt, directCard.title) : builtPrompt;
     const sent = await sendToLog(text, {
       clientId, images, imagePaths, prompt, now, queue: opts?.queue, label: opts?.label,
@@ -2225,7 +2225,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode:
   useEffect(() => {
     if (!sendTextRef) return;
     // Like the old palette queue: behind a running turn, never interrupting it.
-    const send = (text: string) => { void handleSendRef.current(text, undefined, { queue: true }); };
+    const send = (text: string, o?: { skipFileContext?: boolean }) => { void handleSendRef.current(text, undefined, { queue: true, skipFileContext: o?.skipFileContext }); };
     sendTextRef.current = send;
     return () => { if (sendTextRef.current === send) sendTextRef.current = null; };
   }, [sendTextRef]);
