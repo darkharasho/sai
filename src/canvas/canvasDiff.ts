@@ -59,52 +59,74 @@ const normalize = (s: string) => s.replace(/\s+/g, ' ').trim();
 const STATE_MARK: Record<ItemState, string> = { done: '☑', open: '☐', failed: '✗' };
 const stateLine = (state: ItemState, text: string) => `${STATE_MARK[state]} "${text}"`;
 
-function describeChecklist(seen: CanvasBlock, cur: CanvasBlock): string[] {
+/** One agent-facing line and the thing it is about (an item or a block): one change per subject. */
+interface EditLine {
+  subject: string;
+  text: string;
+}
+
+function describeChecklist(seen: CanvasBlock, cur: CanvasBlock): EditLine[] {
   const before = itemsOf(seen.source);
   const after = itemsOf(cur.source);
-  const lines: string[] = [];
+  const lines: EditLine[] = [];
+  const push = (key: string, text: string) => lines.push({ subject: `item ${key}`, text });
   for (const [key, info] of after) {
     const { text } = info;
     const old = before.get(key);
     if (!old) {
-      lines.push(`+ item "${text}"`);
-      if (info.state !== 'open') lines.push(stateLine(info.state, text));
+      push(key, `+ item "${text}"`);
+      if (info.state !== 'open') push(key, stateLine(info.state, text));
     } else {
-      if (old.state !== info.state) lines.push(stateLine(info.state, text));
-      for (const note of info.notes) if (note && !old.notes.includes(note)) lines.push(`note on "${text}": ${note}`);
+      if (old.state !== info.state) push(key, stateLine(info.state, text));
+      for (const note of info.notes) if (note && !old.notes.includes(note)) push(key, `note on "${text}": ${note}`);
     }
   }
-  for (const [key, info] of before) if (!after.has(key)) lines.push(`− item "${info.text}"`);
+  for (const [key, info] of before) if (!after.has(key)) push(key, `− item "${info.text}"`);
   // Never lose an edit the item-level view can't express (e.g. reordered or restructured items).
   if (lines.length === 0 && normalize(seen.source) !== normalize(cur.source)) {
-    return [`edited block ${cur.index + 1}: ${oneLine(cur.source)}`];
+    return [{ subject: 'block', text: `edited block ${cur.index + 1}: ${oneLine(cur.source)}` }];
   }
   return lines;
 }
 
 /** `cur` is `curBlocks[cur.index]`: diagrams and html blocks are named in the current canvas. */
-function describePair(seen: CanvasBlock, cur: CanvasBlock, curBlocks: readonly CanvasBlock[]): string[] {
+function describePair(seen: CanvasBlock, cur: CanvasBlock, curBlocks: readonly CanvasBlock[]): EditLine[] {
   if (seen.kind === 'checklist' && cur.kind === 'checklist') return describeChecklist(seen, cur);
-  if (seen.kind === 'mermaid' && cur.kind === 'mermaid') return [`diagram "${blockName(curBlocks, cur.index)}": edited`];
-  if (seen.kind === 'html' && cur.kind === 'html') return [`html "${blockName(curBlocks, cur.index)}": edited`];
-  if (seen.kind === 'stats' && cur.kind === 'stats') return ['stats: edited'];
-  return [`edited block ${cur.index + 1}: ${oneLine(cur.source)}`];
+  const one = (text: string) => [{ subject: 'block', text }];
+  if (seen.kind === 'mermaid' && cur.kind === 'mermaid') return one(`diagram "${blockName(curBlocks, cur.index)}": edited`);
+  if (seen.kind === 'html' && cur.kind === 'html') return one(`html "${blockName(curBlocks, cur.index)}": edited`);
+  if (seen.kind === 'stats' && cur.kind === 'stats') return one('stats: edited');
+  return one(`edited block ${cur.index + 1}: ${oneLine(cur.source)}`);
+}
+
+function userEditLines(seen: string, current: string): EditLine[] {
+  const seenBlocks = splitBlocks(seen);
+  const curBlocks = splitBlocks(current);
+  const { states, inserted } = diffAgainstBase(seenBlocks, curBlocks);
+  const added = (slot: number) =>
+    inserted[slot].map((b) => ({ subject: `new ${b.index}`, text: `+ block ${b.index + 1}: ${oneLine(b.source)}` }));
+  const lines: EditLine[] = [...added(0)];
+  seenBlocks.forEach((block, i) => {
+    const state = states[i];
+    if (state.kind === 'replaced') {
+      lines.push(...describePair(block, state.block, curBlocks).map((l) => ({ ...l, subject: `${i} ${l.subject}` })));
+    } else if (state.kind === 'deleted') lines.push({ subject: `${i} block`, text: `− block ${i + 1}` });
+    lines.push(...added(i + 1));
+  });
+  return lines;
 }
 
 /** Compact, agent-facing lines describing how `current` differs from the `seen` canvas. */
 export function describeUserEdits(seen: string, current: string): string[] {
-  const seenBlocks = splitBlocks(seen);
-  const curBlocks = splitBlocks(current);
-  const { states, inserted } = diffAgainstBase(seenBlocks, curBlocks);
-  const added = (slot: number) => inserted[slot].map((b) => `+ block ${b.index + 1}: ${oneLine(b.source)}`);
-  const lines: string[] = [...added(0)];
-  seenBlocks.forEach((block, i) => {
-    const state = states[i];
-    if (state.kind === 'replaced') lines.push(...describePair(block, state.block, curBlocks));
-    else if (state.kind === 'deleted') lines.push(`− block ${i + 1}`);
-    lines.push(...added(i + 1));
-  });
-  return lines;
+  return userEditLines(seen, current).map((l) => l.text);
+}
+
+/**
+ * How many things the user changed: distinct items/blocks, not lines (a new item that
+ * arrives ticked is one change, though it reads as two lines).
+ */
+export function countUserEdits(seen: string, current: string): number {
+  return new Set(userEditLines(seen, current).map((l) => l.subject)).size;
 }
 
 /**

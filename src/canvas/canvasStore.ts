@@ -1,5 +1,5 @@
 import { mergeBlocks, type MergeConflict } from './canvasMerge';
-import { describeUserEdits, buildCanvasUpdateMessage, type CanvasEmit } from './canvasDiff';
+import { describeUserEdits, countUserEdits, buildCanvasUpdateMessage, type CanvasEmit } from './canvasDiff';
 import { splitBlocks, replaceBlock } from './canvasBlocks';
 import { deriveAgentMarks, type AgentMarks } from './canvasAgentMarks';
 
@@ -225,12 +225,22 @@ export function createCanvasStore(deps: CanvasStoreDeps) {
     return buildCanvasUpdateMessage({ relPath, lines, emits: e.emits });
   };
 
-  /** Number of change lines (plus coalesced emits) `pendingMessage` would deliver to chatKey. */
+  // Last edit count per path+chat, keyed by the two texts it compared: the count is read on
+  // every render (useSyncExternalStore), the diff only reruns when one of them changes.
+  const countCache = new Map<string, { seen: string; content: string; edits: number }>();
+
+  /** Things (items/blocks) the user changed for chatKey, plus coalesced emits. */
   const pendingChangeCount = (path: string, chatKey: string): number => {
     const e = canvases.get(path);
     if (!e) return 0;
     const seen = e.seen.get(chatKey) ?? e.agentBase;
-    return describeUserEdits(seen, e.content).length + e.emits.length;
+    const key = `${path}\u0000${chatKey}`;
+    let hit = countCache.get(key);
+    if (!hit || hit.seen !== seen || hit.content !== e.content) {
+      hit = { seen, content: e.content, edits: countUserEdits(seen, e.content) };
+      countCache.set(key, hit);
+    }
+    return hit.edits + e.emits.length;
   };
 
   return {
@@ -261,6 +271,7 @@ export function createCanvasStore(deps: CanvasStoreDeps) {
           if (!e) return;
           canvases.delete(path);
           agentTouched.delete(path);
+          for (const k of countCache.keys()) if (k.startsWith(`${path}\u0000`)) countCache.delete(k);
           changed(path);
           return;
         }
@@ -388,8 +399,9 @@ export function createCanvasStore(deps: CanvasStoreDeps) {
 
     pendingChangeCount,
 
+    /** Same answer as `pendingMessage(...) !== null` (a message exactly when something changed), but cached. */
     hasPending(path: string, chatKey: string): boolean {
-      return pendingMessage(path, chatKey) !== null;
+      return pendingChangeCount(path, chatKey) > 0;
     },
 
     /** Paths whose last change was an agent write not yet auto-opened. Clears them. */

@@ -43,4 +43,25 @@ describe('prepareCanvasDiagram', () => {
   it('an unusable accent falls back to the default', () => {
     expect(prepareCanvasDiagram('graph TD\nA\n', 'url(x);fill:red')).not.toContain('url(');
   });
+
+  it('YAML frontmatter stays at char 0: the theme directive goes after it, classDefs still added', () => {
+    const src = '---\ntitle: Shop flow\n---\nflowchart LR\n  A --> B\n  class A pass\n';
+    const out = prepareCanvasDiagram(src, ACCENT);
+    expect(out.startsWith('---\ntitle: Shop flow\n---\n%%{init:')).toBe(true);
+    expect(out).toContain('flowchart LR\n  A --> B\n  class A pass\n');
+    for (const c of RESULT_CLASSES) expect(out).toMatch(new RegExp(`^\\s*classDef ${c} `, 'm'));
+  });
+
+  it('frontmatter with its own config: keeps its theme (no directive), still adds classes', () => {
+    const src = '---\nconfig:\n  theme: forest\n---\ngraph TD\nA --> B\n';
+    const out = prepareCanvasDiagram(src, ACCENT);
+    expect(out.startsWith(src)).toBe(true);
+    expect(out).not.toContain('%%{init');
+    expect(out).toMatch(/^\s*classDef pass /m);
+  });
+
+  it('an unclosed frontmatter-looking start is left alone apart from the theme', () => {
+    const src = '---\nnot closed\ngraph TD\n';
+    expect(() => prepareCanvasDiagram(src, ACCENT)).not.toThrow();
+  });
 });

@@ -3,7 +3,7 @@ import {
   splitBlocks, toggleTask, markTaskFailed, taskItems, blockShape,
 } from '../../../src/canvas/canvasBlocks';
 import { parseStats, checklistTotals, resolveStat } from '../../../src/canvas/canvasStats';
-import { describeUserEdits } from '../../../src/canvas/canvasDiff';
+import { describeUserEdits, countUserEdits } from '../../../src/canvas/canvasDiff';
 
 describe('failed items (- [!])', () => {
   it('a list of [!] / [ ] / [x] items is a checklist', () => {
@@ -108,5 +108,17 @@ describe('stats blocks', () => {
   it('diff reports a stats edit like other blocks', () => {
     const a = '# T\n\n```stats\nBuild: v1\n```\n';
     expect(describeUserEdits(a, a.replace('v1', 'v2'))).toEqual(['stats: edited']);
+  });
+});
+
+describe('countUserEdits', () => {
+  it('counts distinct changed items and blocks, not diff lines', () => {
+    // New item that arrives ticked: two lines, one change.
+    expect(countUserEdits('- [ ] A\n', '- [ ] A\n- [x] B\n')).toBe(1);
+    // Tick + note on one item: one change.
+    expect(countUserEdits('- [ ] A\n', '- [x] A\n  > ok\n')).toBe(1);
+    // Two items ticked + a paragraph edit: three changes.
+    expect(countUserEdits('- [ ] A\n- [ ] B\n\npara\n', '- [x] A\n- [x] B\n\npara 2\n')).toBe(3);
+    expect(countUserEdits('x\n', 'x\n')).toBe(0);
   });
 });

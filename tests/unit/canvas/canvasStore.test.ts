@@ -468,6 +468,10 @@ describe('pendingChangeCount', () => {
     expect(store.pendingChangeCount(P, 'c')).toBe(0);
     await store.userWrite(P, '- [x] a\n- [x] b\n');
     expect(store.pendingChangeCount(P, 'c')).toBe(2);
+    // An added item that arrives ticked is one change, not two lines.
+    await store.userWrite(P, '- [x] a\n- [x] b\n- [x] c\n');
+    expect(store.pendingChangeCount(P, 'c')).toBe(3);
+    await store.userWrite(P, '- [x] a\n- [x] b\n');
     store.userEmit(P, 'w', 1);
     store.userEmit(P, 'w', 2);
     expect(store.pendingChangeCount(P, 'c')).toBe(3);
@@ -482,5 +486,27 @@ describe('pendingChangeCount', () => {
     await store.userWrite(P, '- [x] a\n');
     expect(store.pendingChangeCount(P, 'other')).toBe(1);
     expect(store.pendingChangeCount('/nope', 'c')).toBe(0);
+  });
+});
+
+describe('hasPending agrees with pendingMessage', () => {
+  it('for seen and never-seen chats, edits and emits', async () => {
+    const { store } = await seeded('- [ ] a\n\npara\n');
+    const agree = () => {
+      for (const chat of ['c', 'other']) expect(store.hasPending(P, chat)).toBe(store.pendingMessage(P, chat) !== null);
+    };
+    agree();
+    await store.userWrite(P, '- [x] a\n\npara\n');
+    agree();
+    store.markDelivered(P, 'c');
+    agree();
+    store.userEmit(P, 'w', 1);
+    agree();
+    store.markDelivered(P, 'c');
+    agree();
+    await store.onDiskChange(P, '- [x] a\n\npara 2\n', true);
+    agree();
+    await store.userWrite(P, '- [x] a\n\npara 2\n\n   \n');
+    agree();
   });
 });

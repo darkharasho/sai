@@ -56,9 +56,18 @@ function classDefs(accent: string): Record<(typeof RESULT_CLASSES)[number], stri
 
 const FLOWCHART_RE = /^\s*(?:flowchart|graph)\b/;
 
-/** First line that is not blank, a `%%` comment, or a directive. */
+/**
+ * Leading YAML frontmatter (`---` ... `---`). Mermaid only recognises it at char 0, so nothing
+ * may be put in front of it. '' when there is none (or it is never closed).
+ */
+function frontmatter(src: string): string {
+  const m = /^---[ \t]*\r?\n[\s\S]*?\r?\n---[ \t]*(?:\r?\n|$)/.exec(src);
+  return m ? m[0] : '';
+}
+
+/** First line after any frontmatter that is not blank, a `%%` comment, or a directive. */
 function headerLine(src: string): string {
-  for (const line of src.split('\n')) {
+  for (const line of src.slice(frontmatter(src).length).split('\n')) {
     const t = line.trim();
     if (!t || t.startsWith('%%')) continue;
     return t;
@@ -76,6 +85,9 @@ export function prepareCanvasDiagram(source: string, accent: string): string {
       out = `${out.replace(/\s*$/, '')}\n${missing.map((c) => `  classDef ${c} ${defs[c]}`).join('\n')}\n`;
     }
   }
-  if (!/%%\{\s*init(?:ialize)?\s*:/.test(source)) out = `%%{init: ${JSON.stringify(THEME)}}%%\n${out}`;
+  // A source that brings its own config (init directive or frontmatter `config:`) keeps its theme.
+  const front = frontmatter(source);
+  const ownConfig = /%%\{\s*init(?:ialize)?\s*:/.test(source) || /^config\s*:/m.test(front);
+  if (!ownConfig) out = `${front}%%{init: ${JSON.stringify(THEME)}}%%\n${out.slice(front.length)}`;
   return out;
 }
