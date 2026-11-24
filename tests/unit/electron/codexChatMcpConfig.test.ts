@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
-import { CHAT_GITHUB_WATCH_NUDGE, CHAT_RENDER_NUDGE, CHAT_TASKS_NUDGE } from '@electron/services/chatNudges';
+import { CHAT_CANVAS_NUDGE, CHAT_GITHUB_WATCH_NUDGE, CHAT_RENDER_NUDGE, CHAT_TASKS_NUDGE } from '@electron/services/chatNudges';
 import { buildCodexChatMcpConfig, CODEX_SAI_MCP_SERVER_NAME } from '@electron/services/codexBackend/chatMcpConfig';
 
 describe('buildCodexChatMcpConfig', () => {
@@ -31,5 +31,6 @@ describe('buildCodexChatMcpConfig', () => {
     expect(config.developer_instructions).toContain(CHAT_RENDER_NUDGE);
     expect(config.developer_instructions).toContain(CHAT_GITHUB_WATCH_NUDGE);
     expect(config.developer_instructions).toContain(CHAT_TASKS_NUDGE);
+    expect(config.developer_instructions).toContain(CHAT_CANVAS_NUDGE); // includes canvas nudge
   });
 });

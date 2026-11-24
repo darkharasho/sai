@@ -19,6 +19,21 @@ export const CHAT_RENDER_NUDGE =
   're-render to iterate on feedback.';
 
 /**
+ * Teaches every provider about live canvases: Markdown files at
+ * .sai/canvas/<slug>.md that open beside the chat and that the user edits.
+ * Needs no MCP tool, only file writes, so it is not gated on render tooling.
+ */
+export const CHAT_CANVAS_NUDGE =
+  'SAI canvases: for anything the user will act on, revisit, or co-edit \u2014 step-by-step ' +
+  'instructions they must perform (e.g. manual testing steps), plans, checklists, evolving ' +
+  'diagrams \u2014 write a Markdown file at .sai/canvas/<short-slug>.md in the project instead of a ' +
+  'one-shot render. It opens live beside the chat. Use GFM task lists (- [ ]) for steps, ' +
+  '```mermaid fences for diagrams, and ```html fences for small interactive widgets (they may ' +
+  'call sai.canvas.emit(data) to send you an event). The user edits canvases directly; their ' +
+  'changes arrive as messages starting with "[Canvas update]". When you get one, re-read the ' +
+  'file before editing it, and keep the user\'s ticks and notes intact.';
+
+/**
  * Newer Opus models under-reach for the task tools without an explicit trigger
  * (the interactive CLI injects "consider using TaskCreate" reminders; headless
  * SDK/stream-json sessions do not), which left SAI's task-progress ring —

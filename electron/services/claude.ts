@@ -30,7 +30,7 @@ export {
   hasCachedSlashCommands,
   type SlashCommandInfo,
 } from './slashCommands';
-import { CHAT_RENDER_NUDGE, CHAT_GITHUB_WATCH_NUDGE, CHAT_TASKS_NUDGE } from './chatNudges';
+import { CHAT_CANVAS_NUDGE, CHAT_RENDER_NUDGE, CHAT_GITHUB_WATCH_NUDGE, CHAT_TASKS_NUDGE } from './chatNudges';
 import { classifyTurnEnd, isSchedulingTool, isBackgroundLaunch, isAsyncLaunchResult, WAKEUP_GRACE_MS, type WaitMeta, countLiveBackgroundTasks } from './waitClassifier';
 import { getSudoAskpassHelperPath, getSudoBroker, getSudoSession, lockSudo } from './sudo';
 import { readCachedSlashCommands, writeCachedSlashCommands, type SlashCommandInfo } from './slashCommands';
@@ -294,6 +294,9 @@ export function buildArgs(options: BuildArgsOptions = {}): string[] {
     // And for the task-progress ring: newer models don't reach for
     // TaskCreate/TodoWrite in headless sessions without an explicit trigger.
     appendPrompts.push(CHAT_TASKS_NUDGE);
+    // Canvases are plain file writes (no MCP tool), but are project-relative,
+    // so they share the workspace gate.
+    appendPrompts.push(CHAT_CANVAS_NUDGE);
   }
 
   // Pass through user MCP config path(s) from SAI settings.

@@ -10,7 +10,8 @@ vi.mock('../../../electron/services/workspace', () => ({
   getOrCreate: vi.fn(), get: vi.fn(), touchActivity: vi.fn(),
 }));
 
-import { translateAcpEvent } from '../../../electron/services/acpProvider';
+import { CHAT_CANVAS_NUDGE } from '../../../electron/services/chatNudges';
+import { translateAcpEvent, buildProjectBootstrap } from '../../../electron/services/acpProvider';
 
 describe('translateAcpEvent', () => {
   it('maps agent_message_chunk to a streaming assistant delta', () => {
@@ -59,5 +60,11 @@ describe('translateAcpEvent', () => {
       params: { update: { sessionUpdate: 'tool_call_update', toolCallId: 'cmd-1', status: 'completed', content: [] } },
     }, '/p', 'chat');
     expect(out.message.content[0].partial).toBeUndefined();
+  });
+});
+
+describe('buildProjectBootstrap', () => {
+  it('includes canvas nudge', () => {
+    expect(buildProjectBootstrap('/nonexistent-sai-root')).toContain(CHAT_CANVAS_NUDGE);
   });
 });

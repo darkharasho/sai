@@ -1,5 +1,5 @@
 import type { CodexOptions } from '@openai/codex-sdk';
-import { CHAT_GITHUB_WATCH_NUDGE, CHAT_RENDER_NUDGE, CHAT_TASKS_NUDGE } from '../chatNudges';
+import { CHAT_CANVAS_NUDGE, CHAT_GITHUB_WATCH_NUDGE, CHAT_RENDER_NUDGE, CHAT_TASKS_NUDGE } from '../chatNudges';
 
 export const CODEX_SAI_MCP_SERVER_NAME = 'sai';
 
@@ -37,6 +37,7 @@ export function buildCodexChatMcpConfig(
       CHAT_RENDER_NUDGE,
       CHAT_GITHUB_WATCH_NUDGE,
       CHAT_TASKS_NUDGE,
+      CHAT_CANVAS_NUDGE,
     ].join('\n\n'),
   };
 }

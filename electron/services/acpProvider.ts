@@ -11,6 +11,7 @@ import { withLoadNote } from './loadGuard/hook';
 import { getLoadGuard } from './loadGuard';
 import { externalizeToolResultImages } from './toolResultImageStore';
 import { emitChat } from './chatEmitter';
+import { CHAT_CANVAS_NUDGE } from './chatNudges';
 
 export interface AcpProviderConfig {
   key: 'kimi';                   // IPC channel prefix AND Workspace slot name
@@ -128,7 +129,7 @@ function collectProjectPaths(rootPath: string, maxEntries: number, maxDepth: num
   return results;
 }
 
-function buildProjectBootstrap(rootPath: string): string {
+export function buildProjectBootstrap(rootPath: string): string {
   const topLevel = (() => {
     try {
       return fs.readdirSync(rootPath).sort().slice(0, 40).join('\n');
@@ -157,6 +158,8 @@ function buildProjectBootstrap(rootPath: string): string {
     topLevel ? `Top-level entries:\n${topLevel}` : '',
     projectPaths ? `Shallow project map:\n${projectPaths}` : '',
     fileSnippets ? `Key file snippets:\n${fileSnippets}` : '',
+    '',
+    CHAT_CANVAS_NUDGE,
   ].filter(Boolean).join('\n');
 }
 

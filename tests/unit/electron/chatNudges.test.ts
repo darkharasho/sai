@@ -47,10 +47,17 @@ vi.mock('@electron/services/saiMcpConfig', () => ({
   writeSaiMcpConfig: vi.fn(),
 }));
 
-import { CHAT_RENDER_NUDGE, CHAT_GITHUB_WATCH_NUDGE, CHAT_TASKS_NUDGE, CHAT_TASK_CARDS_NUDGE } from '../../../electron/services/chatNudges';
+import { CHAT_CANVAS_NUDGE, CHAT_RENDER_NUDGE, CHAT_GITHUB_WATCH_NUDGE, CHAT_TASKS_NUDGE, CHAT_TASK_CARDS_NUDGE } from '../../../electron/services/chatNudges';
 import * as claude from '../../../electron/services/claude';
 
 describe('chatNudges', () => {
+  it('canvas nudge keeps its code fences and the update marker intact', () => {
+    expect(CHAT_CANVAS_NUDGE).toContain('.sai/canvas/<short-slug>.md');
+    expect(CHAT_CANVAS_NUDGE).toContain('```mermaid fences');
+    expect(CHAT_CANVAS_NUDGE).toContain('```html fences');
+    expect(CHAT_CANVAS_NUDGE).toContain('"[Canvas update]"');
+  });
+
   it('exposes the render + github nudges as non-empty strings', () => {
     expect(CHAT_RENDER_NUDGE).toContain('render_html');
     expect(CHAT_GITHUB_WATCH_NUDGE).toContain('sai_watch_github_run');
