@@ -357,4 +357,12 @@ describe('canvasStore', () => {
     await store.userWrite(P, 'one\n\ntwo mine\n', [{ index: 1, ours: 'two mine', theirs: 'two newer' }]);
     expect(store.get(P)!.conflicts).toEqual([{ index: 1, ours: 'two mine', theirs: 'two newer' }]);
   });
+
+  it('I3: userWrite re-anchors caller conflicts to the content it writes', async () => {
+    const { store } = await seeded('one\n\ntwo\n');
+    await store.userWrite(P, 'new\n\none\n\ntwo mine\n', [{ index: 1, ours: 'two mine', theirs: 'two agent' }]);
+    expect(store.get(P)!.conflicts).toEqual([{ index: 2, ours: 'two mine', theirs: 'two agent' }]);
+    await store.resolveConflict(P, 2, 'theirs');
+    expect(store.get(P)!.content).toBe('new\n\none\n\ntwo agent\n');
+  });
 });

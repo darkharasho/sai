@@ -251,9 +251,12 @@ export function createCanvasStore(deps: CanvasStoreDeps) {
           applyUserContent(e, content);
         }
         if (conflicts && conflicts.length > 0) {
-          // The caller's merge found blocks both sides changed: keep them visible.
-          const idx = new Set(conflicts.map((c) => c.index));
-          e.conflicts = [...conflicts, ...e.conflicts.filter((c) => !idx.has(c.index))].sort((a, b) => a.index - b.index);
+          // The caller's merge found blocks both sides changed: keep them visible. They may have
+          // been found against an older doc (carried through the debounce): point them at the
+          // blocks that hold their text in `content` first.
+          const fresh = reanchor(conflicts, content);
+          const idx = new Set(fresh.map((c) => c.index));
+          e.conflicts = [...fresh, ...e.conflicts.filter((c) => !idx.has(c.index))].sort((a, b) => a.index - b.index);
         }
         changed(path);
         await saiWrite(path, e, content);

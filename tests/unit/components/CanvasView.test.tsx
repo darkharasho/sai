@@ -90,6 +90,34 @@ describe('CanvasView', () => {
     expect(spy).toHaveBeenCalledWith(P, 1, 'theirs');
   });
 
+  async function conflictInFlight(store: any) {
+    view(store);
+    fireEvent.click(screen.getByLabelText('Edit block 2'));
+    fireEvent.change(screen.getByLabelText('Edit block 2', { selector: 'textarea' }), { target: { value: 'two mine' } });
+    await act(async () => { await store.onDiskChange(P, 'one\n\ntwo A\n', true); });
+    fireEvent.click(screen.getByText('Save'));
+  }
+
+  it('I3: a conflict carried through the debounce re-anchors; "Use agent\'s" replaces the right block', async () => {
+    const { store } = await setup('one\n\ntwo\n');
+    await conflictInFlight(store);
+    // Before the flush the agent inserts a block on top: the carried conflict's index is stale.
+    await act(async () => { await store.onDiskChange(P, 'top\n\none\n\ntwo A\n', true); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(400); });
+    expect(store.get(P)!.content).toBe('top\n\none\n\ntwo mine');
+    expect(store.get(P)!.conflicts).toEqual([{ index: 2, ours: 'two mine', theirs: 'two A' }]);
+    await act(async () => { fireEvent.click(screen.getByText("Use agent's")); await vi.advanceTimersByTimeAsync(0); });
+    expect(store.get(P)!.content).toBe('top\n\none\n\ntwo A');
+  });
+
+  it('I3: a newer agent version wins over the carried one', async () => {
+    const { store } = await setup('one\n\ntwo\n');
+    await conflictInFlight(store);
+    await act(async () => { await store.onDiskChange(P, 'one\n\ntwo B\n', true); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(400); });
+    expect(store.get(P)!.conflicts).toEqual([{ index: 1, ours: 'two mine', theirs: 'two B' }]);
+  });
+
   describe('pill', () => {
     it('sending countdown', async () => {
       const { store } = await setup();

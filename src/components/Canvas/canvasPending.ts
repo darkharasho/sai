@@ -10,7 +10,7 @@ interface Pending {
   base: string;
   /** Base plus every pending edit. */
   doc: string;
-  /** Conflicts found by merges already folded into `doc`. */
+  /** Conflicts found by merges already folded into `doc`, newest first. */
   conflicts: MergeConflict[];
 }
 
@@ -36,7 +36,8 @@ export function usePendingWrites(path: string, store: CanvasStore) {
     const r = current === undefined ? null : mergeBlocks(p.base, p.doc, current);
     const content = r ? r.merged : p.doc;
     const seen = new Set<number>();
-    const conflicts = [...p.conflicts, ...(r?.conflicts ?? [])].filter((c) => !seen.has(c.index) && !!seen.add(c.index));
+    // Newest first, so the dedupe keeps the latest agent version of a block (p.conflicts is newest first too).
+    const conflicts = [...(r?.conflicts ?? []), ...p.conflicts].filter((c) => !seen.has(c.index) && !!seen.add(c.index));
     if (content === current && conflicts.length === 0) return;
     store.userWrite(p.path, content, conflicts).then(
       () => setError(null),
@@ -60,7 +61,7 @@ export function usePendingWrites(path: string, store: CanvasStore) {
       const found = typeof r === 'string' ? [] : r.conflicts;
       if (next === cur && found.length === 0) return;
       const prev = pendingRef.current?.path === path ? pendingRef.current : null;
-      pendingRef.current = { path, base: prev?.base ?? cur, doc: next, conflicts: [...(prev?.conflicts ?? []), ...found] };
+      pendingRef.current = { path, base: prev?.base ?? cur, doc: next, conflicts: [...found, ...(prev?.conflicts ?? [])] };
       setVersion((v) => v + 1);
       if (timerRef.current) clearTimeout(timerRef.current);
       timerRef.current = setTimeout(flush, WRITE_DEBOUNCE_MS);
