@@ -80,7 +80,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { getCapabilities } from './providers/capabilities';
 import { normalizeCodexEffort } from './lib/codexEffort';
 import { CanvasContext, useCanvasController } from './canvas/CanvasContext';
-import { isCanvasFile, workspaceAgentLive } from './canvas/canvasFiles';
+import { canvasLiveness, isCanvasFile, workspaceAgentLive } from './canvas/canvasFiles';
 
 interface ScopeReconcileBridge {
   claudeReconcileScope?: (projectPath: string, scope?: string) => void;
@@ -2553,12 +2553,7 @@ export default function App() {
   }, [activeProjectPath, updateWorkspace]);
 
   // Live canvases (.sai/canvas/*.md): watch every open workspace, auto-open + deliver for the active one.
-  // chatStreamingWorkspaces only tracks the legacy 'chat' scope; real chats stream under their session id,
-  // so liveness also reads streamingScopes (`${ws}:${scope}`).
-  const canvasChatBusy = !!activeProjectPath
-    && (chatStreamingWorkspaces.has(activeProjectPath) || streamingScopes.has(`${activeProjectPath}:${activeSession.id}`));
-  const canvasStreamingWs = new Set(chatStreamingWorkspaces);
-  for (const k of streamingScopes) for (const ws of workspaces.keys()) if (k.startsWith(`${ws}:`)) canvasStreamingWs.add(ws);
+  const { streamingWs: canvasStreamingWs, chatBusy: canvasChatBusy } = canvasLiveness(chatStreamingWorkspaces, streamingScopes, activeProjectPath, activeSession.id);
   const canvas = useCanvasController({
     projectPath: activeProjectPath,
     chatKey: activeProjectPath ? activeSession.id || 'chat' : null,

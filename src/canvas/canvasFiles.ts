@@ -1,3 +1,4 @@
+import { scopeKeyProjectPath } from '../lib/awaitingQuestionTracker';
 import type { OpenFile } from '../types';
 
 /**
@@ -61,6 +62,24 @@ export function canvasWatchSet(storeWorkspaces: Iterable<string>, openWorkspaces
   const open = new Set(openWorkspaces);
   if (active) open.add(active);
   return [...new Set(storeWorkspaces)].filter((ws) => ws && open.has(ws)).sort();
+}
+
+/**
+ * Which workspaces have a chat turn streaming, and is the active chat busy. `chatStreaming` only
+ * tracks the legacy 'chat' scope; real chats stream under their session id, so `streamingScopes`
+ * (`${ws}:${scope}`) counts too.
+ */
+export function canvasLiveness(
+  chatStreaming: ReadonlySet<string>,
+  streamingScopes: ReadonlySet<string>,
+  activeProject: string | null,
+  activeSessionId: string | null,
+): { streamingWs: Set<string>; chatBusy: boolean } {
+  const streamingWs = new Set(chatStreaming);
+  for (const k of streamingScopes) streamingWs.add(scopeKeyProjectPath(k));
+  const chatBusy = !!activeProject
+    && (chatStreaming.has(activeProject) || streamingScopes.has(`${activeProject}:${activeSessionId || 'chat'}`));
+  return { streamingWs, chatBusy };
 }
 
 /** `ws` has a live chat turn or a live background task in any of its scopes (`${ws}:${scope}`). */

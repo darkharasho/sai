@@ -77,9 +77,10 @@ test.describe('live canvas', () => {
     await checkbox.click();
     await expect.poll(() => window.evaluate((f) => (window as any).__canvas.fs[f], file)).toContain('- [x] Launch game');
 
-    // Nothing is delivered mid-turn (even though the file was just edited).
-    await expect.poll(() => window.evaluate(() => (window as any).__canvas.sent.filter((p: string) => p.includes('[Canvas update]')).length), { timeout: 1500 }).toBe(0);
-    await window.waitForTimeout(1500);
+    // Hold the turn open past the 5 s idle window: nothing may be delivered while the agent is busy.
+    const canvasSends = () => window.evaluate(() => (window as any).__canvas.sent.filter((p: string) => p.includes('[Canvas update]')).length);
+    await window.waitForTimeout(6500);
+    expect(await canvasSends()).toBe(0);
     expect(await window.evaluate(() => (window as any).__canvas.sent.length)).toBe(1);
 
     // End the turn; the edit is delivered once the canvas has been idle for 5 s.

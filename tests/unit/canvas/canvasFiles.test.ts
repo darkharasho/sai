@@ -5,6 +5,7 @@ import {
   canvasKey,
   closeDeletedCanvas,
   findOpenCanvasPath,
+  canvasLiveness,
 } from '../../../src/canvas/canvasFiles';
 import type { OpenFile } from '../../../src/types';
 
@@ -121,5 +122,28 @@ describe('closeDeletedCanvasTabs', () => {
       .toEqual({ openFiles: [files[1]], activeFilePath: '/home/u/p/a.ts' });
     const w = { openFiles: files, activeFilePath: files[1].path };
     expect(closeDeletedCanvasTabs(w, '/home/u/p/.sai/canvas/other.md')).toBe(w);
+  });
+});
+
+describe('canvasLiveness', () => {
+  const none = new Set<string>();
+  it('a session-id scope marks its workspace live', () => {
+    const r = canvasLiveness(none, new Set(['/a:sess1']), '/a', 'sess1');
+    expect(r.streamingWs.has('/a')).toBe(true);
+  });
+  it("a stream in workspace B doesn't mark A", () => {
+    const r = canvasLiveness(none, new Set(['/b:sess1']), '/a', 'sess1');
+    expect(r.streamingWs.has('/a')).toBe(false);
+    expect(r.streamingWs.has('/b')).toBe(true);
+    expect(r.chatBusy).toBe(false);
+  });
+  it("chatBusy keys off the active session's scope", () => {
+    expect(canvasLiveness(none, new Set(['/a:other']), '/a', 'sess1').chatBusy).toBe(false);
+    expect(canvasLiveness(none, new Set(['/a:sess1']), '/a', 'sess1').chatBusy).toBe(true);
+  });
+  it("the 'chat' fallback still works", () => {
+    expect(canvasLiveness(new Set(['/a']), none, '/a', 'sess1')).toMatchObject({ chatBusy: true });
+    expect(canvasLiveness(new Set(['/a']), none, '/a', 'sess1').streamingWs.has('/a')).toBe(true);
+    expect(canvasLiveness(none, new Set(['/a:chat']), '/a', '').chatBusy).toBe(true);
   });
 });
