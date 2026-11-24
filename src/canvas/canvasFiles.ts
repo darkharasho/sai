@@ -27,10 +27,13 @@ export function isProjectCanvas(projectPath: string, absPath: string): boolean {
   return isCanvasFile(absPath) && canvasRelPath(projectPath, absPath).startsWith('.sai/canvas/');
 }
 
-/** `openFiles` without any tab showing the deleted canvas (same array when none match). */
+/**
+ * `openFiles` without any tab showing the deleted canvas (same array when none match).
+ * Dirty tabs (unsaved Monaco source edits) stay, in the editor's usual deleted-on-disk state.
+ */
 export function closeDeletedCanvas(openFiles: OpenFile[], path: string): OpenFile[] {
   const key = canvasKey(path);
-  const next = openFiles.filter((f) => canvasKey(f.path) !== key);
+  const next = openFiles.filter((f) => f.isDirty || canvasKey(f.path) !== key);
   return next.length === openFiles.length ? openFiles : next;
 }
 

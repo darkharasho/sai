@@ -54,6 +54,12 @@ describe('closeDeletedCanvas', () => {
     const files = [tab('/home/u/p/a.ts')];
     expect(closeDeletedCanvas(files, '/home/u/p/.sai/canvas/plan.md')).toBe(files);
   });
+  it('I2: keeps a dirty source tab open (unsaved edits are never dropped silently)', () => {
+    const dirty = { ...tab('/home/u/p/.sai/canvas/plan.md'), canvasSource: true, isDirty: true };
+    const files = [tab('/home/u/p/a.ts'), dirty];
+    expect(closeDeletedCanvas(files, '/var/home/u/p/.sai/canvas/plan.md')).toBe(files);
+    expect(closeDeletedCanvasTabs({ openFiles: files, activeFilePath: dirty.path }, dirty.path).openFiles).toBe(files);
+  });
 });
 
 describe('findOpenCanvasPath', () => {

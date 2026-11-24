@@ -175,6 +175,15 @@ describe('useCanvasController', () => {
     expect(opts.closeFile).toHaveBeenCalledWith(TAB);
   });
 
+  it('I2: deleting a canvas leaves a dirty source tab open', async () => {
+    const { opts, setFiles } = setup();
+    await flush();
+    setFiles([{ path: TAB, viewMode: 'editor', canvasSource: true, isDirty: true, content: 'x' }]);
+    act(() => emit({ projectPath: WS, path: REAL, content: null }));
+    await flush();
+    expect(opts.closeFile).not.toHaveBeenCalled();
+  });
+
   it('ignores events for other projects', async () => {
     const { hook } = setup();
     await flush();
