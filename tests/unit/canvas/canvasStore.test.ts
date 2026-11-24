@@ -188,6 +188,51 @@ describe('canvasStore', () => {
     expect(writes).toHaveLength(n);
   });
 
+  it('R8: repeated stale agent writes keep restoring an undelivered tick', async () => {
+    const { store, writes } = await seeded('- [ ] a\n\nx\n');
+    await store.userWrite(P, '- [x] a\n\nx\n');
+    await store.onDiskChange(P, '- [x] a\n\nx\n', false); // echo
+    await store.onDiskChange(P, '- [ ] a\n\ny\n', true); // D1
+    expect(writes.at(-1)!.content).toBe('- [x] a\n\ny\n');
+    const n = writes.length;
+    await store.onDiskChange(P, '- [ ] a\n\nz\n', true); // D2 built from D1, still unticked
+    expect(writes).toHaveLength(n + 1);
+    expect(writes.at(-1)!.content).toBe('- [x] a\n\nz\n');
+    expect(store.get(P)?.content).toBe('- [x] a\n\nz\n');
+  });
+
+  it('R8: agent untick of a delivered tick stands', async () => {
+    const { store, writes } = await seeded('- [ ] a\n\nx\n');
+    await store.userWrite(P, '- [x] a\n\nx\n');
+    store.markDelivered(P, 'c');
+    const n = writes.length;
+    await store.onDiskChange(P, '- [ ] a\n\nx\n', true);
+    expect(writes).toHaveLength(n);
+    expect(store.get(P)?.content).toBe('- [ ] a\n\nx\n');
+    expect(store.pendingMessage(P, 'c')).toBeNull();
+  });
+
+  it('R9: conflicts re-anchor when the user inserts a block before them', async () => {
+    const { store, writes } = await conflicted();
+    await store.userWrite(P, '# T\n\nnew\n\nmine\n');
+    expect(store.get(P)?.conflicts).toEqual([{ index: 2, ours: 'mine', theirs: 'agent' }]);
+    await store.resolveConflict(P, 2, 'theirs');
+    expect(writes.at(-1)!.content).toBe('# T\n\nnew\n\nagent\n');
+    expect(store.get(P)?.conflicts).toEqual([]);
+  });
+
+  it('R9: a conflict whose block the user removed is dropped', async () => {
+    const { store } = await conflicted();
+    await store.onDiskChange(P, '# T\n', false);
+    expect(store.get(P)?.conflicts).toEqual([]);
+  });
+
+  it('R9: earlier conflicts survive a later agent write that keeps their block', async () => {
+    const { store } = await conflicted();
+    await store.onDiskChange(P, '# T2\n\nmine\n', true);
+    expect(store.get(P)?.conflicts).toEqual([{ index: 1, ours: 'mine', theirs: 'agent' }]);
+  });
+
   it('autoSend defaults on and can be toggled; subscribers fire', async () => {
     const { store } = setup();
     let calls = 0;

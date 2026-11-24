@@ -95,9 +95,30 @@ export function createCanvasStore(deps: CanvasStoreDeps) {
     }
   };
 
+  /**
+   * Re-point conflicts at the block that still holds their `ours` text (nearest the old index);
+   * drop those whose text is gone. Conflicts whose index is in `taken` are dropped as superseded.
+   */
+  const reanchor = (conflicts: MergeConflict[], content: string, taken = new Set<number>()): MergeConflict[] => {
+    if (conflicts.length === 0) return conflicts;
+    const blocks = splitBlocks(content).map((b) => b.source.trim());
+    const out: MergeConflict[] = [];
+    for (const c of conflicts) {
+      let best = -1;
+      blocks.forEach((src, i) => {
+        if (src === c.ours && !taken.has(i) && (best < 0 || Math.abs(i - c.index) < Math.abs(best - c.index))) best = i;
+      });
+      if (best < 0) continue;
+      taken.add(best);
+      out.push(best === c.index ? c : { ...c, index: best });
+    }
+    return out;
+  };
+
   const applyUserContent = (e: Entry, content: string) => {
     e.content = content;
     e.userContent = content;
+    e.conflicts = reanchor(e.conflicts, content);
     e.lastEditor = 'user';
     e.lastEditedAt = deps.now();
   };
@@ -126,8 +147,12 @@ export function createCanvasStore(deps: CanvasStoreDeps) {
     for (const [chat, seen] of e.seen) e.seen.set(chat, mergeBlocks(e.agentBase, seen, disk).merged);
     e.content = final;
     e.userContent = final;
-    e.agentBase = final;
-    e.conflicts = res.conflicts;
+    // Base the next merge on what the agent actually wrote, so a later write built from that
+    // (still missing the merged-back user edits) gets them merged back again.
+    e.agentBase = disk;
+    const fresh = res.conflicts;
+    const older = reanchor(e.conflicts, final, new Set(fresh.map((c) => c.index)));
+    e.conflicts = [...fresh, ...older].sort((a, b) => a.index - b.index);
     e.lastEditor = 'agent';
     e.lastEditedAt = deps.now();
     agentTouched.add(path);
