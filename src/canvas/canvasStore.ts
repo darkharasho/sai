@@ -12,6 +12,8 @@ export interface CanvasState {
   content: string;
   lastEditor: 'user' | 'agent';
   lastEditedAt: number;
+  /** Last user edit or emit (0 = none since first sight): drives the auto-send idle window. */
+  lastUserActivityAt: number;
   conflicts: MergeConflict[];
   autoSend: boolean;
 }
@@ -29,6 +31,7 @@ interface Entry {
   agentBase: string;
   lastEditor: 'user' | 'agent';
   lastEditedAt: number;
+  lastUserActivityAt: number;
   conflicts: MergeConflict[];
   autoSend: boolean;
   /** Per-chat content last delivered (agent edits applied on top). */
@@ -51,6 +54,7 @@ function makeView(path: string, e: Omit<Entry, 'view'>): CanvasState {
     content: e.content,
     lastEditor: e.lastEditor,
     lastEditedAt: e.lastEditedAt,
+    lastUserActivityAt: e.lastUserActivityAt,
     conflicts: e.conflicts,
     autoSend: e.autoSend,
   };
@@ -128,6 +132,7 @@ export function createCanvasStore(deps: CanvasStoreDeps) {
     e.conflicts = reanchor(e.conflicts, content);
     e.lastEditor = 'user';
     e.lastEditedAt = deps.now();
+    e.lastUserActivityAt = e.lastEditedAt;
   };
 
   const newEntry = (path: string, content: string, agentBase: string, lastEditor: 'user' | 'agent'): Entry => {
@@ -137,6 +142,7 @@ export function createCanvasStore(deps: CanvasStoreDeps) {
       agentBase,
       lastEditor,
       lastEditedAt: deps.now(),
+      lastUserActivityAt: 0,
       conflicts: [],
       autoSend: true,
       seen: new Map<string, string>(),
@@ -243,6 +249,7 @@ export function createCanvasStore(deps: CanvasStoreDeps) {
         if (!e) {
           // A canvas the user created: its whole content counts as a user edit.
           e = newEntry(path, content, '', 'user');
+          e.lastUserActivityAt = e.lastEditedAt;
           canvases.set(path, e);
         } else {
           applyUserContent(e, content);
@@ -261,6 +268,7 @@ export function createCanvasStore(deps: CanvasStoreDeps) {
       const e = canvases.get(path);
       if (!e) return;
       e.emits.push({ label, data });
+      e.lastUserActivityAt = deps.now();
       changed(path);
     },
 

@@ -79,6 +79,8 @@ import * as monaco from 'monaco-editor';
 import { motion, AnimatePresence } from 'motion/react';
 import { getCapabilities } from './providers/capabilities';
 import { normalizeCodexEffort } from './lib/codexEffort';
+import { CanvasContext, useCanvasController } from './canvas/CanvasContext';
+import { isCanvasFile } from './canvas/canvasFiles';
 
 interface ScopeReconcileBridge {
   claudeReconcileScope?: (projectPath: string, scope?: string) => void;
@@ -2482,7 +2484,7 @@ export default function App() {
     });
   }, [activeProjectPath, updateWorkspace, focusedChat]);
 
-  const handleFileOpen = useCallback(async (filePath: string, line?: number) => {
+  const handleFileOpen = useCallback(async (filePath: string, line?: number, canvasOpts?: { canvasSource?: boolean }) => {
     if (!activeProjectPath) return;
     try {
       if (isImageFile(filePath) || isModelFile(filePath)) {
@@ -2502,13 +2504,17 @@ export default function App() {
           window.sai.fsReadFile(filePath) as Promise<string>,
           window.sai.fsMtime(filePath) as Promise<{ mtime: number }>,
         ]);
+        // Canvas view <-> source switch; a clean source buffer picks up the latest disk content.
+        const canvasPatch = (f?: OpenFile) => canvasOpts
+          ? { canvasSource: canvasOpts.canvasSource, ...(!f?.isDirty && { content, savedContent: content, diskMtime: mtime }) }
+          : {};
         updateWorkspace(activeProjectPath, ws => {
           const exists = ws.openFiles.some(f => f.path === filePath);
           return {
             ...ws,
             openFiles: exists
-              ? ws.openFiles.map(f => f.path === filePath ? { ...f, pendingLine: line } : f)
-              : [...ws.openFiles, { path: filePath, viewMode: 'editor', content, savedContent: content, diskMtime: mtime, pendingLine: line }],
+              ? ws.openFiles.map(f => f.path === filePath ? { ...f, pendingLine: line, ...canvasPatch(f) } : f)
+              : [...ws.openFiles, { path: filePath, viewMode: 'editor', content, savedContent: content, diskMtime: mtime, pendingLine: line, ...canvasPatch() }],
             activeFilePath: filePath,
           };
         });
@@ -2546,6 +2552,20 @@ export default function App() {
     });
   }, [activeProjectPath, updateWorkspace]);
 
+  // Live canvases (.sai/canvas/*.md) of the active workspace: watch, auto-open, deliver user edits.
+  const canvasChatBusy = !!activeProjectPath && chatStreamingWorkspaces.has(activeProjectPath);
+  const canvas = useCanvasController({
+    projectPath: activeProjectPath,
+    chatKey: activeProjectPath ? activeSession.id || 'chat' : null,
+    chatBusy: canvasChatBusy,
+    agentLive: canvasChatBusy || [...backgroundTasksByScope].some(([k, tasks]) =>
+      k.startsWith(`${activeProjectPath}:`) && tasks.some((t) => !isTerminalDetail(t))),
+    sendRef: chatSendTextRef,
+    getOpenFiles: () => (activeProjectPath ? workspacesRef.current.get(activeProjectPath)?.openFiles : undefined) ?? [],
+    openFile: (p, o) => { void handleFileOpen(p, undefined, o); },
+    closeFile: doFileClose,
+  });
+
   const handleFileClose = useCallback((path: string) => {
     if (!activeProjectPath) return;
     const ws = workspaces.get(activeProjectPath);
@@ -2579,13 +2599,19 @@ export default function App() {
 
   const handleToggleMdPreview = useCallback((path: string) => {
     if (!activeProjectPath) return;
+    // A canvas's "preview" is its canvas view.
+    if (isCanvasFile(path)) {
+      const f = workspacesRef.current.get(activeProjectPath)?.openFiles.find(x => x.path === path);
+      if (f?.canvasSource) canvas.openCanvas(path); else canvas.openSource(path);
+      return;
+    }
     updateWorkspace(activeProjectPath, ws => ({
       ...ws,
       openFiles: ws.openFiles.map(f =>
         f.path === path ? { ...f, mdPreview: !f.mdPreview } : f
       ),
     }));
-  }, [activeProjectPath, updateWorkspace]);
+  }, [activeProjectPath, updateWorkspace, canvas.openCanvas, canvas.openSource]);
 
   useKeybinding('markdownPreview.toggle', useCallback((e) => {
     e.preventDefault();
@@ -2770,7 +2796,10 @@ export default function App() {
   }, [activeProjectPath, updateWorkspace]);
 
   const handleEditorSave = useCallback(async (filePath: string, content: string) => {
-    await window.sai.fsWriteFile(filePath, content);
+    // Raw-source saves of a canvas are user edits: route them through the canvas store.
+    if (!(isCanvasFile(filePath) && await canvas.writeSource(filePath, content))) {
+      await window.sai.fsWriteFile(filePath, content);
+    }
     const { mtime } = await window.sai.fsMtime(filePath) as { mtime: number };
     if (activeProjectPath) {
       updateWorkspace(activeProjectPath, ws => ({
@@ -2778,7 +2807,7 @@ export default function App() {
         openFiles: ws.openFiles.map(f => f.path === filePath ? { ...f, savedContent: content, isDirty: false, diskMtime: mtime } : f),
       }));
     }
-  }, [activeProjectPath, updateWorkspace]);
+  }, [activeProjectPath, updateWorkspace, canvas.writeSource]);
 
   const handleEditorContentChange = useCallback((filePath: string, content: string) => {
     if (!activeProjectPath) return;
@@ -3510,6 +3539,7 @@ export default function App() {
               </div>
             ))}
             {panel === 'editor' && activeFilePath && (
+              <CanvasContext.Provider value={canvas}>
               <CodePanel
                 openFiles={openFiles}
                 activeFilePath={activeFilePath}
@@ -3540,6 +3570,7 @@ export default function App() {
                   }
                 }}
               />
+              </CanvasContext.Provider>
             )}
             {panel === 'terminal' && Array.from(workspaces.entries()).map(([wsPath, ws]) => (
               <div

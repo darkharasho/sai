@@ -177,6 +177,8 @@ export interface OpenFile {
   diskMtime?: number;
   pendingLine?: number;
   mdPreview?: boolean;
+  /** Canvas file (.sai/canvas/*.md) shown as raw Markdown in Monaco instead of the canvas view. */
+  canvasSource?: boolean;
 }
 
 export interface GitCommit {

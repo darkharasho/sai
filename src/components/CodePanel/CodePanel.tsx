@@ -9,6 +9,8 @@ import ImageViewer from './ImageViewer';
 import { isImageFile } from '../../utils/imageFiles';
 import { isModelFile } from '../../model3d/modelFiles';
 import CodePanelModelView from '../../model3d/CodePanelModelView';
+import { isCanvasFile } from '../../canvas/canvasFiles';
+import { CanvasTab } from '../../canvas/CanvasContext';
 
 interface CodePanelProps {
   openFiles: OpenFile[];
@@ -313,6 +315,8 @@ export default function CodePanel({
           mode={activeFile.diffMode ?? 'unified'}
           minimap={editorMinimap}
         />
+      ) : activeFile.viewMode === 'editor' && isCanvasFile(activeFile.path) && !activeFile.canvasSource ? (
+        <CanvasTab path={activeFile.path} />
       ) : activeFile.viewMode === 'editor' && activeFile.mdPreview && activeFile.content !== undefined ? (
         <MarkdownPreview
           content={activeFile.content}
