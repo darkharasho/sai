@@ -80,3 +80,20 @@ describe('blockName (D4)', () => {
     expect(blockName(blocks, 6)).toBe('id=picker');
   });
 });
+
+describe('blockName collisions', () => {
+  const DOC = '## Shop flow\n\n```html\n<b/>\n```\n\n```html\n<i/>\n```\n\n```mermaid\nA-->B\n```\n\n## Other\n\n```html\n<u/>\n```\n';
+  it('suffixes untitled blocks of one kind that share a heading name; unique names stay plain', () => {
+    const blocks = splitBlocks(DOC);
+    expect(blockName(blocks, 1)).toBe('Shop flow (block 2)');
+    expect(blockName(blocks, 2)).toBe('Shop flow (block 3)');
+    // Only diagram under the heading: unique among diagrams.
+    expect(blockName(blocks, 3)).toBe('Shop flow');
+    expect(blockName(blocks, 5)).toBe('Other');
+  });
+  it('an untitled block whose heading equals another block\'s title is suffixed; the title stays', () => {
+    const blocks = splitBlocks('## picker\n\n```html picker\n<b/>\n```\n\n```html\n<i/>\n```\n');
+    expect(blockName(blocks, 1)).toBe('picker');
+    expect(blockName(blocks, 2)).toBe('picker (block 3)');
+  });
+});

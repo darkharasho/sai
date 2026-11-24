@@ -280,6 +280,22 @@ describe('CanvasView', () => {
     expect(spy).toHaveBeenCalledWith(P, 'Shop flow', 1);
   });
 
+  it('emits from two untitled html blocks under one heading stay separate (no coalescing)', async () => {
+    const { store } = await setup('# Plan\n\n## Shop flow\n\n```html\n<b>one</b>\n```\n\n```html\n<b>two</b>\n```\n');
+    const spy = vi.spyOn(store, 'userEmit');
+    view(store);
+    const [first, second] = Array.from(document.querySelectorAll('iframe'));
+    act(() => {
+      window.dispatchEvent(new MessageEvent('message', { data: { __saiCanvasEmit: 1, data: 'a' }, source: first.contentWindow }));
+      window.dispatchEvent(new MessageEvent('message', { data: { __saiCanvasEmit: 1, data: 'b' }, source: second.contentWindow }));
+    });
+    expect(spy.mock.calls).toEqual([[P, 'Shop flow (block 3)', 'a'], [P, 'Shop flow (block 4)', 'b']]);
+    // Distinct labels: the store keeps both emits instead of coalescing b over a.
+    const msg = store.pendingMessage(P, 'c')!;
+    expect(msg).toContain('- html "Shop flow (block 3)" sent: "a"');
+    expect(msg).toContain('- html "Shop flow (block 4)" sent: "b"');
+  });
+
   describe('D2: checklist labels are inline Markdown', () => {
     const LINKY = '- [ ] Download dependencies from [Thunderstore](https://thunderstore.io)\n- [ ] Run `npm ci` **first**\n';
 

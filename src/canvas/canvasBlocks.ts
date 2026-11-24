@@ -122,17 +122,29 @@ function headingText(source: string): string | null {
   return node?.type === 'heading' ? collectText(node).trim() || null : null;
 }
 
-/**
- * Agent-facing name of a block (diagram/html): its fence title, else the nearest preceding
- * heading ("Shop flow"), else "block N".
- */
-export function blockName(blocks: readonly CanvasBlock[], index: number): string {
+/** A block's own name before disambiguation: fence title, nearest preceding heading, or null. */
+function baseName(blocks: readonly CanvasBlock[], index: number): { name: string; titled: boolean } | null {
   const b = blocks[index];
-  if (b?.label) return b.label;
+  if (b?.label) return { name: b.label, titled: true };
   for (let i = index - 1; i >= 0; i--) {
     if (blocks[i].kind !== 'markdown') continue;
     const h = headingText(blocks[i].source);
-    if (h) return h;
+    if (h) return { name: h, titled: false };
   }
-  return `block ${index + 1}`;
+  return null;
+}
+
+/**
+ * Agent-facing name of a block (diagram/html): its fence title, else the nearest preceding
+ * heading ("Shop flow"), else "block N". Emits coalesce by this name, so an untitled block whose
+ * heading name is shared by another block of the same kind gets a suffix: "Shop flow (block 5)".
+ * A unique name stays plain; a fence title is never suffixed.
+ */
+export function blockName(blocks: readonly CanvasBlock[], index: number): string {
+  const own = baseName(blocks, index);
+  if (!own) return `block ${index + 1}`;
+  if (own.titled) return own.name;
+  const kind = blocks[index].kind;
+  const shared = blocks.some((b, i) => i !== index && b.kind === kind && baseName(blocks, i)?.name === own.name);
+  return shared ? `${own.name} (block ${index + 1})` : own.name;
 }

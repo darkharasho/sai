@@ -62,6 +62,16 @@ describe('describeUserEdits', () => {
   it('insertion at slot 0', () => {
     expect(describeUserEdits('# T\n', 'first\n\n# T\n')).toEqual(['+ block 1: first']);
   });
+  it('two untitled diagrams under one heading get distinct edit lines', () => {
+    const seen = '## Shop flow\n\n```mermaid\nA-->B\n```\n\n```mermaid\nC-->D\n```\n';
+    const cur = '## Shop flow\n\n```mermaid\nA-->X\n```\n\n```mermaid\nC-->Y\n```\n';
+    expect(describeUserEdits(seen, cur)).toEqual(['diagram "Shop flow (block 2)": edited', 'diagram "Shop flow (block 3)": edited']);
+  });
+  it('two untitled html blocks under one heading get distinct edit lines', () => {
+    const seen = '## Shop flow\n\n```html\n<b>a</b>\n```\n\n```html\n<i>a</i>\n```\n';
+    const cur = '## Shop flow\n\n```html\n<b>b</b>\n```\n\n```html\n<i>b</i>\n```\n';
+    expect(describeUserEdits(seen, cur)).toEqual(['html "Shop flow (block 2)": edited', 'html "Shop flow (block 3)": edited']);
+  });
   it('html block edit', () => {
     const seen = '# T\n\n```html pick\n<b>a</b>\n```\n';
     const cur = '# T\n\n```html pick\n<b>b</b>\n```\n';
