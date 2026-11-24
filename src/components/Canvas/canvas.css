@@ -201,6 +201,10 @@
 .canvas-note__body { flex: 1; min-width: 0; }
 .canvas-note .canvas-md blockquote { margin: 0; padding: 0; border: 0; color: inherit; }
 .canvas-note .canvas-md p { margin: 0; }
+/* A note written as a nested bullet (`  - crashed ...`) reads as plain callout text: no marker, no indent. */
+.canvas-note .canvas-md ul, .canvas-note .canvas-md ol { list-style: none; margin: 0; padding: 0; }
+.canvas-note .canvas-md li { margin: 0; padding: 0; }
+.canvas-note .canvas-md li + li { margin-top: 4px; }
 
 .canvas-task__noteform { display: flex; gap: 6px; margin: 8px 0 0 30px; }
 .canvas-task__noteform input {
@@ -221,6 +225,12 @@
 .canvas-btn--danger:hover { color: var(--cv-bad); }
 .canvas-btn--ghost-visible { border-color: transparent; }
 .canvas-task:hover .canvas-btn--ghost, .canvas-btn--ghost:focus-visible { opacity: 1; }
+/* Hover actions never take the row's done styling (dim + strike): always full-contrast chips. */
+.canvas-task__actions .canvas-btn--ghost {
+  color: var(--text); background: var(--surface-3); border-color: var(--cv-border); text-decoration: none;
+}
+.canvas-task__actions .canvas-btn--ghost:hover { background: var(--surface-4); border-color: var(--cv-border-strong); }
+.canvas-task__actions .canvas-btn--danger:hover { color: var(--cv-bad); }
 
 /* ---------- stat tiles ---------- */
 .canvas-stats { display: flex; gap: 12px; flex-wrap: wrap; }

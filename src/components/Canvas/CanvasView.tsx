@@ -71,6 +71,21 @@ export function currentAccent(): string {
   return getComputedStyle(document.documentElement).getPropertyValue('--accent').trim();
 }
 
+/**
+ * The live accent: re-read when the root's inline style/class/theme attributes change
+ * (applyAccent writes the accent vars onto <html>'s style).
+ */
+export function useThemeAccent(): string {
+  const [accent, setAccent] = useState(currentAccent);
+  useEffect(() => {
+    if (typeof MutationObserver === 'undefined') return;
+    const obs = new MutationObserver(() => setAccent(currentAccent()));
+    obs.observe(document.documentElement, { attributes: true, attributeFilter: ['style', 'class', 'data-theme'] });
+    return () => obs.disconnect();
+  }, []);
+  return accent;
+}
+
 function textOf(node: any): string {
   if (!node) return '';
   if (node.type === 'text') return node.value ?? '';
@@ -378,7 +393,7 @@ function CanvasViewInner(props: CanvasViewProps) {
   const list = useSyncExternalStore(store.subscribe, () => store.list());
   const { pendingDoc, apply, latest, error } = usePendingWrites(path, store);
   const [editing, setEditing] = useState<{ index: number; base: string } | null>(null);
-  const accent = useMemo(currentAccent, []);
+  const accent = useThemeAccent();
 
   const doc = pendingDoc ?? state?.content ?? '';
   const blocks = useMemo(() => splitBlocks(doc), [doc]);

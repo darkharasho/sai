@@ -468,6 +468,24 @@ describe('CanvasView', () => {
       expect(document.querySelector('.canvas-card .canvas-diagram')).toBeTruthy();
     });
 
+    it('diagrams follow an accent change (the current class uses the live accent)', async () => {
+      const { renderMermaidToSvg } = await import('../../../src/render/renderMermaid');
+      const root = document.documentElement;
+      root.style.setProperty('--accent', '#112233');
+      try {
+        const { store } = await setup('```mermaid\ngraph LR\nA:::current\n```\n');
+        view(store);
+        expect((renderMermaidToSvg as any).mock.calls.at(-1)[0]).toContain('stroke:#112233');
+        await act(async () => {
+          root.style.setProperty('--accent', '#445566');
+          await vi.advanceTimersByTimeAsync(0);
+        });
+        expect((renderMermaidToSvg as any).mock.calls.at(-1)[0]).toContain('stroke:#445566');
+      } finally {
+        root.style.removeProperty('--accent');
+      }
+    });
+
     it('"Add section" appends a section card', async () => {
       const { store, writes } = await setup();
       view(store);

@@ -157,6 +157,7 @@ test.describe('live canvas', () => {
       '## Shop', '',
       '- [x] Press `F6` — shop window opens',
       '- [!] Buy the cheapest item', '  > Crashed here — game froze ~2s then closed. Log ends at `NullReferenceException`',
+      '- [!] Open the shop twice', '  - crashed when pressing F6 twice',
       '- [ ] Retry the purchase with `ShopMod.Debug=true` and copy the log here',
       '- [ ] Advance a level — prices go up ~15%', '',
       '## Price check', '',
@@ -175,18 +176,25 @@ test.describe('live canvas', () => {
     await expect(window.locator('.canvas-stats')).toHaveCount(0);
     // The failed item renders as failed, with its note as a red callout.
     const failed = window.locator('li.canvas-task--failed');
-    await expect(failed).toHaveCount(1);
-    await expect(failed).toContainText('Buy the cheapest item');
-    await expect(failed.locator('.canvas-note--bad')).toContainText('NullReferenceException');
-    await expect(cards.nth(2).locator('.canvas-card__count')).toHaveText('1 / 4');
+    await expect(failed).toHaveCount(2);
+    await expect(failed.nth(0)).toContainText('Buy the cheapest item');
+    await expect(failed.nth(0).locator('.canvas-note--bad')).toContainText('NullReferenceException');
+    // A note written as a nested bullet shows no list marker or indent inside the callout.
+    const bulletNote = failed.nth(1).locator('.canvas-note--bad ul');
+    await expect(bulletNote).toContainText('crashed when pressing F6 twice');
+    expect(await bulletNote.evaluate((ul) => {
+      const li = ul.querySelector('li')!;
+      return [getComputedStyle(ul).paddingLeft, getComputedStyle(li).listStyleType, getComputedStyle(ul).listStyleType];
+    })).toEqual(['0px', 'none', 'none']);
+    await expect(cards.nth(2).locator('.canvas-card__count')).toHaveText('1 / 5');
     await expect(cards.nth(0).locator('.canvas-diagram svg')).toBeVisible({ timeout: 15000 });
 
     // The agent adds a stats block and a step: tiles appear, the new step carries the agent marker.
     const stats = '```stats\nProgress: auto\nPassed: auto\nFailed: auto\nBuild: v0.3.1-dev\n```\n\n';
     await write(head + stats + body.replace('- [ ] Advance a level', '- [ ] Check the shop restocks after a level\n- [ ] Advance a level'));
     await expect(window.locator('.canvas-stat')).toHaveCount(4, { timeout: 10000 });
-    await expect(window.locator('.canvas-stat').nth(0)).toContainText('4 of 8 steps');
-    await expect(window.locator('.canvas-stat').nth(2)).toContainText('1');
+    await expect(window.locator('.canvas-stat').nth(0)).toContainText('4 of 9 steps');
+    await expect(window.locator('.canvas-stat').nth(2)).toContainText('2');
     await expect(window.locator('li.canvas-agent-edge')).toContainText('Check the shop restocks');
     // Screenshot for the visual check against the approved mockup (agent marker visible).
     const dir = '/var/tmp/sai-dogfood/shots';
@@ -218,7 +226,22 @@ test.describe('live canvas', () => {
     await window.locator('.canvas-header').screenshot({ path: `${dir}/redesign-header.png` }).catch(() => {});
     await window.getByRole('button', { name: 'Hold' }).click();
 
-    await window.locator('li.canvas-task--failed').hover();
+    // Hover actions on a done (dimmed, struck) row keep full contrast.
+    const doneRow = window.locator('li.canvas-task--done').first();
+    await doneRow.hover();
+    await window.waitForTimeout(300);
+    const look = await doneRow.locator('.canvas-btn--ghost').first().evaluate((b) => {
+      const probe = document.createElement('span');
+      probe.style.color = 'var(--text)';
+      b.parentElement!.appendChild(probe);
+      const text = getComputedStyle(probe).color;
+      probe.remove();
+      const cs = getComputedStyle(b);
+      return { color: cs.color, text, opacity: cs.opacity, deco: cs.textDecorationLine };
+    });
+    expect(look).toEqual({ color: look.text, text: look.text, opacity: '1', deco: 'none' });
+    await window.locator('section.canvas-card').nth(1).screenshot({ path: `${dir}/redesign-hover-done.png` }).catch(() => {});
+    await window.locator('li.canvas-task--failed').first().hover();
     await window.waitForTimeout(300);
     await window.locator('section.canvas-card').nth(2).screenshot({ path: `${dir}/redesign-hover.png` }).catch(() => {});
   });
