@@ -121,12 +121,20 @@ describe('CanvasView', () => {
   describe('pill', () => {
     it('sending countdown', async () => {
       const { store } = await setup();
-      const v = view(store, { sendIn: 5, pending: true });
-      expect(screen.getByText(/Sending to agent in 5s/)).toBeTruthy();
+      const v = view(store, { sendIn: 5, pending: true, pendingCount: 2 });
+      expect(screen.getByText('Sending your 2 changes in 5s')).toBeTruthy();
       fireEvent.click(screen.getByText('Send now'));
       fireEvent.click(screen.getByText('Hold'));
       expect(v.onSendNow).toHaveBeenCalled();
       expect(v.onHoldToggle).toHaveBeenCalled();
+    });
+    it('sending countdown copy: singular, and no count', async () => {
+      const { store } = await setup();
+      const { rerender } = view(store, { sendIn: 3, pending: true, pendingCount: 1 });
+      expect(screen.getByText('Sending your 1 change in 3s')).toBeTruthy();
+      const fns = { onSendNow() {}, onHoldToggle() {}, onOpenSource() {}, onOpenCanvas() {} };
+      rerender(<CanvasView path={P} store={store} {...base} {...fns} sendIn={3} pending />);
+      expect(screen.getByText('Sending your changes in 3s')).toBeTruthy();
     });
     it('held', async () => {
       const { store } = await setup();
@@ -343,6 +351,129 @@ describe('CanvasView', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Edit block 1' }));
       const ta = screen.getByRole('textbox', { name: 'Edit block 1' }) as HTMLTextAreaElement;
       expect(ta.value).toBe(LINKY);
+    });
+  });
+
+  describe('visual redesign', () => {
+    const PAGE = [
+      '# ShopMod test', '',
+      'A mod for the game.', '',
+      '## Launch', '',
+      '- [x] Install', '- [!] Buy item', '  > froze', '- [ ] Retry', '',
+      '## Price check', '',
+      '| Item | Status |', '|---|---|', '| Pack | Pass |', '| Crystal | Blocked by crash |', '| Gem | Not run |', '',
+      '## Empty', '',
+    ].join('\n');
+
+    it('page title, muted subtitle, and one card per ## section with tags and done/total', async () => {
+      const { store } = await setup(PAGE);
+      view(store);
+      expect(document.querySelector('.canvas-h1')!.textContent).toBe('ShopMod test');
+      expect(document.querySelector('.canvas-subtitle')!.textContent).toContain('A mod for the game.');
+      const cards = [...document.querySelectorAll('section.canvas-card')];
+      expect(cards.map((c) => c.getAttribute('aria-label'))).toEqual(['Launch', 'Price check', 'Empty']);
+      expect(cards[0].querySelector('.canvas-card__count')!.textContent).toBe('1 / 3');
+      expect([...cards[0].querySelectorAll('.canvas-tag')].map((t) => t.textContent)).toEqual(['checklist']);
+      expect([...cards[1].querySelectorAll('.canvas-tag')].map((t) => t.textContent)).toEqual(['table']);
+      expect(cards[2].querySelector('.canvas-card__body')).toBeNull();
+    });
+
+    it('a failed item renders failed with a red note; "Mark failed" writes [!]; clicking a failed box resets it', async () => {
+      const { store, writes } = await setup(PAGE);
+      view(store);
+      const failed = screen.getByLabelText('Buy item').closest('li')!;
+      expect(failed.className).toContain('canvas-task--failed');
+      expect(failed.querySelector('.canvas-note--bad')!.textContent).toContain('froze');
+      expect(screen.getByLabelText('Install').closest('li')!.className).toContain('canvas-task--done');
+      const retry = screen.getByLabelText('Retry').closest('li')!;
+      fireEvent.click(retry.querySelector('.canvas-btn--danger')!);
+      await act(async () => { await vi.advanceTimersByTimeAsync(400); });
+      expect(writes[0]).toContain('- [!] Retry');
+      fireEvent.click(screen.getByLabelText('Buy item'));
+      await act(async () => { await vi.advanceTimersByTimeAsync(400); });
+      expect(writes[1]).toContain('- [ ] Buy item');
+    });
+
+    it('table status cells get coloured dots', async () => {
+      const { store } = await setup(PAGE);
+      view(store);
+      const cell = (t: string) => screen.getByText(t).closest('td')!;
+      expect(cell('Pass').className).toContain('canvas-cell--ok');
+      expect(cell('Blocked by crash').className).toContain('canvas-cell--bad');
+      expect(cell('Not run').className).toContain('canvas-cell--dim');
+      expect(cell('Pass').querySelector('.canvas-dot')).toBeTruthy();
+    });
+
+    it('stat tiles only with a ```stats block; auto values come from the checklists', async () => {
+      const { store } = await setup(PAGE);
+      view(store);
+      expect(document.querySelector('.canvas-stats')).toBeNull();
+      cleanup();
+      const { store: s2 } = await setup(PAGE.replace('A mod for the game.\n', 'A mod for the game.\n\n```stats\nProgress: auto\nFailed: auto\nBuild: v0.3.1\n```\n'));
+      view(s2);
+      const tiles = [...document.querySelectorAll('.canvas-stat')].map((t) => t.textContent);
+      expect(tiles).toEqual(['Progress1 of 3 steps', 'Failed1', 'Buildv0.3.1']);
+      expect(document.querySelector('.canvas-stat__value--mono')!.textContent).toBe('v0.3.1');
+    });
+
+    it('header shows the sides that have edited', async () => {
+      const { store } = await setup();
+      view(store);
+      const meta = () => document.querySelector('.canvas-meta')!.textContent;
+      expect(meta()).toContain('Agent edited just now');
+      expect(meta()).not.toContain('you');
+      await act(async () => { await store.userWrite(P, DOC.replace('body', 'mine')); });
+      expect(meta()).toMatch(/Agent edited .*·.*you just now/);
+    });
+
+    it('agent-changed items and blocks get the marker until the user edits', async () => {
+      const { store } = await setup();
+      view(store);
+      await act(async () => { await store.onDiskChange(P, '# Plan\n\n- [ ] a\n- [ ] b\n- [ ] c\n\nbody\n\nnew para\n', true); });
+      const c = screen.getByLabelText('c').closest('li')!;
+      expect(c.className).toContain('canvas-agent-edge');
+      expect(c.textContent).toContain('added by agent');
+      expect(screen.getByLabelText('a').closest('li')!.className).not.toContain('canvas-agent-edge');
+      expect(screen.getByText('new para').closest('.canvas-block')!.className).toContain('canvas-agent-edge');
+      fireEvent.click(screen.getByLabelText('a'));
+      await act(async () => { await vi.advanceTimersByTimeAsync(400); });
+      expect(document.querySelector('.canvas-agent-edge')).toBeNull();
+    });
+
+    it('agent marker expires after 10 minutes', async () => {
+      const { store } = await setup();
+      view(store);
+      await act(async () => { await store.onDiskChange(P, DOC.replace('body', 'agent body'), true); });
+      expect(document.querySelector('.canvas-agent-edge')).toBeTruthy();
+      await act(async () => { await vi.advanceTimersByTimeAsync(10 * 60 * 1000 + 100); });
+      expect(document.querySelector('.canvas-agent-edge')).toBeNull();
+    });
+
+    it('Canvases picker lists canvases and opens one', async () => {
+      const { store } = await setup();
+      const v = view(store);
+      fireEvent.click(screen.getByRole('button', { name: 'Canvases' }));
+      fireEvent.click(screen.getByRole('menuitem', { name: /Plan/ }));
+      expect(v.onOpenCanvas).toHaveBeenCalledWith(P);
+      expect(screen.queryByRole('menu')).toBeNull();
+    });
+
+    it('a mermaid block renders with the injected result classes (render only)', async () => {
+      const { renderMermaidToSvg } = await import('../../../src/render/renderMermaid');
+      const { store } = await setup('## Flow\n\n```mermaid\ngraph LR\nA:::pass --> B\n```\n');
+      view(store);
+      const arg = (renderMermaidToSvg as any).mock.calls.at(-1)[0] as string;
+      expect(arg).toMatch(/classDef pass /);
+      expect(store.get(P)!.content).not.toContain('classDef');
+      expect(document.querySelector('.canvas-card .canvas-diagram')).toBeTruthy();
+    });
+
+    it('"Add section" appends a section card', async () => {
+      const { store, writes } = await setup();
+      view(store);
+      fireEvent.click(screen.getByText('Add section'));
+      await act(async () => { await vi.advanceTimersByTimeAsync(400); });
+      expect(writes[0]).toBe('# Plan\n\n- [ ] a\n- [ ] b\n\nbody\n\n## New section\n\n- [ ] First step\n');
     });
   });
 });

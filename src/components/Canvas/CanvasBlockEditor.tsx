@@ -1,9 +1,12 @@
 import { useState } from 'react';
 import { MermaidRender } from '../Chat/RenderToolCard';
 import type { CanvasBlock } from '../../canvas/canvasBlocks';
+import { prepareCanvasDiagram } from '../../canvas/canvasMermaid';
 
-export default function CanvasBlockEditor({ block, onCommit, onCancel }: {
+export default function CanvasBlockEditor({ block, accent = '', onCommit, onCancel }: {
   block: CanvasBlock;
+  /** Theme accent for the diagram preview's `current` class. */
+  accent?: string;
   onCommit: (source: string) => void;
   onCancel: () => void;
 }) {
@@ -19,7 +22,9 @@ export default function CanvasBlockEditor({ block, onCommit, onCancel }: {
         rows={Math.min(24, Math.max(4, draft.split('\n').length + 1))}
         autoFocus
       />
-      {block.kind === 'mermaid' && <div className="canvas-editor__preview"><MermaidRender diagram={diagram} /></div>}
+      {block.kind === 'mermaid' && (
+        <div className="canvas-editor__preview canvas-diagram"><MermaidRender diagram={prepareCanvasDiagram(diagram, accent)} /></div>
+      )}
       <div className="canvas-editor__actions">
         <button type="button" className="canvas-btn canvas-btn--primary" onClick={() => onCommit(draft)}>Save</button>
         <button type="button" className="canvas-btn" onClick={onCancel}>Cancel</button>

@@ -277,6 +277,7 @@ function CanvasTabInner({ ctl, path }: { ctl: CanvasController; path: string }) 
   const { store, chatKey } = ctl;
   const pending = useSyncExternalStore(store.subscribe, () => (chatKey ? store.hasPending(key, chatKey) : false));
   const autoTarget = useSyncExternalStore(store.subscribe, () => (chatKey ? store.isAutoTarget(key, chatKey) : true));
+  const pendingCount = useSyncExternalStore(store.subscribe, () => (chatKey ? store.pendingChangeCount(key, chatKey) : 0));
   return (
     <CanvasView
       path={key}
@@ -284,6 +285,7 @@ function CanvasTabInner({ ctl, path }: { ctl: CanvasController; path: string }) 
       agentStatus={ctl.agentStatus}
       sendIn={ctl.sendInFor(key)}
       pending={pending}
+      pendingCount={pendingCount}
       autoTarget={autoTarget}
       onSendNow={() => ctl.sendNow(key)}
       onHoldToggle={() => ctl.holdToggle(key)}
