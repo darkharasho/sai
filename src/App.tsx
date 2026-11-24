@@ -80,6 +80,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { getCapabilities } from './providers/capabilities';
 import { normalizeCodexEffort } from './lib/codexEffort';
 import { CanvasContext, useCanvasController } from './canvas/CanvasContext';
+import { expandEditorPanel, type PanelId } from './lib/panelLayout';
 import { canvasLiveness, isCanvasFile, workspaceAgentLive, workspaceLiveChats } from './canvas/canvasFiles';
 
 interface ScopeReconcileBridge {
@@ -222,7 +223,6 @@ const isCodexEffort = (v: unknown): v is CodexEffort => v === 'minimal' || v ===
 type GeminiApprovalMode = 'default' | 'auto_edit' | 'yolo' | 'plan';
 type GeminiConversationMode = 'planning' | 'fast';
 type CodexPermission = 'auto' | 'read-only' | 'full-access';
-type PanelId = 'chat' | 'editor' | 'terminal';
 
 function WelcomeTypewriter() {
   const full = 'Welcome to Simply AI';
@@ -2484,7 +2484,9 @@ export default function App() {
     });
   }, [activeProjectPath, updateWorkspace, focusedChat]);
 
-  const handleFileOpen = useCallback(async (filePath: string, line?: number, canvasOpts?: { canvasSource?: boolean }) => {
+  // canvasOpts.auto: an automatic open (agent-written canvas). It keeps the chat expanded so the
+  // user never loses sight of the conversation mid-turn.
+  const handleFileOpen = useCallback(async (filePath: string, line?: number, canvasOpts?: { canvasSource?: boolean; auto?: boolean }) => {
     if (!activeProjectPath) return;
     try {
       if (isImageFile(filePath) || isModelFile(filePath)) {
@@ -2520,14 +2522,9 @@ export default function App() {
         });
       }
       setExpanded(prev => {
-        if (prev.includes('editor')) return prev;
-        if (focusedChat && prev.includes('chat')) {
-          setSplitRatio(0.66);
-          return ['chat', 'editor'];
-        }
-        const next = [...prev, 'editor' as PanelId];
-        setSplitRatio(0.66);
-        return next.length > 2 ? next.slice(1) : next;
+        const next = expandEditorPanel(prev, focusedChat || !!canvasOpts?.auto);
+        if (next !== prev) setSplitRatio(0.66);
+        return next;
       });
     } catch {
       // File couldn't be read

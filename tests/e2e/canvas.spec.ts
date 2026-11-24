@@ -63,15 +63,29 @@ test.describe('live canvas', () => {
     const file = `${ws}/.sai/canvas/steps.md`.replace(/^\/var(?=\/home\/)/, '');
     await window.evaluate(([w, f]) => {
       const c = (window as any).__canvas;
-      const content = '# Steps\n\n- [ ] Launch game\n';
+      const content = '# Steps\n\n- [ ] Launch game\n- [ ] Get mods from [Thunderstore](https://thunderstore.io)\n';
       c.fs[f] = content;
       c.subs.forEach((cb: any) => cb({ projectPath: w, path: f, content }));
     }, [ws, file]);
 
-    // Auto-open is deferred while a text entry has focus.
-    await window.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    // D1: focus is still in the chat composer after sending; that must not defer auto-open,
+    // and auto-open must not take focus away from it.
     const checkbox = window.getByRole('checkbox', { name: 'Launch game' });
     await expect(checkbox).toBeVisible({ timeout: 10000 });
+    expect(await window.evaluate(() => document.activeElement?.classList.contains('chat-textarea'))).toBe(true);
+    await window.keyboard.type('still typing');
+    await expect(window.locator('textarea.chat-textarea')).toHaveValue('still typing');
+    await window.locator('textarea.chat-textarea').fill('');
+
+    // D3: the auto-open put the editor beside the chat; the chat panel stayed expanded.
+    await expect(window.locator('.accordion-panel.accordion-expanded textarea.chat-textarea')).toBeVisible();
+
+    // D2: a label renders inline Markdown; clicking its link opens it and does not tick the box.
+    const linkBox = window.getByRole('checkbox', { name: 'Get mods from Thunderstore' });
+    await window.evaluate(() => { (window as any).__opened = []; (window as any).sai.openExternal = (u: string) => (window as any).__opened.push(u); });
+    await window.getByRole('link', { name: 'Thunderstore' }).click();
+    expect(await window.evaluate(() => (window as any).__opened)).toEqual(['https://thunderstore.io']);
+    await expect(linkBox).not.toBeChecked();
 
     // Tick the box mid-turn: the canvas file is rewritten.
     await checkbox.click();
