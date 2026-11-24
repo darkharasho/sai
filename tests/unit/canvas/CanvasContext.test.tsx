@@ -91,6 +91,66 @@ describe('useCanvasController', () => {
     view.remove();
   });
 
+  it('auto-opens a canvas once per session, not on every agent write', async () => {
+    const { live, opts } = setup();
+    await flush();
+    live.add(WS);
+    act(() => emit({ projectPath: WS, path: REAL, content: '- [ ] a\n\none\n' }));
+    await flush();
+    act(() => emit({ projectPath: WS, path: REAL, content: '- [ ] a\n\ntwo\n' }));
+    await flush();
+    expect(opts.openFile).toHaveBeenCalledTimes(1);
+  });
+
+  it('a deferred canvas opens once when focus allows, despite more agent writes meanwhile', async () => {
+    const { live, opts } = setup();
+    await flush();
+    live.add(WS);
+    const ta = document.createElement('textarea');
+    document.body.appendChild(ta);
+    ta.focus();
+    act(() => emit({ projectPath: WS, path: REAL, content: '- [ ] a\n\none\n' }));
+    await flush();
+    act(() => emit({ projectPath: WS, path: REAL, content: '- [ ] a\n\ntwo\n' }));
+    await flush();
+    expect(opts.openFile).not.toHaveBeenCalled();
+    vi.useFakeTimers();
+    act(() => { ta.blur(); vi.runAllTimers(); });
+    vi.useRealTimers();
+    act(() => emit({ projectPath: WS, path: REAL, content: '- [ ] a\n\nthree\n' }));
+    await flush();
+    expect(opts.openFile).toHaveBeenCalledTimes(1);
+    ta.remove();
+  });
+
+  it('keeps the controller value stable across unrelated re-renders', async () => {
+    const { hook, opts } = setup();
+    await flush();
+    const before = hook.result.current;
+    hook.rerender({ ...opts, getOpenFiles: () => [], openFile: vi.fn() });
+    expect(hook.result.current).toBe(before);
+    hook.rerender({ ...opts, chatBusy: true });
+    expect(hook.result.current).not.toBe(before);
+  });
+
+  it('clears a pending focusout check on unmount', async () => {
+    const { hook, live, opts } = setup();
+    await flush();
+    live.add(WS);
+    const ta = document.createElement('textarea');
+    document.body.appendChild(ta);
+    ta.focus();
+    act(() => emit({ projectPath: WS, path: REAL, content: '- [ ] a\n\nnew\n' }));
+    await flush();
+    vi.useFakeTimers();
+    ta.blur(); // schedules the deferred check
+    hook.unmount();
+    vi.runAllTimers();
+    vi.useRealTimers();
+    expect(opts.openFile).not.toHaveBeenCalled();
+    ta.remove();
+  });
+
   it('a focused checkbox does not defer auto-open', async () => {
     const { live, opts } = setup();
     await flush();

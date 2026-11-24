@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { CanvasStore } from './canvasStore';
 
 /** A canvas auto-sends once its user activity (edits, emits) has been quiet this long. */
@@ -23,21 +23,13 @@ export interface CanvasDelivery {
   sendNow(path: string): void;
 }
 
-/**
- * Send `path`'s pending update to `chatKey`, then mark it delivered, in the same tick:
- * once this returns true nothing is pending, so no later render/effect can send it again.
- */
-function deliver(store: CanvasStore, path: string, chatKey: string, send: (text: string) => void): boolean {
-  const msg = store.pendingMessage(path, chatKey);
-  if (!msg) return false;
-  try {
-    send(msg);
-  } catch (err) {
-    console.error('[canvas] delivery failed', err);
-    return false;
-  }
-  store.markDelivered(path, chatKey);
-  return true;
+/** After a failed send, wait this long (or for a new send/chatKey) before auto-retrying. */
+export const CANVAS_RETRY_MS = 30000;
+
+interface FailStreak {
+  send: unknown;
+  chatKey: string;
+  until: number;
 }
 
 export function useCanvasDelivery({ store, chatKey, chatBusy, send }: CanvasDeliveryOpts): CanvasDelivery {
@@ -46,19 +38,48 @@ export function useCanvasDelivery({ store, chatKey, chatBusy, send }: CanvasDeli
   const [tick, setTick] = useState(0);
   // Canvases the user asked to send while the chat could not take it.
   const forcedRef = useRef(new Set<string>());
+  // Switching chats restarts the idle window: nothing auto-sends sooner than IDLE after it.
+  const chatSinceRef = useRef<{ chatKey: string | null; at: number }>({ chatKey, at: 0 });
+  if (chatSinceRef.current.chatKey !== chatKey) chatSinceRef.current = { chatKey, at: Date.now() };
+  const chatSince = chatSinceRef.current.at;
+  // Current failure streak: logged once, auto-retry backs off until `until` (or a new send/chatKey).
+  const failRef = useRef<FailStreak | null>(null);
   const optsRef = useRef({ store, chatKey, chatBusy, send });
   optsRef.current = { store, chatKey, chatBusy, send };
 
+  /**
+   * Send `path`'s pending update to `chatKey`, then mark it delivered, in the same tick:
+   * once this returns true nothing is pending, so no later render/effect can send it again.
+   */
+  const deliver = useCallback((s: CanvasStore, path: string, key: string, fn: (text: string) => void): boolean => {
+    const msg = s.pendingMessage(path, key);
+    if (!msg) return false;
+    try {
+      fn(msg);
+    } catch (err) {
+      const f = failRef.current;
+      if (!f || f.send !== fn || f.chatKey !== key) console.error('[canvas] delivery failed; retrying later', err);
+      failRef.current = { send: fn, chatKey: key, until: Date.now() + CANVAS_RETRY_MS };
+      return false;
+    }
+    failRef.current = null;
+    s.markDelivered(path, key);
+    return true;
+  }, []);
+
+  const fail = failRef.current;
+  const backingOff = !!fail && fail.send === send && fail.chatKey === chatKey && Date.now() < fail.until;
   const ready = !chatBusy && !!chatKey && !!send;
 
   // Countdown per auto-send canvas with something pending.
   const now = Date.now();
   const perPath = new Map<string, number>();
   let sendIn: number | null = null;
-  if (ready) {
+  if (ready && !backingOff) {
     for (const c of list) {
       if (!c.autoSend || !store.hasPending(c.path, chatKey!)) continue;
-      const secs = Math.max(0, Math.ceil((c.lastUserActivityAt + CANVAS_IDLE_MS - now) / 1000));
+      const from = Math.max(c.lastUserActivityAt, chatSince);
+      const secs = Math.max(0, Math.ceil((from + CANVAS_IDLE_MS - now) / 1000));
       perPath.set(c.path, secs);
       sendIn = sendIn === null ? secs : Math.min(sendIn, secs);
     }
@@ -67,6 +88,11 @@ export function useCanvasDelivery({ store, chatKey, chatBusy, send }: CanvasDeli
   useEffect(() => {
     if (!ready) return;
     const t = Date.now();
+    const f = failRef.current;
+    if (f && f.send === send && f.chatKey === chatKey && t < f.until) {
+      const id = setTimeout(() => setTick((n) => n + 1), f.until - t);
+      return () => clearTimeout(id);
+    }
     let next = Infinity;
     for (const c of store.list()) {
       const forced = forcedRef.current.has(c.path);
@@ -75,9 +101,14 @@ export function useCanvasDelivery({ store, chatKey, chatBusy, send }: CanvasDeli
         forcedRef.current.delete(c.path);
         continue;
       }
-      const due = forced ? 0 : c.lastUserActivityAt + CANVAS_IDLE_MS;
+      const due = forced ? 0 : Math.max(c.lastUserActivityAt, chatSince) + CANVAS_IDLE_MS;
       if (due <= t) {
         if (deliver(store, c.path, chatKey!, send!)) forcedRef.current.delete(c.path);
+        else if (failRef.current) {
+          // Failed: back off (the effect re-runs at the retry time).
+          next = Math.min(next, failRef.current.until);
+          break;
+        }
       } else {
         next = Math.min(next, due);
       }
@@ -85,7 +116,7 @@ export function useCanvasDelivery({ store, chatKey, chatBusy, send }: CanvasDeli
     if (next === Infinity) return;
     const id = setTimeout(() => setTick((n) => n + 1), next - t);
     return () => clearTimeout(id);
-  }, [list, tick, store, chatKey, ready, send]);
+  }, [list, tick, store, chatKey, chatSince, ready, send, deliver]);
 
   // 1 s display tick, only while something counts down.
   const counting = sendIn !== null;
@@ -103,8 +134,14 @@ export function useCanvasDelivery({ store, chatKey, chatBusy, send }: CanvasDeli
       return;
     }
     forcedRef.current.add(path);
-  }, []);
+  }, [deliver]);
 
-  const sendInFor = (path: string) => perPath.get(path) ?? null;
+  // Stable while the countdown values are unchanged, so the canvas context stays memoized.
+  const sig = [...perPath].map(([p, n]) => `${p}=${n}`).join('\n');
+  const sendInFor = useMemo(() => {
+    const m = new Map(perPath);
+    return (path: string) => m.get(path) ?? null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sig]);
   return { sendIn, sendInFor, sendNow };
 }

@@ -165,15 +165,50 @@ describe('useCanvasDelivery', () => {
     expect(send).toHaveBeenCalledTimes(1);
   });
 
-  it('a throwing send leaves the update pending', async () => {
+  it('a throwing send keeps the update pending, logs once per streak and backs off', async () => {
     const store = await makeStore();
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const { hook } = setup(store, { send: () => { throw new Error('no chat'); } });
+    const bad = vi.fn(() => { throw new Error('no chat'); });
+    const { hook, props } = setup(store, { send: bad });
     await act(async () => { await store.userWrite(A, '- [x] a\n'); });
     act(() => { vi.advanceTimersByTime(5000); });
+    expect(bad).toHaveBeenCalledTimes(1);
     expect(store.hasPending(A, 'c')).toBe(true);
-    expect(hook.result.current.sendIn).toBe(0);
+    // No retry every second.
+    act(() => { vi.advanceTimersByTime(29000); });
+    expect(bad).toHaveBeenCalledTimes(1);
+    // Retries after the back-off, without logging again.
+    act(() => { vi.advanceTimersByTime(1000); });
+    expect(bad).toHaveBeenCalledTimes(2);
+    expect(errSpy).toHaveBeenCalledTimes(1);
+    // A new send function ends the back-off at once.
+    const good = vi.fn();
+    hook.rerender({ ...props, send: good });
+    expect(good).toHaveBeenCalledTimes(1);
+    expect(store.hasPending(A, 'c')).toBe(false);
     errSpy.mockRestore();
+  });
+
+  it('switching chats restarts the idle window', async () => {
+    const store = await makeStore();
+    store.markDelivered(A, 'd');
+    const { send, hook, props } = setup(store);
+    await act(async () => { await store.userWrite(A, '- [x] a\n'); });
+    act(() => { vi.advanceTimersByTime(4000); });
+    hook.rerender({ ...props, chatKey: 'd' });
+    expect(hook.result.current.sendIn).toBe(5);
+    act(() => { vi.advanceTimersByTime(4999); });
+    expect(send).not.toHaveBeenCalled();
+    act(() => { vi.advanceTimersByTime(1); });
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it('sendInFor is stable while the countdown is unchanged', async () => {
+    const store = await makeStore();
+    const { hook, props } = setup(store);
+    const before = hook.result.current.sendInFor;
+    hook.rerender({ ...props });
+    expect(hook.result.current.sendInFor).toBe(before);
   });
 
   it('never double-sends under StrictMode and re-renders', async () => {

@@ -99,6 +99,7 @@ describe('isTextEntry', () => {
     const host = mk(`<div class="canvas-view"><textarea id="t"></textarea></div><input id="i"><input id="s" type="search">
       <div id="ce" contenteditable="true"></div><div class="monaco-editor"><div id="m"></div></div>`);
     for (const id of ['t', 'i', 's', 'm']) expect(isTextEntry(host.querySelector(`#${id}`))).toBe(true);
+    expect(isTextEntry(document.createElement('iframe'))).toBe(true);
     const ce = host.querySelector('#ce') as HTMLElement;
     Object.defineProperty(ce, 'isContentEditable', { value: true });
     expect(isTextEntry(ce)).toBe(true);

@@ -42,12 +42,13 @@ export function findOpenCanvasPath(openFiles: OpenFile[], path: string): string 
 const TEXT_INPUT_TYPES = new Set(['', 'text', 'search', 'email', 'url', 'tel', 'password', 'number']);
 
 /**
- * Focus is in a text entry (Monaco, textarea, contenteditable, text-like input), anywhere,
+ * Focus is in a text entry (Monaco, textarea, contenteditable, text-like input, iframe), anywhere,
  * including the canvas block editor. Checkboxes, buttons and other inputs do not count.
  */
 export function isTextEntry(el: Element | null): boolean {
   if (!el || el === document.body) return false;
-  if (el.tagName === 'TEXTAREA') return true;
+  // Focus inside an iframe (canvas html block / form) is opaque from here: assume text entry.
+  if (el.tagName === 'TEXTAREA' || el.tagName === 'IFRAME') return true;
   if (el.tagName === 'INPUT') return TEXT_INPUT_TYPES.has(((el as HTMLInputElement).getAttribute('type') ?? '').toLowerCase());
   return (el as HTMLElement).isContentEditable || !!el.closest('.monaco-editor');
 }

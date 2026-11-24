@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useSyncExternalStore, type MutableRefObject } from 'react';
+import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useSyncExternalStore, type MutableRefObject } from 'react';
 import type { OpenFile } from '../types';
 import CanvasView from '../components/Canvas/CanvasView';
 import { createCanvasStore, type CanvasStore } from './canvasStore';
@@ -81,26 +81,43 @@ export function useCanvasController(opts: CanvasControllerOpts): CanvasControlle
   // Agent-touched canvases of the active workspace waiting for focus to leave a text entry.
   // Background workspaces keep theirs in the store (takeAgentTouched) until they become active.
   const deferredRef = useRef(new Map<string, Set<string>>());
+  // Canvases already auto-opened this session, per workspace: auto-open happens once per canvas,
+  // so later agent writes never reopen a tab the user closed or steal the active tab.
+  const autoOpenedRef = useRef(new Map<string, Set<string>>());
   const flushAutoOpen = useCallback(() => {
     const ws = optsRef.current.projectPath;
     const s = ws ? storesRef.current.get(ws) : undefined;
     if (!ws || !s) return;
-    let set = deferredRef.current.get(ws);
-    if (!set) deferredRef.current.set(ws, (set = new Set()));
-    for (const p of s.takeAgentTouched()) set.add(p);
-    if (set.size === 0 || isTextEntry(document.activeElement)) return;
-    const paths = [...set];
-    set.clear();
-    for (const p of paths) if (s.get(p)) optsRef.current.openFile(tabPathFor(p));
+    const setFor = (m: Map<string, Set<string>>) => {
+      let x = m.get(ws);
+      if (!x) m.set(ws, (x = new Set()));
+      return x;
+    };
+    const deferred = setFor(deferredRef.current);
+    const opened = setFor(autoOpenedRef.current);
+    for (const p of s.takeAgentTouched()) if (!opened.has(p)) deferred.add(p);
+    if (deferred.size === 0 || isTextEntry(document.activeElement)) return;
+    const paths = [...deferred];
+    deferred.clear();
+    for (const p of paths) {
+      if (!s.get(p) || opened.has(p)) continue;
+      opened.add(p);
+      optsRef.current.openFile(tabPathFor(p));
+    }
   }, [tabPathFor]);
 
   useEffect(() => {
     const onFocusIn = () => flushAutoOpen();
     // On focusout the old element is still active; check after focus settles.
-    const onFocusOut = () => setTimeout(flushAutoOpen, 0);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const onFocusOut = () => {
+      clearTimeout(timer);
+      timer = setTimeout(flushAutoOpen, 0);
+    };
     document.addEventListener('focusin', onFocusIn);
     document.addEventListener('focusout', onFocusOut);
     return () => {
+      clearTimeout(timer);
       document.removeEventListener('focusin', onFocusIn);
       document.removeEventListener('focusout', onFocusOut);
     };
@@ -112,6 +129,7 @@ export function useCanvasController(opts: CanvasControllerOpts): CanvasControlle
   /** Close every tab of `ws` showing the deleted canvas `key`. */
   const closeTabsIn = useCallback((ws: string, key: string) => {
     deferredRef.current.get(ws)?.delete(key);
+    autoOpenedRef.current.get(ws)?.delete(key);
     const o = optsRef.current;
     if (ws === o.projectPath) {
       const files = o.getOpenFiles(ws);
@@ -185,6 +203,7 @@ export function useCanvasController(opts: CanvasControllerOpts): CanvasControlle
       watchesRef.current.delete(ws);
       storesRef.current.delete(ws);
       deferredRef.current.delete(ws);
+      autoOpenedRef.current.delete(ws);
     }
     for (const ws of want) {
       const s = storesRef.current.get(ws);
@@ -216,25 +235,27 @@ export function useCanvasController(opts: CanvasControllerOpts): CanvasControlle
     return true;
   }, [store]);
 
-  return {
+  const { sendInFor, sendNow } = delivery;
+  // Stable between App renders so canvas tabs only re-render when canvas state changes.
+  return useMemo<CanvasController>(() => ({
     store,
     chatKey,
     agentStatus: chatBusy ? 'busy' : 'idle',
-    sendInFor: delivery.sendInFor,
-    sendNow: delivery.sendNow,
+    sendInFor,
+    sendNow,
     holdToggle,
     openCanvas,
     openSource,
     writeSource,
-  };
+  }), [store, chatKey, chatBusy, sendInFor, sendNow, holdToggle, openCanvas, openSource, writeSource]);
 }
 
-/** Code-panel body for a canvas tab in canvas view. */
-export function CanvasTab({ path }: { path: string }) {
+/** Code-panel body for a canvas tab in canvas view. Memoized: re-renders on path or controller change only. */
+export const CanvasTab = memo(function CanvasTab({ path }: { path: string }) {
   const ctl = useContext(CanvasContext);
   if (!ctl) return null;
   return <CanvasTabInner ctl={ctl} path={path} />;
-}
+});
 
 function CanvasTabInner({ ctl, path }: { ctl: CanvasController; path: string }) {
   const key = canvasKey(path);
