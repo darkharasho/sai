@@ -195,6 +195,18 @@ describe('useCanvasController', () => {
     expect(s.pendingMessage(TAB, 'c')).toContain('☑ "a"');
   });
 
+  it('I1: takeHeld hands the composer the held update for the active chat', async () => {
+    const { hook } = setup();
+    await flush();
+    const s = hook.result.current.store;
+    s.markDelivered(TAB, 'c');
+    s.setAutoSend(TAB, false);
+    await act(async () => { await s.userWrite(TAB, '- [x] a\n'); });
+    const held = hook.result.current.takeHeld();
+    expect(held).toContain('☑ "a"');
+    expect(s.hasPending(TAB, 'c')).toBe(false);
+  });
+
   it('ignores events for other projects', async () => {
     const { hook } = setup();
     await flush();

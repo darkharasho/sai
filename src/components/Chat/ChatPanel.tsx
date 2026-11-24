@@ -270,6 +270,11 @@ interface ChatPanelProps {
    * way the composer does (App's command palette). A busy chat queues it.
    */
   sendTextRef?: React.MutableRefObject<((text: string, opts?: { skipFileContext?: boolean }) => void) | null>;
+  /**
+   * Held canvas updates for this chat, marked delivered as they are taken (null = none).
+   * A message the user sends from the composer carries them first ("Hold" mode).
+   */
+  takeHeldCanvasUpdates?: () => string | null;
   terminalTabs?: TerminalTab[];
   onSlashCommandsUpdate?: (commands: SlashCommandInfo[]) => void;
   /**
@@ -545,7 +550,7 @@ const LOAD_MORE_CHUNK = 30; // messages to load when scrolling up
 const LOG_TURN_RECONCILE_MS = 20_000;
 
 
-export default function ChatPanel({ projectPath, overlayControl, permissionMode: defaultPermissionMode, onPermissionChange: onDefaultPermissionChange, effortLevel: defaultEffortLevel, onEffortChange: onDefaultEffortChange, modelChoice: defaultModelChoice, onModelChange: onDefaultModelChange, availableModels, claudeOverrideState: workspaceOverrideState, aiProvider, codexModel: defaultCodexModel, onCodexModelChange: onDefaultCodexModelChange, codexModels, onCodexModelsRefresh, codexPermission: defaultCodexPermission, onCodexPermissionChange: onDefaultCodexPermissionChange, codexEffort: defaultCodexEffort, onCodexEffortChange: onDefaultCodexEffortChange, geminiModel: defaultGeminiModel, onGeminiModelChange: onDefaultGeminiModelChange, geminiModels, geminiApprovalMode: defaultGeminiApprovalMode, onGeminiApprovalModeChange: onDefaultGeminiApprovalModeChange, geminiConversationMode: defaultGeminiConversationMode, onGeminiConversationModeChange: onDefaultGeminiConversationModeChange, kimiModel: defaultKimiModel, onKimiModelChange: onDefaultKimiModelChange, kimiModels, kimiApprovalMode: defaultKimiApprovalMode, onKimiApprovalModeChange: onDefaultKimiApprovalModeChange, onMessagesChange, onTurnComplete, onClaudeSessionId, onGeminiSessionId, onKimiSessionId, onCodexSessionId, activeFilePath, onFileOpen, isActive, isStreaming = false, awaitingQuestion = false, initialDraft, onDraftChange, initialContextItems, onContextItemsChange, sessionId, sendTextRef, terminalTabs = [], onSlashCommandsUpdate, claudeScope = 'chat', onOpenMcpPanel, renderToolCall, activeMetaRuntime, mentionInsertRef: mentionInsertRefProp, waiting = null, followUp = null, onDismissFollowUp, liveBackgroundTaskCount, onToggleBackgroundTasks, backgroundTasksOpen, taskUiEnabled = false, backgroundTasks, onStopBackgroundTask, claudeSessionId }: ChatPanelProps) {
+export default function ChatPanel({ projectPath, overlayControl, permissionMode: defaultPermissionMode, onPermissionChange: onDefaultPermissionChange, effortLevel: defaultEffortLevel, onEffortChange: onDefaultEffortChange, modelChoice: defaultModelChoice, onModelChange: onDefaultModelChange, availableModels, claudeOverrideState: workspaceOverrideState, aiProvider, codexModel: defaultCodexModel, onCodexModelChange: onDefaultCodexModelChange, codexModels, onCodexModelsRefresh, codexPermission: defaultCodexPermission, onCodexPermissionChange: onDefaultCodexPermissionChange, codexEffort: defaultCodexEffort, onCodexEffortChange: onDefaultCodexEffortChange, geminiModel: defaultGeminiModel, onGeminiModelChange: onDefaultGeminiModelChange, geminiModels, geminiApprovalMode: defaultGeminiApprovalMode, onGeminiApprovalModeChange: onDefaultGeminiApprovalModeChange, geminiConversationMode: defaultGeminiConversationMode, onGeminiConversationModeChange: onDefaultGeminiConversationModeChange, kimiModel: defaultKimiModel, onKimiModelChange: onDefaultKimiModelChange, kimiModels, kimiApprovalMode: defaultKimiApprovalMode, onKimiApprovalModeChange: onDefaultKimiApprovalModeChange, onMessagesChange, onTurnComplete, onClaudeSessionId, onGeminiSessionId, onKimiSessionId, onCodexSessionId, activeFilePath, onFileOpen, isActive, isStreaming = false, awaitingQuestion = false, initialDraft, onDraftChange, initialContextItems, onContextItemsChange, sessionId, sendTextRef, takeHeldCanvasUpdates, terminalTabs = [], onSlashCommandsUpdate, claudeScope = 'chat', onOpenMcpPanel, renderToolCall, activeMetaRuntime, mentionInsertRef: mentionInsertRefProp, waiting = null, followUp = null, onDismissFollowUp, liveBackgroundTaskCount, onToggleBackgroundTasks, backgroundTasksOpen, taskUiEnabled = false, backgroundTasks, onStopBackgroundTask, claudeSessionId }: ChatPanelProps) {
   // The chat renders from the durable main-process log (useChatLog): every
   // provider stamps the chat id as scope; the legacy 'chat' scope stands for
   // the session main binds it to (bindLegacyScope below).
@@ -2056,7 +2061,8 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode:
   // `opts.queue` (Ctrl+Enter) never interrupts; `opts.now` (send-now from the
   // queue strip) always does.
   // `opts.label` is the short text the queue strip shows (Ctrl+Enter).
-  const handleSend = async (text: string, images?: string[], opts?: { taskCard?: TaskCard | null; queue?: boolean; now?: boolean; label?: string; skipFileContext?: boolean }) => {
+  // `opts.programmatic`: sent through sendTextRef (palette, canvas delivery), not typed by the user.
+  const handleSend = async (text: string, images?: string[], opts?: { taskCard?: TaskCard | null; queue?: boolean; now?: boolean; label?: string; skipFileContext?: boolean; programmatic?: boolean }) => {
     // Slash commands must reach the command handler as typed, so they are never redirected.
     const directCard = taskUiEnabled && !text.trim().startsWith('/') && opts?.taskCard?.source === 'declared' ? opts.taskCard : null;
     // Handle built-in commands locally
@@ -2135,6 +2141,11 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode:
       );
     }
 
+    // Held canvas updates ride the user's next typed message, ahead of it. Taken (and marked
+    // delivered) synchronously right before dispatch, so no other path can send them too.
+    const held = !opts?.programmatic && !text.trim().startsWith('/') ? takeHeldCanvasUpdates?.() ?? null : null;
+    const userText = text;
+    text = held ? `${held}\n\n${text}` : text;
     const builtPrompt = activeFilePath && fileContextEnabled && !opts?.skipFileContext ? `[File: ${activeFilePath}]\n\n${text}` : text;
     const prompt = directCard ? directAtTask(builtPrompt, directCard.title) : builtPrompt;
     const sent = await sendToLog(text, {
@@ -2143,7 +2154,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode:
       ...(directCard ? { taskId: directCard.tag } : {}),
     });
     // The composer already cleared: give the text back so nothing is lost.
-    if (!sent) draftRestoreRef.current?.(text);
+    if (!sent) draftRestoreRef.current?.(userText);
   };
 
   const handleCancelWait = () => {
@@ -2225,7 +2236,7 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode:
   useEffect(() => {
     if (!sendTextRef) return;
     // Like the old palette queue: behind a running turn, never interrupting it.
-    const send = (text: string, o?: { skipFileContext?: boolean }) => { void handleSendRef.current(text, undefined, { queue: true, skipFileContext: o?.skipFileContext }); };
+    const send = (text: string, o?: { skipFileContext?: boolean }) => { void handleSendRef.current(text, undefined, { queue: true, skipFileContext: o?.skipFileContext, programmatic: true }); };
     sendTextRef.current = send;
     return () => { if (sendTextRef.current === send) sendTextRef.current = null; };
   }, [sendTextRef]);

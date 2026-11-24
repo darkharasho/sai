@@ -3390,6 +3390,7 @@ export default function App() {
                   onContextItemsChange={(items: any[]) => handleContextItemsChange(wsPath, items)}
                   overlayControl={overlayEnabled ? { mode: overlayMode, onChange: handleOverlayModeChange } : undefined}
                   sendTextRef={wsPath === activeProjectPath ? chatSendTextRef : undefined}
+                  takeHeldCanvasUpdates={wsPath === activeProjectPath ? canvas.takeHeld : undefined}
                   sessionId={ws.activeSession.id}
                   taskUiEnabled={taskUiEnabled}
                   backgroundTasks={aiProvider === 'claude' ? selectSidebarTasks(backgroundTasksByScope, `${wsPath}:${ws.activeSession.id}`) : undefined}

@@ -12,6 +12,8 @@ export interface CanvasController {
   agentStatus: 'idle' | 'busy';
   sendInFor(path: string): number | null;
   sendNow(path: string): void;
+  /** Held updates for the active chat, marked delivered: the composer prepends them to the user's message. */
+  takeHeld(): string | null;
   holdToggle(path: string): void;
   /** Open (or focus) the canvas tab in canvas view. */
   openCanvas(path: string): void;
@@ -242,7 +244,7 @@ export function useCanvasController(opts: CanvasControllerOpts): CanvasControlle
     return true;
   }, [store]);
 
-  const { sendInFor, sendNow } = delivery;
+  const { sendInFor, sendNow, takeHeld } = delivery;
   // Stable between App renders so canvas tabs only re-render when canvas state changes.
   return useMemo<CanvasController>(() => ({
     store,
@@ -250,11 +252,12 @@ export function useCanvasController(opts: CanvasControllerOpts): CanvasControlle
     agentStatus: chatBusy ? 'busy' : 'idle',
     sendInFor,
     sendNow,
+    takeHeld,
     holdToggle,
     openCanvas,
     openSource,
     writeSource,
-  }), [store, chatKey, chatBusy, sendInFor, sendNow, holdToggle, openCanvas, openSource, writeSource]);
+  }), [store, chatKey, chatBusy, sendInFor, sendNow, takeHeld, holdToggle, openCanvas, openSource, writeSource]);
 }
 
 /** Code-panel body for a canvas tab in canvas view. Memoized: re-renders on path or controller change only. */

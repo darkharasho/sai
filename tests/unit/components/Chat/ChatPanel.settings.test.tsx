@@ -327,6 +327,35 @@ describe('ChatPanel: file-context prefix on programmatic sends', () => {
   });
 });
 
+describe('ChatPanel: held canvas updates ride the next user message', () => {
+  it('a composer send prepends held updates (update, blank line, user text)', async () => {
+    const takeHeldCanvasUpdates = vi.fn(() => '[Canvas update] .sai/canvas/p.md\n- ☑ "a"');
+    await mount({ takeHeldCanvasUpdates } as any);
+    await act(async () => { await inputProps.onSend('next step?'); });
+    await flushChatlog();
+    expect(takeHeldCanvasUpdates).toHaveBeenCalledTimes(1);
+    expect(log.commands('send')[0].text).toBe('[Canvas update] .sai/canvas/p.md\n- ☑ "a"\n\nnext step?');
+  });
+
+  it('nothing held: the message is unchanged', async () => {
+    await mount({ takeHeldCanvasUpdates: () => null } as any);
+    await act(async () => { await inputProps.onSend('hi'); });
+    await flushChatlog();
+    expect(log.commands('send')[0].text).toBe('hi');
+  });
+
+  it('slash commands and programmatic sends never take held updates', async () => {
+    const takeHeldCanvasUpdates = vi.fn(() => '[Canvas update] x');
+    const sendTextRef: { current: ((t: string, o?: { skipFileContext?: boolean }) => void) | null } = { current: null };
+    await mount({ takeHeldCanvasUpdates, sendTextRef } as any);
+    await act(async () => { await inputProps.onSend('/review'); });
+    await act(async () => { sendTextRef.current!('[Canvas update] y', { skipFileContext: true }); });
+    await flushChatlog();
+    expect(takeHeldCanvasUpdates).not.toHaveBeenCalled();
+    expect(log.commands('send').map((c: any) => c.text)).toEqual(['/review', '[Canvas update] y']);
+  });
+});
+
 describe('ChatPanel: command palette sends', () => {
   it('palette /compact mid-turn queues behind the running turn instead of compacting now', async () => {
     const sendTextRef: { current: ((t: string) => void) | null } = { current: null };

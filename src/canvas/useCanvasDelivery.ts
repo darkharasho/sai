@@ -21,6 +21,11 @@ export interface CanvasDelivery {
   sendInFor(path: string): number | null;
   /** Send now; when the chat is busy, send as soon as it goes idle (no idle window). */
   sendNow(path: string): void;
+  /**
+   * The user is sending a normal message to the active chat: take every held (Hold mode) update
+   * that targets it, marked delivered now, for the caller to prepend. Null when none.
+   */
+  takeHeld(): string | null;
 }
 
 /** After a failed send, wait this long (or for a new send/chatKey) before auto-retrying. */
@@ -137,6 +142,22 @@ export function useCanvasDelivery({ store, chatKey, chatBusy, send }: CanvasDeli
     forcedRef.current.add(path);
   }, [deliver]);
 
+  const takeHeld = useCallback((): string | null => {
+    const { store: s, chatKey: key } = optsRef.current;
+    if (!key) return null;
+    const out: string[] = [];
+    for (const c of s.list()) {
+      // Auto-send canvases deliver themselves; other chats' canvases are not this message's business.
+      if (c.autoSend || !s.isAutoTarget(c.path, key)) continue;
+      const msg = s.pendingMessage(c.path, key);
+      if (!msg) continue;
+      out.push(msg);
+      s.markDelivered(c.path, key);
+      forcedRef.current.delete(c.path);
+    }
+    return out.length > 0 ? out.join('\n\n') : null;
+  }, []);
+
   // Stable while the countdown values are unchanged, so the canvas context stays memoized.
   const sig = [...perPath].map(([p, n]) => `${p}=${n}`).join('\n');
   const sendInFor = useMemo(() => {
@@ -144,5 +165,5 @@ export function useCanvasDelivery({ store, chatKey, chatBusy, send }: CanvasDeli
     return (path: string) => m.get(path) ?? null;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sig]);
-  return { sendIn, sendInFor, sendNow };
+  return { sendIn, sendInFor, sendNow, takeHeld };
 }

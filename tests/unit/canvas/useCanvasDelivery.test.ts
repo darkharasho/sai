@@ -255,4 +255,40 @@ describe('useCanvasDelivery', () => {
     expect(send).toHaveBeenCalledTimes(1);
     expect(store.hasPending(A, 'c')).toBe(true);
   });
+
+  it('I1: takeHeld returns held updates for the active chat and marks them delivered', async () => {
+    const store = await makeStore();
+    store.setAutoSend(A, false);
+    const { send, hook } = setup(store);
+    await act(async () => { await store.userWrite(A, '- [x] a\n'); });
+    await act(async () => { await store.userWrite(B, '- [x] b\n'); });
+    let held: string | null = null;
+    act(() => { held = hook.result.current.takeHeld(); });
+    // Only the held canvas; the auto-send one keeps its own countdown.
+    expect(held).toContain('a.md');
+    expect(held).toContain('☑ "a"');
+    expect(held).not.toContain('b.md');
+    expect(store.hasPending(A, 'c')).toBe(false);
+    expect(store.hasPending(B, 'c')).toBe(true);
+    act(() => { vi.advanceTimersByTime(5000); });
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0][0]).toContain('b.md');
+    let again: string | null = 'x';
+    act(() => { again = hook.result.current.takeHeld(); });
+    expect(again).toBeNull();
+  });
+
+  it('I1: takeHeld joins several held canvases with a blank line; nothing without a chat', async () => {
+    const store = await makeStore();
+    store.setAutoSend(A, false);
+    store.setAutoSend(B, false);
+    const { hook, props } = setup(store);
+    await act(async () => { await store.userWrite(A, '- [x] a\n'); });
+    await act(async () => { await store.userWrite(B, '- [x] b\n'); });
+    hook.rerender({ ...props, chatKey: null });
+    expect(hook.result.current.takeHeld()).toBeNull();
+    hook.rerender({ ...props });
+    const held = hook.result.current.takeHeld()!;
+    expect(held.split('\n\n[Canvas update]')).toHaveLength(2);
+  });
 });
