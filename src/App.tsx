@@ -85,7 +85,7 @@ import { useChatCanvasSidebar } from './canvas/useChatCanvasSidebar';
 import { deriveChatCanvasTouches } from './canvas/chatCanvases';
 import { CanvasSidebar } from './components/Canvas/CanvasSidebar';
 import { expandEditorPanel, type PanelId } from './lib/panelLayout';
-import { canvasLiveness, isCanvasFile, workspaceAgentLive, workspaceLiveChats } from './canvas/canvasFiles';
+import { canvasLiveness, isCanvasFile, isProjectCanvas, workspaceAgentLive, workspaceLiveChats } from './canvas/canvasFiles';
 
 interface ScopeReconcileBridge {
   claudeReconcileScope?: (projectPath: string, scope?: string) => void;
@@ -2508,6 +2508,13 @@ export default function App() {
   // user never loses sight of the conversation mid-turn.
   const handleFileOpen = useCallback(async (filePath: string, line?: number, canvasOpts?: { canvasSource?: boolean; auto?: boolean }) => {
     if (!activeProjectPath) return;
+    // A plain open of this project's canvas (explorer, chat link) shows it in the chat's canvas
+    // sidebar, which joins it to the chat's tabs. Source view and jumps to a line stay in the editor.
+    if (!canvasOpts && line == null && expandedRef.current.includes('chat') && canvasOpenRef.current
+      && isProjectCanvas(activeProjectPath, filePath)) {
+      canvasOpenRef.current(filePath);
+      return;
+    }
     try {
       if (isImageFile(filePath) || isModelFile(filePath)) {
         const { mtime } = await window.sai.fsMtime(filePath) as { mtime: number };
@@ -4233,6 +4240,7 @@ export default function App() {
               width={canvasSidebar.width}
               onToggle={canvasSidebar.toggle}
               onSelect={canvasSidebar.select}
+              onRemove={canvasSidebar.remove}
               onResize={canvasSidebar.setWidth}
             />
             </CanvasContext.Provider>

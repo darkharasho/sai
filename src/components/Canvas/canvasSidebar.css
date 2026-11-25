@@ -41,13 +41,28 @@ body.canvas-sidebar-resizing { cursor: col-resize; user-select: none; }
   display: flex; align-items: center; gap: 2px; padding: 6px 6px 6px 8px; flex-shrink: 0;
   border-bottom: 1px solid var(--border-hairline); overflow-x: auto; scrollbar-width: none;
 }
-.canvas-sidebar__tab {
-  display: inline-flex; align-items: center; gap: 6px; max-width: 180px; min-width: 0;
-  padding: 4px 9px; border: none; border-radius: 6px; background: none; cursor: pointer;
-  color: var(--text-muted); font: inherit; font-size: 12px; flex-shrink: 0;
+.canvas-sidebar__tabwrap {
+  position: relative; display: inline-flex; align-items: center; flex-shrink: 0; max-width: 180px; min-width: 0;
+  border-radius: 6px;
 }
-.canvas-sidebar__tab:hover { color: var(--text); background: var(--surface-2); }
-.canvas-sidebar__tab--on { color: var(--text); background: var(--surface-3); }
+.canvas-sidebar__tabwrap:hover { background: var(--surface-2); }
+.canvas-sidebar__tabwrap--on, .canvas-sidebar__tabwrap--on:hover { background: var(--surface-3); }
+.canvas-sidebar__tab {
+  display: inline-flex; align-items: center; gap: 6px; min-width: 0;
+  padding: 4px 9px; border: none; border-radius: 6px; background: none; cursor: pointer;
+  color: var(--text-muted); font: inherit; font-size: 12px;
+}
+.canvas-sidebar__tabwrap:hover .canvas-sidebar__tab, .canvas-sidebar__tab--on { color: var(--text); }
+/* The close button shows on hover / the selected tab, taking the label's right padding. */
+.canvas-sidebar__tabclose {
+  display: none; align-items: center; justify-content: center; width: 16px; height: 16px;
+  margin: 0 4px 0 -5px; padding: 0; border: none; border-radius: 4px; flex-shrink: 0;
+  background: none; color: var(--text-muted); cursor: pointer;
+}
+.canvas-sidebar__tabwrap:hover .canvas-sidebar__tabclose,
+.canvas-sidebar__tabwrap--on .canvas-sidebar__tabclose,
+.canvas-sidebar__tabclose:focus-visible { display: inline-flex; }
+.canvas-sidebar__tabclose:hover { color: var(--text); background: var(--surface-4); }
 .canvas-sidebar__tablabel { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .canvas-sidebar__tabdot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); flex-shrink: 0; animation: canvas-sidebar-blink 1.4s ease-in-out infinite; }
 @keyframes canvas-sidebar-blink { 50% { opacity: 0.3; } }

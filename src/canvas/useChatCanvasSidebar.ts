@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { reconcileChatCanvases, showCanvas, type ChatCanvasUi, type SavedChatCanvasUi } from './canvasSidebarState';
+import { reconcileChatCanvases, removeCanvas, showCanvas, visibleCanvases, type ChatCanvasUi, type SavedChatCanvasUi } from './canvasSidebarState';
 
 const STORAGE_KEY = 'sai.canvasSidebar.v1';
 const MAX_SAVED_CHATS = 200;
@@ -24,6 +24,8 @@ function save(s: Saved) {
   if (keys.length > MAX_SAVED_CHATS) for (const k of keys.slice(0, keys.length - MAX_SAVED_CHATS)) delete s.chats[k];
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(s)); } catch { /* quota: not worth failing over */ }
 }
+
+const EMPTY: ChatCanvasUi = { open: false, selected: null, known: [], added: [], removed: [] };
 
 const sameList = (a: readonly string[] | undefined, b: readonly string[]) =>
   !!a && a.length === b.length && a.every((x, i) => x === b[i]);
@@ -66,8 +68,12 @@ export function useChatCanvasSidebar(chatKey: string | null) {
   }, [chatKey]);
 
   const show = useCallback((path: string) => update((p) => showCanvas(p, path)), [update]);
-  const select = useCallback((path: string) => update((p) => ({ ...(p ?? { known: [] }), open: true, selected: path })), [update]);
-  const toggle = useCallback(() => update((p) => ({ ...(p ?? { selected: null, known: [] }), open: !p?.open })), [update]);
+  const select = useCallback((path: string) => update((p) => ({ ...(p ?? EMPTY), open: true, selected: path })), [update]);
+  const toggle = useCallback(() => update((p) => ({ ...(p ?? EMPTY), open: !p?.open })), [update]);
+  const remove = useCallback((path: string) => update((p) => {
+    const list = (chatKey && listsRef.current.get(chatKey)) || [];
+    return removeCanvas(p, path, visibleCanvases(list, p));
+  }), [update, chatKey]);
 
   // Persist the on-screen chat's open/selected state and the shared width.
   const ui = chatKey ? uis.get(chatKey) : undefined;
@@ -76,14 +82,19 @@ export function useChatCanvasSidebar(chatKey: string | null) {
     s.width = width;
     if (chatKey && ui) {
       delete s.chats[chatKey];
-      s.chats[chatKey] = { open: ui.open, selected: ui.selected };
+      s.chats[chatKey] = {
+        open: ui.open,
+        selected: ui.selected,
+        ...(ui.added.length > 0 && { added: ui.added }),
+        ...(ui.removed.length > 0 && { removed: ui.removed }),
+      };
     }
     save(s);
-  }, [chatKey, ui?.open, ui?.selected, width]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [chatKey, ui?.open, ui?.selected, ui?.added, ui?.removed, width]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return {
-    /** The on-screen chat's canvases, in first-touch order. */
-    paths: (chatKey && lists.get(chatKey)) || [],
+    /** The on-screen chat's canvases (its tabs): transcript order, then ones the user showed. */
+    paths: visibleCanvases((chatKey && lists.get(chatKey)) || [], ui),
     open: ui?.open ?? false,
     selected: ui?.selected ?? null,
     width,
@@ -92,5 +103,6 @@ export function useChatCanvasSidebar(chatKey: string | null) {
     show,
     select,
     toggle,
+    remove,
   };
 }
