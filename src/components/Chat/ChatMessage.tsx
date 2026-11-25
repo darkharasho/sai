@@ -6,7 +6,9 @@ import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
 import remarkGfm from 'remark-gfm';
 import 'highlight.js/styles/monokai.css';
-import { Check, ChevronRight, Circle, Copy, Eraser, RotateCw, Terminal, TerminalSquare, X } from 'lucide-react';
+import { Check, ChevronRight, Circle, Copy, Eraser, PencilLine, RotateCw, Terminal, TerminalSquare, X } from 'lucide-react';
+import { splitCanvasUpdates } from '../../canvas/canvasDiff';
+import './CanvasUpdateNote.css';
 import { motion, AnimatePresence } from 'motion/react';
 import ToolCallCard from './ToolCallCard';
 import GitHubWatcherCard from './GitHubWatcherCard';
@@ -370,9 +372,13 @@ function ChatMessage({
     && !(typeof message.content === 'string' ? message.content.trim() : message.content)
     && !message.reasoning && !(message.images && message.images.length > 0);
   const dotColor = getDotColor(message.role);
-  const userAttachments = message.role === 'user'
-    ? parseUserAttachments(typeof message.content === 'string' ? message.content : String(message.content ?? ''))
-    : NO_ATTACHMENTS;
+  // Canvas updates (the user's canvas edits, sent to the agent) show as a quiet note, not raw text.
+  const canvasSplit = message.role === 'user'
+    ? splitCanvasUpdates(typeof message.content === 'string' ? message.content : String(message.content ?? ''))
+    : null;
+  const canvasUpdatePaths = canvasSplit?.relPaths ?? [];
+  const canvasUpdateOnly = canvasUpdatePaths.length > 0 && !canvasSplit!.rest.trim() && !(message.images && message.images.length > 0);
+  const userAttachments = canvasSplit ? parseUserAttachments(canvasSplit.rest) : NO_ATTACHMENTS;
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const [errorDetailsOpen, setErrorDetailsOpen] = useState(false);
   const [errorDetailsCopied, setErrorDetailsCopied] = useState(false);
@@ -862,6 +868,7 @@ function ChatMessage({
   // nothing else renders nothing (after all hooks, so hook order stays stable
   // as tool calls stream in).
   if (hiddenTaskOnly) return null;
+  if (canvasUpdateOnly) return <CanvasUpdateNote relPaths={canvasUpdatePaths} projectPath={projectPath} onOpen={onFileOpen} />;
 
   return (
     <>
@@ -927,6 +934,9 @@ function ChatMessage({
             ? <SaiLogo mode="static" size={16} className="chat-msg-dot chat-msg-sai" />
             : <Circle size={8} fill={dotColor} stroke={dotColor} className="chat-msg-dot" />}
           <div className="chat-msg-body">
+            {canvasUpdatePaths.length > 0 && (
+              <CanvasUpdateNote relPaths={canvasUpdatePaths} projectPath={projectPath} onOpen={onFileOpen} inline />
+            )}
             {userAttachments.files.length > 0 && (
               <div className="chat-msg-file-chips">
                 {userAttachments.files.map((p, i) => (
@@ -1325,3 +1335,31 @@ export default memo(ChatMessage, (prev, next) =>
   prev.watcherUrlAllowlist === next.watcherUrlAllowlist &&
   prev.taskLabels?.sig === next.taskLabels?.sig
 );
+
+/** The user's canvas edits, sent to the agent: one muted line naming the canvases; click to show one. */
+function CanvasUpdateNote({ relPaths, projectPath, onOpen, inline }: {
+  relPaths: string[];
+  projectPath?: string;
+  onOpen?: (path: string) => void;
+  inline?: boolean;
+}) {
+  const names = [...new Set(relPaths)];
+  return (
+    <div className={`chat-canvas-note${inline ? ' chat-canvas-note--inline' : ''}`} data-testid="canvas-update-note">
+      <PencilLine size={12} aria-hidden />
+      <span>{inline ? 'with your canvas edits to' : 'Shared your canvas edits to'}</span>
+      {names.map((rel, i) => {
+        const label = rel.replace(/^.*\//, '').replace(/\.md$/, '');
+        const abs = projectPath && !rel.startsWith('/') ? `${projectPath.replace(/\/+$/, '')}/${rel}` : rel;
+        return (
+          <React.Fragment key={rel}>
+            {i > 0 && <span>,</span>}
+            {onOpen
+              ? <button type="button" className="chat-canvas-note__name" onClick={() => onOpen(abs)}>{label}</button>
+              : <span className="chat-canvas-note__name">{label}</span>}
+          </React.Fragment>
+        );
+      })}
+    </div>
+  );
+}

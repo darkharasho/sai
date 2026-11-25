@@ -56,6 +56,21 @@ describe('ChatMessage', () => {
     expect(container.textContent).toContain('RAM 85% used.');
   });
 
+  it('a canvas update shows as a quiet note, not the raw hook text; clicking opens the canvas', () => {
+    const hook = '[Canvas update] .sai/canvas/shop.md\nThe user edited the canvas:\n- ticked "one"\nRe-read the file for full context.';
+    const onFileOpen = vi.fn();
+    const { container, unmount } = render(<ChatMessage message={makeMessage({ role: 'user', content: hook })} projectPath="/p" onFileOpen={onFileOpen} />);
+    expect(container.textContent).not.toContain('[Canvas update]');
+    expect(container.querySelector('.chat-msg-user')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'shop' }));
+    expect(onFileOpen).toHaveBeenCalledWith('/p/.sai/canvas/shop.md');
+    unmount();
+    const { container: c2 } = render(<ChatMessage message={makeMessage({ role: 'user', content: `${hook}\n\nlooks good` })} />);
+    expect(c2.textContent).toContain('looks good');
+    expect(c2.textContent).toContain('with your canvas edits to');
+    expect(c2.textContent).not.toContain('Re-read the file');
+  });
+
   it('renders without crashing', () => {
     const msg = makeMessage();
     render(<ChatMessage message={msg} />);

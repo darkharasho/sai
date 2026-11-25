@@ -189,3 +189,24 @@ export function buildCanvasUpdateMessage(input: {
   out.push('Re-read the file for full context.');
   return out.join('\n');
 }
+
+const UPDATE_HEAD = '[Canvas update] ';
+const UPDATE_TAIL = '\nRe-read the file for full context.';
+
+/**
+ * Split the canvas updates (buildCanvasUpdateMessage blocks) off the front of a user message, so
+ * the chat can show them as a quiet note instead of the raw hook text. `relPaths` in order;
+ * `rest` is what the user typed (empty for an update sent on its own).
+ */
+export function splitCanvasUpdates(text: string): { relPaths: string[]; rest: string } {
+  const relPaths: string[] = [];
+  let rest = text;
+  while (rest.startsWith(UPDATE_HEAD)) {
+    const end = rest.indexOf(UPDATE_TAIL);
+    if (end < 0) break;
+    const nl = rest.indexOf('\n');
+    relPaths.push(rest.slice(UPDATE_HEAD.length, nl < 0 ? undefined : nl).trim());
+    rest = rest.slice(end + UPDATE_TAIL.length).replace(/^\s+/, '');
+  }
+  return relPaths.length ? { relPaths, rest } : { relPaths, rest: text };
+}

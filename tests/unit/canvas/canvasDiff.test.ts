@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { describeUserEdits, buildCanvasUpdateMessage } from '../../../src/canvas/canvasDiff';
+import { describeUserEdits, buildCanvasUpdateMessage, splitCanvasUpdates } from '../../../src/canvas/canvasDiff';
 
 describe('describeUserEdits', () => {
   it('ticks', () => {
@@ -153,5 +153,20 @@ describe('buildCanvasUpdateMessage', () => {
   it('shows the emit count when coalesced', () => {
     const msg = buildCanvasUpdateMessage({ relPath, lines: [], emits: [{ label: 'picker', data: 5, count: 37 }] });
     expect(msg).toContain('- html "picker" sent: 5 (×37)');
+  });
+});
+
+describe('splitCanvasUpdates', () => {
+  const a = buildCanvasUpdateMessage({ relPath: '.sai/canvas/shop.md', lines: ['ticked "one"'], emits: [] });
+  const b = buildCanvasUpdateMessage({ relPath: '.sai/canvas/plan.md', lines: [], emits: [], fullContent: '# Plan\n\n- [ ] x\n' });
+
+  it('splits held updates off the front of a typed message', () => {
+    expect(splitCanvasUpdates(`${a}\n\n${b}\n\nlooks good, go on`)).toEqual({ relPaths: ['.sai/canvas/shop.md', '.sai/canvas/plan.md'], rest: 'looks good, go on' });
+  });
+
+  it('an update sent on its own leaves nothing; plain text is untouched', () => {
+    expect(splitCanvasUpdates(a)).toEqual({ relPaths: ['.sai/canvas/shop.md'], rest: '' });
+    expect(splitCanvasUpdates('hello [Canvas update] x')).toEqual({ relPaths: [], rest: 'hello [Canvas update] x' });
+    expect(splitCanvasUpdates('[Canvas update] x\nno tail')).toEqual({ relPaths: [], rest: '[Canvas update] x\nno tail' });
   });
 });
