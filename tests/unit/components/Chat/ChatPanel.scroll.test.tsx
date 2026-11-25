@@ -163,6 +163,19 @@ describe('ChatPanel scroll-follow', () => {
     expect(screen.queryByTestId('follow-btn')).toBeNull();
   });
 
+  it('an upward layout shift right after the page loads keeps following (no input has happened yet)', async () => {
+    const now = vi.spyOn(performance, 'now').mockReturnValue(200);
+    try {
+      const { el, g } = await mountScroller();
+      g.height = 1100;
+      scrollTo(el, g, 431);
+      g.writes.length = 0;
+      grow(g, 1200);
+      expect(g.writes.length).toBeGreaterThan(0);
+      expect(screen.queryByTestId('follow-btn')).toBeNull();
+    } finally { now.mockRestore(); }
+  });
+
   it('dragging the scrollbar up releases follow', async () => {
     const { el, g } = await mountScroller();
     fireEvent.pointerDown(el);

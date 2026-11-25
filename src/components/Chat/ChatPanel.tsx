@@ -841,11 +841,11 @@ export default function ChatPanel({ projectPath, overlayControl, permissionMode:
   const tweenCancelRef = useRef<(() => boolean) | null>(null);
   // Phone: when a finger last touched the chat (Infinity while one is down).
   // Only a scroll near a touch is the user's; anything else is layout.
-  const lastTouchRef = useRef(0);
+  const lastTouchRef = useRef(-Infinity);
   // Desktop: when a wheel tick or scroll key last reached the chat (Infinity while
   // a pointer is held on it, e.g. dragging the scrollbar). Cards re-laying out and
   // the browser's scroll anchoring move scrollTop up with no input at all.
-  const lastScrollInputRef = useRef(0);
+  const lastScrollInputRef = useRef(-Infinity);
   const lastScrollTopRef = useRef(0);
   const lastScrollMaxRef = useRef(0);
   // Set by "Load earlier": the layout effect below keeps the viewport on the same message after the prepend.
