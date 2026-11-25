@@ -3349,7 +3349,7 @@ export default function App() {
                     globalEffort: effortLevel,
                   }}
                   availableModels={claudeModels}
-                  renderToolCall={renderToolCallFor(projectPath, (p) => { void handleFileOpenRef.current?.(p); })}
+                  renderToolCall={renderToolCallFor(projectPath, (p) => { void handleFileOpenRef.current?.(p); }, (name) => canvasOpenRef.current?.(`${projectPath}/.sai/canvas/${name}.md`))}
                   aiProvider={aiProvider}
                   codexModel={codexModel}
                   onCodexModelChange={handleCodexModelChange}

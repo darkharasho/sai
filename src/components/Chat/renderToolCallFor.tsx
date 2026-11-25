@@ -1,18 +1,23 @@
 import type { ReactNode } from 'react';
 import type { ToolCall } from '../../types';
 import { RenderToolCallCard } from './RenderToolCallCard';
+import { CanvasToolCard, isCanvasToolName } from './CanvasToolCard';
 
 /**
  * ChatPanel's `renderToolCall` for a workspace: SAI render-tool and
  * confirm/choose calls mount a RenderToolCallCard; anything else returns null
- * (the default ToolCallCard). Shared by the desktop App and the phone ChatHost.
+ * (the default ToolCallCard). `sai_canvas` calls get a one-line card; with `onOpenCanvas`
+ * (desktop) clicking it shows that canvas in the sidebar. Shared by the desktop App and the
+ * phone ChatHost.
  */
 export function renderToolCallFor(
   cwd: string,
   onOpenFile: (path: string) => void,
+  onOpenCanvas?: (name: string) => void,
 ): (tc: ToolCall, defaultExpanded: boolean, seedGrow?: boolean, ctx?: { isNewestModel: boolean }) => ReactNode | null {
   return (tc, _defaultExpanded, seedGrow, ctx) => {
     const n = tc.name || '';
+    if (isCanvasToolName(n)) return <CanvasToolCard tc={tc} onOpenCanvas={onOpenCanvas} />;
     if (
       n.endsWith('sai_render_html') ||
       n.endsWith('sai_render_component') ||

@@ -1,0 +1,13 @@
+.canvas-toolcard {
+  display: flex; align-items: center; gap: 7px; max-width: 100%; min-width: 0;
+  margin: 4px 0; padding: 5px 10px; border: 1px solid var(--border-hairline); border-radius: 8px;
+  background: var(--surface-1); color: var(--text-muted); font: inherit; font-size: 12.5px; text-align: left;
+}
+.canvas-toolcard--link { cursor: pointer; }
+.canvas-toolcard--link:hover { background: var(--surface-2); color: var(--text); }
+.canvas-toolcard__icon { flex-shrink: 0; color: var(--accent); }
+.canvas-toolcard__icon--err { color: #f87171; }
+.canvas-toolcard__verb { flex-shrink: 0; }
+.canvas-toolcard__title { color: var(--text); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.canvas-toolcard__meta { flex-shrink: 0; font-size: 11.5px; opacity: 0.8; }
+.canvas-toolcard__err { color: #f87171; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
