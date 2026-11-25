@@ -131,6 +131,16 @@ test.describe('live canvas', () => {
     // The chat that wrote the canvas already knows it: it gets the tick as a diff line, not the whole file.
     expect(delivered).toContain('- ☑ "Launch game"');
     expect(delivered).not.toContain('sharing this canvas');
+
+    // The chat shows the delivery as a quiet note, not the raw hook text.
+    await expect(window.getByTestId('canvas-update-note')).toBeVisible();
+    await expect(window.locator('.chat-msg-user', { hasText: '[Canvas update]' })).toHaveCount(0);
+
+    // Collapsed: the rail is an icon plus one progress ring per canvas.
+    await window.getByRole('button', { name: 'Collapse canvas' }).first().click();
+    await expect(window.locator('.canvas-sidebar__panel')).toHaveCount(0);
+    await expect(window.locator('.canvas-sidebar__icon')).toBeVisible();
+    await window.locator('.tm-views-wrapper').screenshot({ path: '/var/tmp/sai-dogfood/shots/rail-collapsed.png' }).catch(() => {});
   });
 
   test('redesign: section cards, a failed item, and stat tiles only with a stats block', async ({ window }) => {

@@ -1,5 +1,5 @@
 import { useContext, useEffect, useReducer, useRef } from 'react';
-import { PanelRightClose, X } from 'lucide-react';
+import { PanelRight, PanelRightClose, X } from 'lucide-react';
 import { CanvasContext, CanvasTab } from '../../canvas/CanvasContext';
 import { checklistTotals } from '../../canvas/canvasStats';
 import { canvasTitle } from '../../lib/canvasName';
@@ -131,16 +131,22 @@ export function CanvasSidebar({ paths, open, selected, width, onToggle, onSelect
         onClick={onToggle}
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggle(); } }}
       >
+        <span className="canvas-sidebar__icon" aria-hidden>
+          {open ? <PanelRightClose size={14} /> : <PanelRight size={14} />}
+        </span>
         {items.map((it) => {
           const { done, failed, total } = it.totals;
-          const h = Math.max(28, Math.min(120, 10 * Math.max(total, 3)));
           const summary = total > 0 ? `${done} of ${total}${failed ? ` · ${failed} failed` : ''}` : 'no checklist';
+          // Progress ring: done (accent), then failed (red), the rest track.
+          const d = total ? (360 * done) / total : 0;
+          const f = total ? (360 * (done + failed)) / total : 0;
+          const ring = `conic-gradient(var(--accent) 0 ${d}deg, #f87171 ${d}deg ${f}deg, var(--surface-4) ${f}deg)`;
           return (
             <button
               key={it.path}
               type="button"
               className={`canvas-sidebar__bar${it.path === sel && open ? ' canvas-sidebar__bar--on' : ''}${it.live ? ' canvas-sidebar__bar--live' : ''}`}
-              style={{ height: h }}
+              style={{ background: ring }}
               title={`${it.title} — ${summary}`}
               aria-label={`${it.title}, ${summary}`}
               onClick={(e) => {
@@ -148,14 +154,7 @@ export function CanvasSidebar({ paths, open, selected, width, onToggle, onSelect
                 if (open && it.path === sel) onToggle();
                 else onSelect(it.path);
               }}
-            >
-              {total > 0 && (
-                <>
-                  <span className="canvas-sidebar__fill" style={{ height: `${(100 * (done + failed)) / total}%` }} />
-                  {failed > 0 && <span className="canvas-sidebar__fail" style={{ height: `${(100 * failed) / total}%` }} />}
-                </>
-              )}
-            </button>
+            />
           );
         })}
       </div>

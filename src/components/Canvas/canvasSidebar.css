@@ -6,23 +6,34 @@
 }
 
 .canvas-sidebar__strip {
-  width: 14px; flex-shrink: 0; display: flex; flex-direction: column; align-items: center;
-  gap: 8px; padding: 12px 0; cursor: pointer; outline: none;
+  width: 34px; flex-shrink: 0; display: flex; flex-direction: column; align-items: center;
+  gap: 10px; padding: 10px 0; cursor: pointer; outline: none;
   transition: background var(--dur-fast, 120ms) var(--ease-out-soft, ease-out);
 }
 .canvas-sidebar__strip:hover, .canvas-sidebar__strip:focus-visible { background: var(--surface-1); }
-
-.canvas-sidebar__bar {
-  position: relative; width: 4px; padding: 0; border: none; border-radius: 3px; overflow: hidden;
-  background: var(--surface-3); cursor: pointer; flex-shrink: 0;
-  transition: width var(--dur-fast, 120ms) var(--ease-out-soft, ease-out), box-shadow 300ms;
+.canvas-sidebar__icon {
+  display: grid; place-items: center; width: 24px; height: 24px; border-radius: 6px; flex-shrink: 0;
+  color: var(--accent); background: var(--surface-2);
 }
-.canvas-sidebar__bar:hover, .canvas-sidebar__bar--on { width: 6px; }
-.canvas-sidebar__bar--on { background: var(--surface-4); }
-.canvas-sidebar__fill { position: absolute; left: 0; right: 0; bottom: 0; background: var(--accent); }
-.canvas-sidebar__fail { position: absolute; left: 0; right: 0; top: 0; background: #f87171; }
-.canvas-sidebar__bar--live { box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent); animation: canvas-sidebar-pulse 1.4s ease-in-out infinite; }
-@keyframes canvas-sidebar-pulse { 50% { box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 10%, transparent); } }
+.canvas-sidebar__strip:hover .canvas-sidebar__icon { background: var(--surface-3); }
+
+/* One progress ring per canvas (conic background set inline; the ::after punches the hole). */
+.canvas-sidebar__bar {
+  position: relative; width: 20px; height: 20px; padding: 0; border: none; border-radius: 50%;
+  cursor: pointer; flex-shrink: 0;
+  transition: transform var(--dur-fast, 120ms) var(--ease-out-soft, ease-out), box-shadow 300ms;
+}
+.canvas-sidebar__bar::after {
+  content: ''; position: absolute; inset: 4px; border-radius: 50%; background: var(--surface-0);
+}
+.canvas-sidebar__strip:hover .canvas-sidebar__bar::after { background: var(--surface-1); }
+.canvas-sidebar__bar:hover { transform: scale(1.12); }
+.canvas-sidebar__bar--on { box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 40%, transparent); }
+.canvas-sidebar__bar--live { animation: canvas-sidebar-pulse 1.4s ease-in-out infinite; }
+@keyframes canvas-sidebar-pulse {
+  0%, 100% { box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent); }
+  50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 10%, transparent); }
+}
 
 .canvas-sidebar__panel {
   position: relative; display: flex; flex-direction: column; min-width: 0; height: 100%;
