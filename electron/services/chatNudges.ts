@@ -39,6 +39,30 @@ export const CHAT_CANVAS_NUDGE =
   '(class A,B pass or A:::fail); SAI colors them.';
 
 /**
+ * CHAT_CANVAS_NUDGE for chats that have SAI's MCP tools (Claude CLI/SDK, Codex): steer to
+ * the `sai_canvas` tool. Format rules repeat here because deferred tools hide their
+ * descriptions until loaded. ACP providers (Gemini, Kimi) keep the file-write nudge.
+ */
+export const CHAT_CANVAS_TOOL_NUDGE =
+  'SAI canvases: for anything the user will act on, revisit, or co-edit \u2014 step-by-step ' +
+  'instructions they must perform (e.g. manual testing steps), plans, checklists, evolving ' +
+  'diagrams \u2014 use the sai_canvas tool instead of a one-shot render: action "write" with a short ' +
+  '`name` and the full Markdown `content` creates or replaces a canvas, which opens live in a sidebar ' +
+  'beside the chat; "read" returns its current content, "list" the project\'s canvases, "open" shows ' +
+  'one in the sidebar. If the tool is deferred, load it via ToolSearch first; only if sai_canvas is ' +
+  'unavailable, write the Markdown to .sai/canvas/<name>.md yourself. ' +
+  'Start with a "# Title"; "## " headings become section cards. Use GFM task lists (- [ ]) for ' +
+  'steps, ```mermaid fences for diagrams, and ```html fences for small interactive widgets (they ' +
+  'may call sai.canvas.emit(data) to send you an event). The user edits canvases directly; their ' +
+  'changes arrive as messages starting with "[Canvas update]". Read the canvas before rewriting ' +
+  'it, and keep the user\'s ticks and notes intact. ' +
+  'Mark a failed step with - [!] (and add the reason as a > note under it). ' +
+  'Optional summary tiles: a ```stats fence with one "Label: value" per line; the value auto ' +
+  'computes Progress, Passed, Failed or Remaining from the checklist items. ' +
+  'In flowcharts, tag result nodes with the classes pass, fail or current ' +
+  '(class A,B pass or A:::fail); SAI colors them.';
+
+/**
  * Newer Opus models under-reach for the task tools without an explicit trigger
  * (the interactive CLI injects "consider using TaskCreate" reminders; headless
  * SDK/stream-json sessions do not), which left SAI's task-progress ring —

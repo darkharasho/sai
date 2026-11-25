@@ -47,7 +47,7 @@ vi.mock('@electron/services/saiMcpConfig', () => ({
   writeSaiMcpConfig: vi.fn(),
 }));
 
-import { CHAT_CANVAS_NUDGE, CHAT_RENDER_NUDGE, CHAT_GITHUB_WATCH_NUDGE, CHAT_TASKS_NUDGE, CHAT_TASK_CARDS_NUDGE } from '../../../electron/services/chatNudges';
+import { CHAT_CANVAS_NUDGE, CHAT_CANVAS_TOOL_NUDGE, CHAT_RENDER_NUDGE, CHAT_GITHUB_WATCH_NUDGE, CHAT_TASKS_NUDGE, CHAT_TASK_CARDS_NUDGE } from '../../../electron/services/chatNudges';
 import * as claude from '../../../electron/services/claude';
 
 describe('chatNudges', () => {
@@ -116,5 +116,17 @@ describe('chatNudges', () => {
   it('claude.ts re-exports the same constants (back-compat)', () => {
     expect(claude.CHAT_RENDER_NUDGE).toBe(CHAT_RENDER_NUDGE);
     expect(claude.CHAT_GITHUB_WATCH_NUDGE).toBe(CHAT_GITHUB_WATCH_NUDGE);
+  });
+});
+
+describe('CHAT_CANVAS_TOOL_NUDGE', () => {
+  it('steers to sai_canvas, keeps the file path only as a fallback, and carries the format rules', () => {
+    expect(CHAT_CANVAS_TOOL_NUDGE).toContain('sai_canvas');
+    expect(CHAT_CANVAS_TOOL_NUDGE).toContain('ToolSearch');
+    expect(CHAT_CANVAS_TOOL_NUDGE).toContain('only if sai_canvas is unavailable');
+    for (const a of ['"write"', '"read"', '"list"', '"open"']) expect(CHAT_CANVAS_TOOL_NUDGE).toContain(a);
+    for (const f of ['- [!]', '```stats fence', '```mermaid fences', '```html fences', '"[Canvas update]"', 'pass, fail or current']) {
+      expect(CHAT_CANVAS_TOOL_NUDGE).toContain(f);
+    }
   });
 });

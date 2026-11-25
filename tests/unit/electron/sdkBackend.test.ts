@@ -80,7 +80,7 @@ vi.mock('../../../electron/services/notify', () => ({
 // Import after mocks are set up
 import { parseScopeTag } from '../../../electron/services/loadGuard/scopeTag';
 import { SdkBackend } from '../../../electron/services/claudeBackend/sdkBackend';
-import { CHAT_CANVAS_NUDGE, CHAT_TASKS_NUDGE, CHAT_TASK_CARDS_NUDGE } from '../../../electron/services/chatNudges';
+import { CHAT_CANVAS_TOOL_NUDGE, CHAT_TASKS_NUDGE, CHAT_TASK_CARDS_NUDGE } from '../../../electron/services/chatNudges';
 import { BACKGROUND_WAIT_SETTLE_MS, BACKGROUND_WAIT_IDLE_MS } from '../../../electron/services/waitClassifier';
 import { FOLLOWUP_RESUME_GRACE_MS, FOLLOWUP_HOLD_CAP_MS } from '../../../electron/services/followupState';
 import {
@@ -702,7 +702,7 @@ describe('SdkBackend', () => {
     fakeQuery.close();
   });
 
-  it('sai_task is auto-allowed without an approval card or awaitingInput', async () => {
+  it.each(['mcp__sai__sai_task', 'mcp__sai__sai_canvas'])('%s is auto-allowed without an approval card or awaitingInput', async (toolName) => {
     const fakeQuery = makeFakeQuery([], { hang: true });
     let capturedOptions: any = null;
     const queryFn = vi.fn((args: { prompt: any; options: any }) => {
@@ -723,7 +723,7 @@ describe('SdkBackend', () => {
 
     const input = { action: 'create', title: 'x' };
     const result = await capturedOptions.canUseTool(
-      'mcp__sai__sai_task',
+      toolName,
       input,
       { toolUseID: 'tu-task', signal: new AbortController().signal },
     );
@@ -1249,7 +1249,7 @@ describe('SdkBackend', () => {
     expect(appended).toContain('render_html');
     expect(appended).toContain('sai_watch_github_run');
     expect(appended).toContain(CHAT_TASK_CARDS_NUDGE);
-    expect(appended).toContain(CHAT_CANVAS_NUDGE); // includes canvas nudge
+    expect(appended).toContain(CHAT_CANVAS_TOOL_NUDGE); // includes canvas nudge
     expect(appended).not.toContain(CHAT_TASKS_NUDGE);
 
     fakeQuery.close();

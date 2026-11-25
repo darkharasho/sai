@@ -1,0 +1,79 @@
+/* Right-edge canvas sidebar: a thin strip that is always there, expanding into the live canvas. */
+.canvas-sidebar {
+  display: flex; flex-shrink: 0; height: 100%; min-height: 0;
+  border-left: 1px solid var(--border-hairline);
+  background: var(--surface-0);
+}
+
+.canvas-sidebar__strip {
+  width: 14px; flex-shrink: 0; display: flex; flex-direction: column; align-items: center;
+  gap: 8px; padding: 12px 0; cursor: pointer; outline: none;
+  transition: background var(--dur-fast, 120ms) var(--ease-out-soft, ease-out);
+}
+.canvas-sidebar__strip:hover, .canvas-sidebar__strip:focus-visible { background: var(--surface-1); }
+
+.canvas-sidebar__bar {
+  position: relative; width: 4px; padding: 0; border: none; border-radius: 3px; overflow: hidden;
+  background: var(--surface-3); cursor: pointer; flex-shrink: 0;
+  transition: width var(--dur-fast, 120ms) var(--ease-out-soft, ease-out), box-shadow 300ms;
+}
+.canvas-sidebar__bar:hover, .canvas-sidebar__bar--on { width: 6px; }
+.canvas-sidebar__bar--on { background: var(--surface-4); }
+.canvas-sidebar__fill { position: absolute; left: 0; right: 0; bottom: 0; background: var(--accent); }
+.canvas-sidebar__fail { position: absolute; left: 0; right: 0; top: 0; background: #f87171; }
+.canvas-sidebar__bar--live { box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent); animation: canvas-sidebar-pulse 1.4s ease-in-out infinite; }
+@keyframes canvas-sidebar-pulse { 50% { box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 10%, transparent); } }
+
+.canvas-sidebar__panel {
+  position: relative; display: flex; flex-direction: column; min-width: 0; height: 100%;
+  background: var(--surface-1); border-right: 1px solid var(--border-hairline);
+  animation: canvas-sidebar-in 160ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+@keyframes canvas-sidebar-in { from { opacity: 0; transform: translateX(10px); } }
+
+.canvas-sidebar__resize {
+  position: absolute; left: -3px; top: 0; bottom: 0; width: 6px; cursor: col-resize; z-index: 2;
+}
+.canvas-sidebar__resize:hover { background: color-mix(in srgb, var(--accent) 30%, transparent); }
+body.canvas-sidebar-resizing { cursor: col-resize; user-select: none; }
+
+.canvas-sidebar__tabs {
+  display: flex; align-items: center; gap: 2px; padding: 6px 6px 6px 8px; flex-shrink: 0;
+  border-bottom: 1px solid var(--border-hairline); overflow-x: auto; scrollbar-width: none;
+}
+.canvas-sidebar__tab {
+  display: inline-flex; align-items: center; gap: 6px; max-width: 180px; min-width: 0;
+  padding: 4px 9px; border: none; border-radius: 6px; background: none; cursor: pointer;
+  color: var(--text-muted); font: inherit; font-size: 12px; flex-shrink: 0;
+}
+.canvas-sidebar__tab:hover { color: var(--text); background: var(--surface-2); }
+.canvas-sidebar__tab--on { color: var(--text); background: var(--surface-3); }
+.canvas-sidebar__tablabel { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.canvas-sidebar__tabdot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); flex-shrink: 0; animation: canvas-sidebar-blink 1.4s ease-in-out infinite; }
+@keyframes canvas-sidebar-blink { 50% { opacity: 0.3; } }
+.canvas-sidebar__collapse {
+  margin-left: auto; display: inline-flex; padding: 4px; border: none; border-radius: 6px;
+  background: none; color: var(--text-muted); cursor: pointer; flex-shrink: 0;
+}
+.canvas-sidebar__collapse:hover { color: var(--text); background: var(--surface-2); }
+
+.canvas-sidebar__body { flex: 1; min-height: 0; }
+.canvas-sidebar .canvas-page { padding: 18px 16px 32px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .canvas-sidebar__bar--live, .canvas-sidebar__tabdot, .canvas-sidebar__panel { animation: none; }
+}
+
+/* Narrow canvas: the tabs name the canvas, so the header keeps only meta, pill and Source. */
+.canvas-sidebar .canvas-header__id, .canvas-sidebar .canvas-picker { display: none; }
+.canvas-sidebar .canvas-header { padding: 8px 12px; gap: 8px; }
+.canvas-sidebar .canvas-meta { align-self: center; padding-bottom: 0; }
+/* Hover actions float over the row instead of reserving width the labels need. */
+/* They straddle the row's bottom edge (the padding between rows), clear of the label's text. */
+.canvas-sidebar .canvas-task { position: relative; }
+.canvas-sidebar .canvas-task__actions {
+  position: absolute; right: 6px; bottom: 0; transform: translateY(50%); z-index: 2;
+  pointer-events: none;
+}
+.canvas-sidebar .canvas-task:hover .canvas-task__actions,
+.canvas-sidebar .canvas-task__actions:focus-within { pointer-events: auto; }

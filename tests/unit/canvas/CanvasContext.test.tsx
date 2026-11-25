@@ -64,6 +64,22 @@ describe('useCanvasController', () => {
     expect(opts.openFile).not.toHaveBeenCalled();
   });
 
+  it('with a canvas sidebar: agent writes never open code tabs, and openCanvas shows it in the sidebar', async () => {
+    const showCanvas = vi.fn();
+    const { live, opts, hook } = setup({ showCanvas });
+    await flush();
+    live.add(WS);
+    act(() => emit({ projectPath: WS, path: REAL, content: '- [ ] a\n\nnew\n' }));
+    await flush();
+    expect(opts.openFile).not.toHaveBeenCalled();
+    act(() => hook.result.current.openCanvas(REAL));
+    expect(showCanvas).toHaveBeenCalledWith(TAB);
+    expect(opts.openFile).not.toHaveBeenCalled();
+    // Source still opens in the editor.
+    act(() => hook.result.current.openSource(TAB));
+    expect(opts.openFile).toHaveBeenCalledWith(TAB, { canvasSource: true });
+  });
+
   it('auto-opens an agent-written canvas in the project spelling', async () => {
     const { live, opts } = setup();
     await flush();

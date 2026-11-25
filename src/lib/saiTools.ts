@@ -583,6 +583,35 @@ export const SAI_TOOL_SCHEMA: SaiToolDef[] = [
       },
     },
   },
+  {
+    name: 'canvas',
+    description:
+      'Create and update live canvases: shared Markdown pages shown in a sidebar beside the chat (only this ' +
+      'chat\'s canvases) that the user ticks and edits. USE THIS for anything the user will act on, revisit, or co-edit: ' +
+      'step-by-step instructions they must perform (e.g. manual testing steps), plans, checklists, ' +
+      'evolving diagrams. Prefer it over a one-shot render for those. Actions: "write" creates or ' +
+      'replaces a canvas (`name` + full Markdown `content`; a new canvas opens the sidebar on it), "read" ' +
+      'returns its current content including the user\'s ticks and notes, "list" shows the project\'s ' +
+      'canvases, "open" shows a canvas in the sidebar (and adds it to this chat\'s canvases). ALWAYS "read" before rewriting an existing ' +
+      'canvas and keep the user\'s ticks and notes intact. The user\'s edits arrive as messages ' +
+      'starting with "[Canvas update]". Format: start with a "# Title"; "## " headings become section ' +
+      'cards; GFM task lists (- [ ] / - [x]) for steps; mark a failed step - [!] with the reason as a ' +
+      '> note under it; ```mermaid fences for diagrams (tag flowchart result nodes with the classes ' +
+      'pass, fail or current, e.g. class A,B pass or A:::fail; SAI colors them); an optional ```stats ' +
+      'fence with one "Label: value" per line (value auto computes Progress, Passed, Failed or ' +
+      'Remaining from the checklist); ```html fences for small interactive widgets (they may call ' +
+      'sai.canvas.emit(data) to send you an event). Canvases are saved as .sai/canvas/<name>.md.',
+    toolset: 'chat',
+    input_schema: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', enum: ['write', 'read', 'list', 'open'], description: 'What to do.' },
+        name: { type: 'string', description: 'Canvas name, a short slug like "shop-mod-test" (letters, digits, - _ .). Required except for list.' },
+        content: { type: 'string', description: 'For write: the full Markdown of the canvas.' },
+      },
+      required: ['action'],
+    },
+  },
 ];
 
 export const SAI_TOOL_NAMES = new Set(SAI_TOOL_SCHEMA.map((t) => t.name));

@@ -129,6 +129,7 @@ import * as browserBridge from './services/browserBridge';
 import * as browserDeploy from './services/browserDeploy';
 import { cleanupSaiMcpConfigs } from './services/saiMcpConfig';
 import { setSaiToolDispatch } from './services/saiToolBridge';
+import { runCanvasFileTool } from './services/canvasTool';
 import {
   listMetaWorkspaces, createMetaWorkspace, updateMetaWorkspace,
   deleteMetaWorkspace, getMetaWorkspace,
@@ -990,6 +991,13 @@ function createWindow() {
     // CLI and Codex SDK backends) and the in-process SDK MCP server (Claude SDK
     // backend, via saiToolBridge).
     const dispatchSaiTool = async (req: { tool: string; input: unknown; workspace: string }) => {
+      // Canvas file actions run here: a write is a plain file change the canvas
+      // watcher picks up. Only "open" needs the window.
+      if (req.tool === 'canvas' && (req.input as { action?: unknown } | null)?.action !== 'open') {
+        const r = runCanvasFileTool(req.input, req.workspace);
+        if (!r.ok) throw new Error(r.error);
+        return r;
+      }
       const id = `mcp-${crypto.randomUUID()}`;
       return await new Promise<unknown>((resolve, reject) => {
         pendingMcpCalls.set(id, { resolve, reject });

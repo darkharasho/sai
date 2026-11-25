@@ -63,7 +63,7 @@ vi.mock('node:child_process', async (importOriginal) => {
 });
 
 import { buildArgs, CHAT_RENDER_NUDGE, CHAT_GITHUB_WATCH_NUDGE } from '../../../electron/services/claude';
-import { CHAT_CANVAS_NUDGE } from '../../../electron/services/chatNudges';
+import { CHAT_CANVAS_TOOL_NUDGE } from '../../../electron/services/chatNudges';
 
 describe('buildArgs — chat session MCP config', () => {
   it('includes --mcp-config when workspace is provided', () => {
@@ -203,7 +203,7 @@ describe('buildArgs — chat session MCP config', () => {
       resolveElectronExecPath: () => 'elec',
       readSetting: () => undefined,
     });
-    expect(args[args.indexOf('--append-system-prompt') + 1]).toContain(CHAT_CANVAS_NUDGE);
+    expect(args[args.indexOf('--append-system-prompt') + 1]).toContain(CHAT_CANVAS_TOOL_NUDGE);
   });
 
   it('does NOT append the render nudge when chat has no workspace (tool not attached)', () => {

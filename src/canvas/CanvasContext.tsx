@@ -48,6 +48,11 @@ export interface CanvasControllerOpts {
   openFile(path: string, opts?: { canvasSource?: boolean; auto?: boolean }): void;
   /** Close a tab of the active workspace. */
   closeFile(path: string): void;
+  /**
+   * Show a canvas in the canvas sidebar. When set, canvases open there (links, `sai_canvas`
+   * open) and agent writes never auto-open code-panel tabs; the sidebar follows the chat.
+   */
+  showCanvas?(path: string): void;
   /** Rewrite a background workspace's tabs. */
   patchTabs(ws: string, fn: (w: { openFiles: OpenFile[]; activeFilePath: string | null }) => { openFiles: OpenFile[]; activeFilePath: string | null }): void;
 }
@@ -102,7 +107,10 @@ export function useCanvasController(opts: CanvasControllerOpts): CanvasControlle
     };
     const deferred = setFor(deferredRef.current);
     const opened = setFor(autoOpenedRef.current);
-    for (const p of s.takeAgentTouched()) if (!opened.has(p)) deferred.add(p);
+    const touched = s.takeAgentTouched();
+    // The sidebar decides what to show from the chat's own history.
+    if (optsRef.current.showCanvas) return;
+    for (const p of touched) if (!opened.has(p)) deferred.add(p);
     if (deferred.size === 0 || defersAutoOpen(document.activeElement)) return;
     const paths = [...deferred];
     deferred.clear();
@@ -240,7 +248,11 @@ export function useCanvasController(opts: CanvasControllerOpts): CanvasControlle
     const c = store.get(path);
     if (c) store.setAutoSend(path, !c.autoSend);
   }, [store]);
-  const openCanvas = useCallback((path: string) => optsRef.current.openFile(tabPathFor(path), { canvasSource: false }), [tabPathFor]);
+  const openCanvas = useCallback((path: string) => {
+    const show = optsRef.current.showCanvas;
+    if (show) show(canvasKey(path));
+    else optsRef.current.openFile(tabPathFor(path), { canvasSource: false });
+  }, [tabPathFor]);
   const openSource = useCallback((path: string) => optsRef.current.openFile(tabPathFor(path), { canvasSource: true }), [tabPathFor]);
   const writeSource = useCallback(async (path: string, content: string) => {
     const ws = optsRef.current.projectPath;

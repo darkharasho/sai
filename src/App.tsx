@@ -80,6 +80,10 @@ import { motion, AnimatePresence } from 'motion/react';
 import { getCapabilities } from './providers/capabilities';
 import { normalizeCodexEffort } from './lib/codexEffort';
 import { CanvasContext, useCanvasController } from './canvas/CanvasContext';
+import { handleCanvasOpen } from './canvas/canvasOpenTool';
+import { useChatCanvasSidebar } from './canvas/useChatCanvasSidebar';
+import { deriveChatCanvasTouches } from './canvas/chatCanvases';
+import { CanvasSidebar } from './components/Canvas/CanvasSidebar';
 import { expandEditorPanel, type PanelId } from './lib/panelLayout';
 import { canvasLiveness, isCanvasFile, workspaceAgentLive, workspaceLiveChats } from './canvas/canvasFiles';
 
@@ -737,6 +741,9 @@ export default function App() {
     window.sai.workspaceSetActive(activeProjectPath);
   }, [activeProjectPath]);
 
+  // Set below once the canvas controller exists; the tool bridge opens canvas tabs through it.
+  const canvasOpenRef = useRef<((path: string) => void) | null>(null);
+
   // Bridge SAI tool calls (render/query/browser/native/form tools) from the
   // main process's MCP host into the renderer, then return the result over IPC.
   useEffect(() => {
@@ -775,6 +782,19 @@ export default function App() {
           return;
         }
         void saiAny.captureWindow({ target: req.input?.target, workspace: req.workspace, display: req.input?.display === true }).then(
+          (result) => sai.respondSaiTool(req.id, result),
+          (err) => sai.respondSaiToolError(req.id, err instanceof Error ? err.message : String(err)),
+        );
+        return;
+      }
+
+      if (req.tool === 'canvas') {
+        // Only "open" reaches the window; main handles list/read/write.
+        void handleCanvasOpen(req.input, req.workspace, {
+          activeWorkspace: activeProjectPathRef.current ?? null,
+          canvasList: (ws) => Promise.resolve(sai.canvasList?.(ws) ?? []),
+          openCanvas: (p) => canvasOpenRef.current?.(p),
+        }).then(
           (result) => sai.respondSaiTool(req.id, result),
           (err) => sai.respondSaiToolError(req.id, err instanceof Error ? err.message : String(err)),
         );
@@ -2551,7 +2571,17 @@ export default function App() {
 
   // Live canvases (.sai/canvas/*.md): watch every open workspace, auto-open + deliver for the active one.
   const { streamingWs: canvasStreamingWs, chatBusy: canvasChatBusy } = canvasLiveness(chatStreamingWorkspaces, streamingScopes, activeProjectPath, activeSession.id);
+  // Right canvas sidebar: follows the chat on screen and shows only that chat's canvases.
+  const canvasChatKey = activeProjectPath ? `${activeProjectPath}:${activeSession.id}` : null;
+  const canvasSidebar = useChatCanvasSidebar(canvasChatKey);
+  const { setChatCanvases } = canvasSidebar;
+  useEffect(() => {
+    if (!activeProjectPath || !canvasChatKey) return;
+    const msgs = wsMessagesRef.current.get(activeProjectPath) ?? activeSession.messages;
+    setChatCanvases(canvasChatKey, deriveChatCanvasTouches(msgs, activeProjectPath));
+  }, [canvasChatKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const canvas = useCanvasController({
+    showCanvas: canvasSidebar.show,
     projectPath: activeProjectPath,
     chatKey: activeProjectPath ? activeSession.id || 'chat' : null,
     chatBusy: canvasChatBusy,
@@ -2564,6 +2594,7 @@ export default function App() {
     closeFile: doFileClose,
     patchTabs: (ws, fn) => updateWorkspace(ws, (w) => ({ ...w, ...fn(w) })),
   });
+  canvasOpenRef.current = canvas.openCanvas;
 
   const handleFileClose = useCallback((path: string) => {
     if (!activeProjectPath) return;
@@ -3395,6 +3426,7 @@ export default function App() {
                   claudeSessionId={ws.activeSession.claudeSessionId}
                   onMessagesChange={(messages: ChatMessage[]) => {
                     wsMessagesRef.current.set(wsPath, messages);
+                    setChatCanvases(`${wsPath}:${ws.activeSession.id}`, deriveChatCanvasTouches(messages, wsPath));
                     // First-user-message persist: as soon as the user sends
                     // their first message, persist the session so it survives
                     // a refresh and shows the right preview/messageCount in
@@ -4192,6 +4224,19 @@ export default function App() {
               </div>
             ))}
           </div>
+          {chatOpen && (
+            <CanvasContext.Provider value={canvas}>
+            <CanvasSidebar
+              paths={canvasSidebar.paths}
+              open={canvasSidebar.open}
+              selected={canvasSidebar.selected}
+              width={canvasSidebar.width}
+              onToggle={canvasSidebar.toggle}
+              onSelect={canvasSidebar.select}
+              onResize={canvasSidebar.setWidth}
+            />
+            </CanvasContext.Provider>
+          )}
           {taskSidebarOpen && sidebarTasks.length > 0 && !activeTaskUiEnabled && (
             <BackgroundTasksSidebar
               tasks={sidebarTasks}

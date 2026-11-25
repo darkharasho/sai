@@ -1,8 +1,8 @@
 import { test, expect } from './electron.setup';
 
 /**
- * Live canvas flow: the agent writes .sai/canvas/steps.md mid-turn -> a canvas
- * tab auto-opens; the user ticks a checkbox -> the file is written; once the
+ * Live canvas flow: the agent writes .sai/canvas/steps.md mid-turn (sai_canvas) -> the
+ * right canvas sidebar opens on it; the user ticks a checkbox -> the file is written; once the
  * turn ends and the canvas has been idle for 5 s the edit is delivered to the
  * chat as a "[Canvas update] ..." message.
  *
@@ -49,7 +49,7 @@ test.describe('live canvas', () => {
     },
   });
 
-  test('agent canvas opens as a tab, a tick is saved, and the edit reaches the chat', async ({ window }) => {
+  test('agent canvas opens in the sidebar, a tick is saved, and the edit reaches the chat', async ({ window }) => {
     const chatInput = window.locator('textarea').first();
     await chatInput.waitFor({ state: 'visible', timeout: 20000 });
     await chatInput.click({ force: true });
@@ -64,6 +64,9 @@ test.describe('live canvas', () => {
     await window.evaluate(([w, f]) => {
       const c = (window as any).__canvas;
       const content = '# Steps\n\n- [ ] Launch game\n- [ ] Get mods from [Thunderstore](https://thunderstore.io)\n\nSee [the docs](https://example.com/docs).\n';
+      // The sai_canvas call puts the canvas in this chat's sidebar; the write lands on disk.
+      c.claude.forEach((cb: any) => cb({ projectPath: c.projectPath, scope: c.scope, type: 'assistant',
+        message: { content: [{ type: 'tool_use', id: 'cv1', name: 'mcp__sai__sai_canvas', input: { action: 'write', name: 'steps', content } }] } }));
       c.fs[f] = content;
       c.subs.forEach((cb: any) => cb({ projectPath: w, path: f, content }));
     }, [ws, file]);
@@ -77,8 +80,11 @@ test.describe('live canvas', () => {
     await expect(window.locator('textarea.chat-textarea')).toHaveValue('still typing');
     await window.locator('textarea.chat-textarea').fill('');
 
-    // D3: the auto-open put the editor beside the chat; the chat panel stayed expanded.
+    // The canvas opened in the right sidebar beside the chat (not as an editor tab); the chat stayed expanded.
+    await expect(window.locator('[data-testid="canvas-sidebar"] .canvas-sidebar__panel .canvas-view')).toBeVisible();
+    await expect(window.getByRole('tab', { name: 'Steps' })).toHaveAttribute('aria-selected', 'true');
     await expect(window.locator('.accordion-panel.accordion-expanded textarea.chat-textarea')).toBeVisible();
+    await window.locator('[data-testid="canvas-sidebar"]').screenshot({ path: '/var/tmp/sai-dogfood/shots/sidebar-open.png' }).catch(() => {});
 
     // Canvas links (labels and markdown blocks) use the app's accent color, like chat links,
     // not the browser's default dark blue.
@@ -98,7 +104,7 @@ test.describe('live canvas', () => {
     // D2: a label renders inline Markdown; clicking its link opens it and does not tick the box.
     const linkBox = window.getByRole('checkbox', { name: 'Get mods from Thunderstore' });
     await window.evaluate(() => { (window as any).__opened = []; (window as any).sai.openExternal = (u: string) => (window as any).__opened.push(u); });
-    await window.getByRole('link', { name: 'Thunderstore' }).click();
+    await window.getByTestId('canvas-sidebar').getByRole('link', { name: 'Thunderstore' }).click();
     expect(await window.evaluate(() => (window as any).__opened)).toEqual(['https://thunderstore.io']);
     await expect(linkBox).not.toBeChecked();
 
@@ -140,6 +146,8 @@ test.describe('live canvas', () => {
     const file = `${ws}/.sai/canvas/shop-test.md`.replace(/^\/var(?=\/home\/)/, '');
     const write = (content: string) => window.evaluate(([w, f, c]) => {
       const x = (window as any).__canvas;
+      x.claude.forEach((cb: any) => cb({ projectPath: x.projectPath, scope: x.scope, type: 'assistant',
+        message: { content: [{ type: 'tool_use', id: `cv${Date.now()}`, name: 'mcp__sai__sai_canvas', input: { action: 'write', name: 'shop-test', content: c } }] } }));
       x.fs[f] = c;
       x.subs.forEach((cb: any) => cb({ projectPath: w, path: f, content: c }));
     }, [ws, file, content]);

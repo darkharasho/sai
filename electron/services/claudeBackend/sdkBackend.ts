@@ -16,7 +16,7 @@ import * as path from 'path';
 import * as os from 'os';
 import type { query as QueryFn, SDKUserMessage, PermissionResult, McpSdkServerConfigWithInstance, McpServerConfig, SdkPluginConfig } from '@anthropic-ai/claude-agent-sdk';
 import { enrichedEnv } from '../shellEnv';
-import { CHAT_CANVAS_NUDGE, CHAT_RENDER_NUDGE, CHAT_GITHUB_WATCH_NUDGE, CHAT_TASK_CARDS_NUDGE } from '../chatNudges';
+import { CHAT_CANVAS_TOOL_NUDGE, CHAT_RENDER_NUDGE, CHAT_GITHUB_WATCH_NUDGE, CHAT_TASK_CARDS_NUDGE } from '../chatNudges';
 import {
   approveImpl,
   alwaysAllowImpl,
@@ -1218,7 +1218,7 @@ export class SdkBackend implements ClaudeBackend {
     if (server) {
       mcpServers = { sai: server };
     }
-    const nudges = [CHAT_RENDER_NUDGE, CHAT_GITHUB_WATCH_NUDGE, CHAT_TASK_CARDS_NUDGE, CHAT_CANVAS_NUDGE];
+    const nudges = [CHAT_RENDER_NUDGE, CHAT_GITHUB_WATCH_NUDGE, CHAT_TASK_CARDS_NUDGE, CHAT_CANVAS_TOOL_NUDGE];
     const existing = appendSystemPrompt && appendSystemPrompt.trim() ? [appendSystemPrompt] : [];
     const chatAppendSystemPrompt = [...nudges, ...existing].join('\n\n');
 
@@ -1397,9 +1397,10 @@ export class SdkBackend implements ClaudeBackend {
 
     return (toolName: string, input: Record<string, unknown>, opts: { toolUseID: string; [key: string]: unknown }): Promise<PermissionResult> => {
       const toolUseId = opts.toolUseID;
-      // sai_task is display-only bookkeeping for the task rail: never gate it
-      // behind an approval card, and never mark the scope as awaiting input.
-      if (toolName === 'mcp__sai__sai_task') {
+      // sai_task is display-only bookkeeping for the task rail, and sai_canvas
+      // only touches .sai/canvas (user edits it clobbers are restored): never
+      // gate them behind an approval card or mark the scope as awaiting input.
+      if (toolName === 'mcp__sai__sai_task' || toolName === 'mcp__sai__sai_canvas') {
         return Promise.resolve({ behavior: 'allow', updatedInput: input });
       }
       const session = this.sessions.get(scopeKey);
